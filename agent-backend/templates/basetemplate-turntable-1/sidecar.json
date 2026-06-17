@@ -1,0 +1,23 @@
+{
+  "tracked_object": {
+    "visual_cues": [
+      "red phone"
+    ]
+  },
+  "reference_geometry": {
+    "label": "black circular base",
+    "bbox_center_px": [
+      568,
+      822
+    ],
+    "physical_size": 0.4
+  },
+  "rotation_center_frac": [
+    0.5259,
+    0.4281
+  ],
+  "display_w": 1080,
+  "display_h": 1920,
+  "video_w": 1080,
+  "video_h": 1920
+}

@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>llama-server Metrics Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 24px;
+}
+h1 { font-size: 24px; margin-bottom: 4px; display: flex; align-items: center; gap: 12px; }
+h1 small { font-size: 14px; color: #94a3b8; font-weight: 400; }
+.header-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+}
+.connection-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #94a3b8; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; display: inline-block; }
+.last-update { font-size: 12px; color: #64748b; }
+.grid-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px; margin-bottom: 20px;
+}
+.card {
+  background: #1e293b; border-radius: 10px; padding: 16px; border: 1px solid #334155;
+}
+.card .label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.card .value { font-size: 24px; font-weight: 700; }
+.card .sub { font-size: 11px; color: #64748b; margin-top: 3px; }
+.section-title { font-size: 16px; font-weight: 600; margin: 20px 0 12px 0; color: #e2e8f0; }
+.grid-charts {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+  gap: 12px; margin-bottom: 16px;
+}
+.chart-container {
+  background: #1e293b; border-radius: 10px; padding: 16px; border: 1px solid #334155;
+}
+.chart-container h3 { font-size: 13px; color: #94a3b8; margin-bottom: 10px; font-weight: 500; }
+.chart-wrapper { position: relative; height: 160px; }
+.unit-tog { display:inline-flex;gap:2px;margin-left:8px;vertical-align:middle }
+.unit-pill {
+  font-size:10px;font-weight:600;padding:1px 7px;border-radius:8px;cursor:pointer;
+  background:#334155;color:#64748b;transition:all .15s;user-select:none;
+}
+.unit-pill.active { background:#3b82f6;color:#fff }
+.unit-pill:hover:not(.active) { background:#475569;color:#94a3b8 }
+.raw-section {
+  background: #1e293b; border-radius: 10px; padding: 16px; border: 1px solid #334155;
+}
+.raw-section summary { cursor: pointer; font-size: 13px; color: #94a3b8; font-weight: 500; }
+.raw-section pre {
+  margin-top: 10px; font-size: 11px; color: #94a3b8; overflow-x: auto;
+  white-space: pre-wrap; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+@media (max-width: 640px) {
+  body { padding: 12px; }
+  .grid-charts { grid-template-columns: 1fr; }
+  .grid-cards { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="header-bar">
+  <div>
+    <h1>llama-server <small>192.168.1.205:8083</small></h1>
+    <div style="font-size:12px;color:#64748b;margin-top:2px">RPC: 10.0.0.1:50052</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px">
+    <span class="connection-status"><span class="status-dot" id="statusDot"></span> <span id="statusText">Connected</span></span>
+    <span class="last-update" id="lastUpdate">updating...</span>
+  </div>
+</div>
+
+<div class="section-title">llama-server</div>
+<div class="grid-cards" id="cardsContainer">
+  <div class="card"><div class="label">Requests Processing</div><div class="value" id="requests_processing">-</div></div>
+  <div class="card"><div class="label">Requests Deferred</div><div class="value" id="requests_deferred">-</div></div>
+  <div class="card"><div class="label">Prompt Tokens</div><div class="value" id="prompt_tokens">-</div><div class="sub" id="prompt_tokens_rate"></div></div>
+  <div class="card"><div class="label">Generated Tokens</div><div class="value" id="predicted_tokens">-</div><div class="sub" id="predicted_tokens_rate"></div></div>
+  <div class="card"><div class="label">Prompt Throughput</div><div class="value" id="prompt_throughput">-</div><div class="sub">tokens/s</div></div>
+  <div class="card"><div class="label">Generation Throughput</div><div class="value" id="gen_throughput">-</div><div class="sub">tokens/s</div></div>
+  <div class="card"><div class="label">Uptime</div><div class="value" id="uptime">-</div></div>
+  <div class="card"><div class="label">Max Context Used</div><div class="value" id="max_context">-</div><div class="sub">tokens</div></div>
+  <div class="card"><div class="label">Total Decode Calls</div><div class="value" id="n_decode">-</div></div>
+</div>
+
+<div class="grid-charts">
+  <div class="chart-container" style="grid-column: 1 / -1;">
+    <h3>Active Slots <span id="slotsCount" style="font-weight:400;color:#64748b;font-size:12px"></span></h3>
+    <div id="slotsContainer" style="font-size:12px;color:#94a3b8;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px"></div>
+  </div>
+  <div class="chart-container">
+    <h3>Token Count Over Time</h3>
+    <div class="chart-wrapper"><canvas id="tokenChart"></canvas></div>
+  </div>
+  <div class="chart-container">
+    <h3>Throughput Over Time</h3>
+    <div class="chart-wrapper"><canvas id="throughputChart"></canvas></div>
+  </div>
+  <div class="chart-container">
+    <h3>Requests Processing</h3>
+    <div class="chart-wrapper"><canvas id="requestsChart"></canvas></div>
+  </div>
+  <div class="chart-container">
+    <h3>Busy Slots / Decode</h3>
+    <div class="chart-wrapper"><canvas id="slotsChart"></canvas></div>
+  </div>
+</div>
+
+<div class="section-title">GPUs</div>
+<div class="grid-cards" id="gpuCards" style="grid-template-columns:1fr 1fr"></div>
+<div class="grid-charts">
+<div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+  <div class="chart-container" style="border-color:#3b82f6">
+    <h3>Utilization</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuUtilChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#3b82f6">
+    <h3>Memory</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuMemChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#3b82f6">
+    <h3>Power</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuPowerChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#3b82f6">
+    <h3>Temp</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuTempChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#3b82f6">
+    <h3>Mem Clock</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuMemClkChart"></canvas></div>
+  </div>
+  <span style="grid-column:1/-1;font-size:12px;color:#3b82f6;font-weight:600;margin-top:-4px">Local (192.168.1.205)</span>
+</div>
+<div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+  <div class="chart-container" style="border-color:#a855f7">
+    <h3>Utilization</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuUtilRChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#a855f7">
+    <h3>Memory</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuMemRChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#a855f7">
+    <h3>Power</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuPowerRChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#a855f7">
+    <h3>Temp</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuTempRChart"></canvas></div>
+  </div>
+  <div class="chart-container" style="border-color:#a855f7">
+    <h3>Mem Clock</h3>
+    <div class="chart-wrapper" style="height:120px"><canvas id="gpuMemClkRChart"></canvas></div>
+  </div>
+  <span style="grid-column:1/-1;font-size:12px;color:#a855f7;font-weight:600;margin-top:-4px">RPC (10.0.0.1)</span>
+</div>
+</div>
+
+<div class="section-title">Network</div>
+<div class="grid-cards" id="netCards" style="grid-template-columns:1fr 1fr"></div>
+<div class="grid-charts">
+  <div class="chart-container">
+    <h3>Local — Bandwidth (enp5s0) <span class="unit-tog" onclick="toggleNetUnit()"><span class="unit-pill active" data-u="kB/s">kB/s</span><span class="unit-pill" data-u="MB/s">MB/s</span><span class="unit-pill" data-u="GB/s">GB/s</span></span></h3>
+    <div class="chart-wrapper"><canvas id="netLocalChart"></canvas></div>
+  </div>
+  <div class="chart-container">
+    <h3>RPC (10.0.0.1) — Bandwidth (enp6s0) <span class="unit-tog" onclick="toggleNetUnit()"><span class="unit-pill active" data-u="kB/s">kB/s</span><span class="unit-pill" data-u="MB/s">MB/s</span><span class="unit-pill" data-u="GB/s">GB/s</span></span></h3>
+    <div class="chart-wrapper"><canvas id="netRemoteChart"></canvas></div>
+  </div>
+</div>
+
+<div class="raw-section">
+  <details>
+    <summary>Raw Metrics</summary>
+    <pre id="rawMetrics">Waiting for data...</pre>
+  </details>
+</div>
+
+<script>
+let netUnit = 'kB/s';
+function convertBW(v) {
+  if (netUnit === 'MB/s') return (v / 1024).toFixed(1);
+  if (netUnit === 'GB/s') return (v / 1048576).toFixed(2);
+  return v.toFixed(0);
+}
+function toggleNetUnit(e) {
+  const units = ['kB/s', 'MB/s', 'GB/s'];
+  const i = (units.indexOf(netUnit) + 1) % units.length;
+  netUnit = units[i];
+  document.querySelectorAll('.unit-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.u === netUnit);
+  });
+  for (const c of [netLocalChart, netRemoteChart]) {
+    c.data.datasets[0].label = 'RX ' + netUnit;
+    c.data.datasets[1].label = 'TX ' + netUnit;
+  }
+}
+const state = { history: { ts: [],
+  prompt_tokens: [], predicted_tokens: [], prompt_throughput: [], gen_throughput: [],
+  requests: [], deferred: [], slots: [],
+  gpu_util: [], gpu_mem_used: [], gpu_power: [], gpu_temp: [], gpu_mem_clk: [],
+  gpu_util_r: [], gpu_mem_used_r: [], gpu_power_r: [], gpu_temp_r: [], gpu_mem_clk_r: [],
+  net_local_rx: [], net_local_tx: [], net_remote_rx: [], net_remote_tx: []
+} };
+const MAX_POINTS = 120;
+
+let tokenChart, throughputChart, requestsChart, slotsChart;
+let gpuUtilChart, gpuMemChart, gpuPowerChart, gpuTempChart, gpuMemClkChart;
+let gpuUtilRChart, gpuMemRChart, gpuPowerRChart, gpuTempRChart, gpuMemClkRChart;
+let netLocalChart, netRemoteChart;
+
+function formatNum(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toFixed(0);
+}
+
+function timeLabel() {
+  return new Date().toLocaleTimeString();
+}
+
+function lineChart(id, label, color) {
+  return new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels: [], datasets: [{
+      label, data: [], borderColor: color, backgroundColor: color + '20',
+      fill: true, tension: 0.2, pointRadius: 0, borderWidth: 2
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 0 },
+      plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 10, padding: 6, font: { size: 10 } } } },
+      scales: {
+        x: { ticks: { color: '#64748b', maxTicksLimit: 5, maxRotation: 0, font: { size: 9 } }, grid: { color: '#1e293b' } },
+        y: { beginAtZero: true, ticks: { color: '#64748b', maxTicksLimit: 4, font: { size: 9 } }, grid: { color: '#334155' } }
+      }
+    }
+  });
+}
+
+function initCharts() {
+  tokenChart = lineChart('tokenChart', 'Prompt', '#3b82f6');
+  tokenChart.data.datasets.push({ label: 'Generated', data: [], borderColor: '#a855f7', backgroundColor: '#a855f720', fill: true, tension: 0.2, pointRadius: 0, borderWidth: 2 });
+  tokenChart.update();
+
+  throughputChart = lineChart('throughputChart', 'Prompt tok/s', '#10b981');
+  throughputChart.data.datasets.push({ label: 'Gen tok/s', data: [], borderColor: '#f59e0b', backgroundColor: '#f59e0b20', fill: true, tension: 0.2, pointRadius: 0, borderWidth: 2 });
+  throughputChart.update();
+
+  requestsChart = lineChart('requestsChart', 'Processing', '#3b82f6');
+  requestsChart.data.datasets.push({ label: 'Deferred', data: [], borderColor: '#ef4444', backgroundColor: '#ef444420', fill: true, tension: 0.2, pointRadius: 0, borderWidth: 2 });
+  requestsChart.update();
+
+  slotsChart = lineChart('slotsChart', 'Avg Busy Slots', '#06b6d4');
+
+  gpuUtilChart = lineChart('gpuUtilChart', 'GPU Util %', '#22c55e');
+  gpuMemChart = lineChart('gpuMemChart', 'Memory Used (GB)', '#f59e0b');
+  gpuPowerChart = lineChart('gpuPowerChart', 'Power (W)', '#ef4444');
+  gpuTempChart = lineChart('gpuTempChart', 'Temp (°C)', '#f97316');
+  gpuMemClkChart = lineChart('gpuMemClkChart', 'Mem Clock (MHz)', '#06b6d4');
+
+  gpuUtilRChart = lineChart('gpuUtilRChart', 'GPU Util %', '#22c55e');
+  gpuMemRChart = lineChart('gpuMemRChart', 'Memory Used (GB)', '#f59e0b');
+  gpuPowerRChart = lineChart('gpuPowerRChart', 'Power (W)', '#ef4444');
+  gpuTempRChart = lineChart('gpuTempRChart', 'Temp (°C)', '#f97316');
+  gpuMemClkRChart = lineChart('gpuMemClkRChart', 'Mem Clock (MHz)', '#06b6d4');
+
+  netLocalChart = lineChart('netLocalChart', 'RX kB/s', '#22c55e');
+  netLocalChart.data.datasets.push({ label: 'TX kB/s', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', fill: true, tension: 0.2, pointRadius: 0, borderWidth: 2 });
+  netLocalChart.update();
+
+  netRemoteChart = lineChart('netRemoteChart', 'RX kB/s', '#22c55e');
+  netRemoteChart.data.datasets.push({ label: 'TX kB/s', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', fill: true, tension: 0.2, pointRadius: 0, borderWidth: 2 });
+  netRemoteChart.update();
+}
+
+function pushHistory(arr, val) {
+  arr.push(val);
+  if (arr.length > MAX_POINTS) arr.shift();
+}
+
+function updateGPUCards(local_gpus, remote_gpus) {
+  const container = document.getElementById('gpuCards');
+  const lg = local_gpus?.[0] || {};
+  const rg = remote_gpus?.[0] || {};
+  const hasLocal = Object.keys(lg).length > 1;
+  const hasRemote = Object.keys(rg).length > 1;
+
+  if (!hasLocal && !hasRemote) {
+    container.innerHTML = '<div class="card"><div class="label">GPU</div><div class="value" style="font-size:14px;color:#64748b">No GPU data</div></div>';
+    return;
+  }
+
+  function toGB(mb) { return (mb / 1024).toFixed(1) + ' GB'; }
+function cardHtml(label, g) {
+    if (!g || Object.keys(g).length <= 1) return '';
+    return `<div class="card"><div class="label">${label}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;color:#94a3b8;margin-top:6px">
+        <span>◉ Util: <strong style="color:#e2e8f0">${g['utilization.gpu']}%</strong></span>
+        <span>▦ Mem: <strong style="color:#e2e8f0">${toGB(g['memory.used'])} / ${toGB(g['memory.total'])}</strong></span>
+        <span>⚡ Power: <strong style="color:#e2e8f0">${g['power.draw']} W</strong></span>
+        <span>🌡 Temp: <strong style="color:#e2e8f0">${g['temperature.gpu']}°C</strong></span>
+        <span>◇ Clocks: <strong style="color:#e2e8f0">${g['clocks.current.graphics']} MHz</strong></span>
+        <span>◈ Mem Clk: <strong style="color:#e2e8f0">${g['clocks.current.memory']} MHz</strong></span>
+        <span>⇄ PCIe: <strong style="color:#e2e8f0">Gen ${g['pcie.link.gen.current']} x${g['pcie.link.width.current']}</strong></span>
+        <span>⟳ Fan: <strong style="color:#e2e8f0">${g['fan.speed'] ?? 'N/A'}%</strong></span>
+      </div>
+    </div>`;
+  }
+
+  container.innerHTML = cardHtml('192.168.1.205', lg) + cardHtml('10.0.0.1 (RPC)', rg);
+}
+
+function toHuman(b) { if (b >= 1e12) return (b/1e12).toFixed(1)+' TB'; if (b >= 1e9) return (b/1e9).toFixed(1)+' GB'; if (b >= 1e6) return (b/1e6).toFixed(1)+' MB'; return (b/1024).toFixed(0)+' KB'; }
+
+function netRateLabel(v) { return convertBW(v) + ' ' + netUnit; }
+
+function updateNetCards(data) {
+  const container = document.getElementById('netCards');
+  const nl = data.net_local?.ifaces || {};
+  const nr = data.net_remote?.ifaces || {};
+  let html = '';
+  const localIf = nl.enp5s0;
+  if (localIf) html += `<div class="card"><div class="label">Local (enp5s0)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;color:#94a3b8;margin-top:6px">
+      <span>RX: <strong style="color:#e2e8f0">${toHuman(localIf.rx_bytes)}</strong></span>
+      <span>TX: <strong style="color:#e2e8f0">${toHuman(localIf.tx_bytes)}</strong></span>
+      <span>RX rate: <strong style="color:#e2e8f0">${netRateLabel(localIf.rx_kBs)}</strong></span>
+      <span>TX rate: <strong style="color:#e2e8f0">${netRateLabel(localIf.tx_kBs)}</strong></span>
+    </div></div>`;
+  const remoteIf = nr.enp6s0;
+  if (remoteIf) html += `<div class="card"><div class="label">RPC (enp6s0)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;color:#94a3b8;margin-top:6px">
+      <span>RX: <strong style="color:#e2e8f0">${toHuman(remoteIf.rx_bytes)}</strong></span>
+      <span>TX: <strong style="color:#e2e8f0">${toHuman(remoteIf.tx_bytes)}</strong></span>
+      <span>RX rate: <strong style="color:#e2e8f0">${netRateLabel(remoteIf.rx_kBs)}</strong></span>
+      <span>TX rate: <strong style="color:#e2e8f0">${netRateLabel(remoteIf.tx_kBs)}</strong></span>
+    </div></div>`;
+  container.innerHTML = html || '<div class="card"><div class="label">Network</div><div class="value" style="font-size:14px;color:#64748b">No data</div></div>';
+}
+
+function updateDashboard(m, gpus_local, gpus_remote, data) {
+  document.getElementById('requests_processing').textContent = m.requests_processing ?? '-';
+  document.getElementById('requests_deferred').textContent = m.requests_deferred ?? '-';
+  document.getElementById('prompt_tokens').textContent = m.prompt_tokens_total !== undefined ? formatNum(m.prompt_tokens_total) : '-';
+  document.getElementById('predicted_tokens').textContent = m.tokens_predicted_total !== undefined ? formatNum(m.tokens_predicted_total) : '-';
+  document.getElementById('prompt_throughput').textContent = m.prompt_tokens_seconds !== undefined ? m.prompt_tokens_seconds.toFixed(1) : '-';
+  document.getElementById('gen_throughput').textContent = m.predicted_tokens_seconds !== undefined ? m.predicted_tokens_seconds.toFixed(1) : '-';
+  document.getElementById('max_context').textContent = m.n_tokens_max !== undefined ? m.n_tokens_max.toLocaleString() : '-';
+  document.getElementById('n_decode').textContent = m.n_decode_total !== undefined ? formatNum(m.n_decode_total) : '-';
+
+  updateGPUCards(gpus_local, gpus_remote);
+  updateNetCards(data);
+
+  const gl = gpus_local?.[0] || {};
+  const gr = gpus_remote?.[0] || {};
+
+  const label = timeLabel();
+  const h = state.history;
+  pushHistory(h.ts, label);
+  pushHistory(h.prompt_tokens, m.prompt_tokens_total ?? 0);
+  pushHistory(h.predicted_tokens, m.tokens_predicted_total ?? 0);
+  pushHistory(h.prompt_throughput, m.prompt_tokens_seconds ?? 0);
+  pushHistory(h.gen_throughput, m.predicted_tokens_seconds ?? 0);
+  pushHistory(h.requests, m.requests_processing ?? 0);
+  pushHistory(h.deferred, m.requests_deferred ?? 0);
+  pushHistory(h.slots, m.n_busy_slots_per_decode ?? 0);
+  pushHistory(h.gpu_util, gl['utilization.gpu'] ?? 0);
+  pushHistory(h.gpu_mem_used, gl['memory.used'] ?? 0);
+  pushHistory(h.gpu_power, gl['power.draw'] ?? 0);
+  pushHistory(h.gpu_temp, gl['temperature.gpu'] ?? 0);
+  pushHistory(h.gpu_mem_clk, gl['clocks.current.memory'] ?? 0);
+  pushHistory(h.gpu_util_r, gr['utilization.gpu'] ?? 0);
+  pushHistory(h.gpu_mem_used_r, gr['memory.used'] ?? 0);
+  pushHistory(h.gpu_power_r, gr['power.draw'] ?? 0);
+  pushHistory(h.gpu_temp_r, gr['temperature.gpu'] ?? 0);
+  pushHistory(h.gpu_mem_clk_r, gr['clocks.current.memory'] ?? 0);
+
+  if (data.net_local) {
+    const e = data.net_local.ifaces?.enp5s0 || {};
+    pushHistory(h.net_local_rx, e.rx_kBs ?? 0);
+    pushHistory(h.net_local_tx, e.tx_kBs ?? 0);
+  }
+  if (data.net_remote) {
+    const e = data.net_remote.ifaces?.enp6s0 || {};
+    pushHistory(h.net_remote_rx, e.rx_kBs ?? 0);
+    pushHistory(h.net_remote_tx, e.tx_kBs ?? 0);
+  }
+
+  tokenChart.data.labels = h.ts;
+  tokenChart.data.datasets[0].data = h.prompt_tokens;
+  tokenChart.data.datasets[1].data = h.predicted_tokens;
+  tokenChart.update('none');
+
+  throughputChart.data.labels = h.ts;
+  throughputChart.data.datasets[0].data = h.prompt_throughput;
+  throughputChart.data.datasets[1].data = h.gen_throughput;
+  throughputChart.update('none');
+
+  requestsChart.data.labels = h.ts;
+  requestsChart.data.datasets[0].data = h.requests;
+  requestsChart.data.datasets[1].data = h.deferred;
+  requestsChart.update('none');
+
+  slotsChart.data.labels = h.ts;
+  slotsChart.data.datasets[0].data = h.slots;
+  slotsChart.update('none');
+
+  gpuUtilChart.data.labels = h.ts;
+  gpuUtilChart.data.datasets[0].data = h.gpu_util;
+  gpuUtilChart.update('none');
+
+  gpuMemChart.data.labels = h.ts;
+  gpuMemChart.data.datasets[0].data = h.gpu_mem_used;
+  gpuMemChart.update('none');
+
+  gpuPowerChart.data.labels = h.ts;
+  gpuPowerChart.data.datasets[0].data = h.gpu_power;
+  gpuPowerChart.update('none');
+
+  gpuTempChart.data.labels = h.ts;
+  gpuTempChart.data.datasets[0].data = h.gpu_temp;
+  gpuTempChart.update('none');
+
+  gpuMemClkChart.data.labels = h.ts;
+  gpuMemClkChart.data.datasets[0].data = h.gpu_mem_clk;
+  gpuMemClkChart.update('none');
+
+  gpuUtilRChart.data.labels = h.ts;
+  gpuUtilRChart.data.datasets[0].data = h.gpu_util_r;
+  gpuUtilRChart.update('none');
+
+  gpuMemRChart.data.labels = h.ts;
+  gpuMemRChart.data.datasets[0].data = h.gpu_mem_used_r;
+  gpuMemRChart.update('none');
+
+  gpuPowerRChart.data.labels = h.ts;
+  gpuPowerRChart.data.datasets[0].data = h.gpu_power_r;
+  gpuPowerRChart.update('none');
+
+  gpuTempRChart.data.labels = h.ts;
+  gpuTempRChart.data.datasets[0].data = h.gpu_temp_r;
+  gpuTempRChart.update('none');
+
+  gpuMemClkRChart.data.labels = h.ts;
+  gpuMemClkRChart.data.datasets[0].data = h.gpu_mem_clk_r;
+  gpuMemClkRChart.update('none');
+
+  netLocalChart.data.labels = h.ts;
+  netLocalChart.data.datasets[0].data = h.net_local_rx.map(convertBW);
+  netLocalChart.data.datasets[1].data = h.net_local_tx.map(convertBW);
+  netLocalChart.update('none');
+
+  netRemoteChart.data.labels = h.ts;
+  netRemoteChart.data.datasets[0].data = h.net_remote_rx.map(convertBW);
+  netRemoteChart.data.datasets[1].data = h.net_remote_tx.map(convertBW);
+  netRemoteChart.update('none');
+
+  if (h.ts.length >= 2 && m.prompt_seconds_total !== undefined) {
+    const elapsed = m.prompt_seconds_total + m.tokens_predicted_seconds_total;
+    const hh = Math.floor(elapsed / 3600);
+    const min = Math.floor((elapsed % 3600) / 60);
+    const sec = Math.floor(elapsed % 60);
+    document.getElementById('uptime').textContent = `${hh}h ${min}m ${sec}s`;
+
+    const first = h.prompt_tokens[0] + h.predicted_tokens[0];
+    const last = h.prompt_tokens[h.prompt_tokens.length - 1] + h.predicted_tokens[h.predicted_tokens.length - 1];
+    const dt = (h.prompt_tokens.length - 1) * 1;
+    if (dt > 0) {
+      document.getElementById('prompt_tokens_rate').textContent = `Rate: ${((last - first) / dt).toFixed(1)} tok/s`;
+    }
+  }
+}
+
+function renderSlots(slots) {
+  const container = document.getElementById('slotsContainer');
+  const countEl = document.getElementById('slotsCount');
+  if (!slots || slots.length === 0) {
+    container.innerHTML = '<div style="color:#64748b;padding:6px 0">No active slots</div>';
+    countEl.textContent = '';
+    return;
+  }
+  countEl.textContent = `(${slots.length} slot${slots.length > 1 ? 's' : ''})`;
+  container.innerHTML = slots.map(s => {
+    const processing = s.is_processing ? '<span style="color:#22c55e">● Processing</span>' : '<span style="color:#64748b">○ Idle</span>';
+    const pct = s.n_ctx > 0 ? ((s.n_prompt_tokens_processed / s.n_ctx) * 100).toFixed(1) : '0';
+    const remaining = s.next_token?.[0]?.n_remain ?? '-';
+    return `<div style="background:#0f172a;border-radius:8px;padding:12px;border:1px solid #334155">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-weight:600;font-size:13px">Slot #${s.id}</span> ${processing}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;font-size:11px">
+        <span>Task: ${s.id_task ?? '-'}</span>
+        <span>Context: ${s.n_ctx?.toLocaleString() ?? '-'}</span>
+        <span>Prompt: ${s.n_prompt_tokens?.toLocaleString() ?? '-'}</span>
+        <span>Processed: ${s.n_prompt_tokens_processed?.toLocaleString() ?? '-'}</span>
+        <span>Cache: ${s.n_prompt_tokens_cache?.toLocaleString() ?? '-'}</span>
+        <span>Remaining: ${remaining}</span>
+        <span style="grid-column:span 2">Context used: ${pct}%</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadHistory() {
+  try {
+    const since = (Date.now() / 1000) - 600;
+    const resp = await fetch(`/api/history?since=${since}`);
+    if (!resp.ok) return;
+    const buf = await resp.arrayBuffer();
+    const ds = new DecompressionStream('gzip');
+    const decomp = new Response(new Blob([buf]).stream().pipeThrough(ds));
+    const data = await decomp.json();
+    if (!data || data.length === 0) return;
+    const h = state.history;
+    for (const snap of data) {
+      const m = snap.metrics || {};
+      const gl = snap.gpus_local?.[0] || {};
+      const gr = snap.gpus_remote?.[0] || {};
+      const label = new Date(snap.ts * 1000).toLocaleTimeString();
+      pushHistory(h.ts, label);
+      pushHistory(h.prompt_tokens, m.prompt_tokens_total ?? 0);
+      pushHistory(h.predicted_tokens, m.tokens_predicted_total ?? 0);
+      pushHistory(h.prompt_throughput, m.prompt_tokens_seconds ?? 0);
+      pushHistory(h.gen_throughput, m.predicted_tokens_seconds ?? 0);
+      pushHistory(h.requests, m.requests_processing ?? 0);
+      pushHistory(h.deferred, m.requests_deferred ?? 0);
+      pushHistory(h.slots, m.n_busy_slots_per_decode ?? 0);
+      pushHistory(h.gpu_util, gl['utilization.gpu'] ?? 0);
+      pushHistory(h.gpu_mem_used, gl['memory.used'] ?? 0);
+      pushHistory(h.gpu_power, gl['power.draw'] ?? 0);
+      pushHistory(h.gpu_temp, gl['temperature.gpu'] ?? 0);
+      pushHistory(h.gpu_mem_clk, gl['clocks.current.memory'] ?? 0);
+      pushHistory(h.gpu_util_r, gr['utilization.gpu'] ?? 0);
+      pushHistory(h.gpu_mem_used_r, gr['memory.used'] ?? 0);
+      pushHistory(h.gpu_power_r, gr['power.draw'] ?? 0);
+      pushHistory(h.gpu_temp_r, gr['temperature.gpu'] ?? 0);
+      pushHistory(h.gpu_mem_clk_r, gr['clocks.current.memory'] ?? 0);
+      const ne = snap.net_local?.ifaces?.enp5s0 || {};
+      pushHistory(h.net_local_rx, ne.rx_kBs ?? 0);
+      pushHistory(h.net_local_tx, ne.tx_kBs ?? 0);
+      const ner = snap.net_remote?.ifaces?.enp6s0 || {};
+      pushHistory(h.net_remote_rx, ner.rx_kBs ?? 0);
+      pushHistory(h.net_remote_tx, ner.tx_kBs ?? 0);
+    }
+  } catch (_) {}
+}
+
+async function fetchAll() {
+  try {
+    const resp = await fetch('/api/all');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    document.getElementById('rawMetrics').textContent = data.metrics_raw || 'No data';
+
+    const m = data.metrics || {};
+    if (data.slots) renderSlots(data.slots);
+    updateDashboard(m, data.gpus_local, data.gpus_remote, data);
+
+    document.getElementById('statusDot').style.background = '#22c55e';
+    document.getElementById('statusText').textContent = 'Connected';
+  } catch (err) {
+    document.getElementById('statusDot').style.background = '#ef4444';
+    document.getElementById('statusText').textContent = `Error: ${err.message}`;
+  }
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+}
+
+initCharts();
+loadHistory().then(fetchAll);
+setInterval(fetchAll, 1000);
+</script>
+</body>
+</html>

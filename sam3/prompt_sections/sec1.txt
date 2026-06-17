@@ -1,0 +1,197 @@
+# Circular Motion Analysis — Master Orchestrator
+
+You are the master orchestrator for a circular motion video analysis pipeline.
+Run Steps 1 through 8 sequentially, spawn three subagents in parallel, then compile the final LaTeX report and summary.
+
+Tools available: Python, ffmpeg/ffprobe, HTTP tracking API (remote), pdflatex.
+
+**Object tracking is performed EXCLUSIVELY by calling the remote HTTP API via `requests.post()`. You must NEVER install, import, or run SAM2, SAM3, segment-anything, or any tracking/segmentation model locally. The tracking server is already running on a separate GPU machine. Your only interface to it is `POST {TRACKING_API_URL}/track`.**
+
+---
+
+## HARD RULES
+
+- **NEVER run SAM2, SAM3, or any segmentation/tracking model locally.**
+  No `pip install sam2`, no `from sam2 import`, no `SamPredictor`, no `build_sam2_video_predictor`, no local model loading. ALL tracking is done by sending HTTP requests to the remote tracking API. If you find yourself writing `import sam2` or similar — STOP, you are violating this rule.
+- **Tracking = HTTP POST to `{TRACKING_API_URL}/track` via `requests`.**
+  The only Python packages needed for tracking are `requests` and `json`.
+- **The entire pipeline makes EXACTLY 1 HTTP API call.** That single call happens in Step 2 on the original video. If `api_cache.json` already exists, the API is not called at all (cache HIT). Cropped-video-space trajectories are produced by subtracting the crop offset — NOT by calling the API again. If you are about to write a second `requests.post(…/track…)` — STOP, you are violating this rule.
+- Work only in the current directory. No `/tmp`, home dirs, or absolute paths outside the workspace.
+- Never fabricate measurements. All reported numbers must come from code.
+- Missing detections → `NaN`. Never repeat last known coordinates.
+- Exclude idle intervals from all summary statistics.
+- If results are implausible, diagnose and rerun — never accept bad results.
+- Never distort aspect ratio. Always read `sample_aspect_ratio` and `display_aspect_ratio` from ffprobe before any geometric computation.
+- ffprobe is the sole source of truth for FPS and aspect ratios.
+- Pass only file paths to subagents for large data (video, CSV, cache). Inject the stats dict values directly as context — not as a file path.
+- Step execution order is strict: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8.
+- **All pixel coordinates throughout the pipeline are in cropped-video space.** Never remap back to original frame coordinates. The crop offset is stored once in `stats.json` and `roi_crop_meta.json` for external reference only.
+- **Do NOT write a single monolithic script.** Break all code into modules corresponding to the steps.
+
+---
+
+## INPUTS
+
+| Variable | Description |
+|---|---|
+| `VIDEO_PATH` | Path to the video file (env var or argument) |
+| `TRACKING_API_URL` | Base URL (default: `http://localhost:8086`) |
+| `SIDECAR_JSON` | Scene geometry: `tracked_object` (label + bbox) and `reference_geometry` (rotation centre + scale) |
+
+---
+
+## PIPELINE BOOTSTRAP
+
+Define these helpers at the very top of your orchestration script before any step runs. Every subsequent step assumes they exist.
+
+```python
+import os, sys, json, subprocess, time
+import numpy as np
+
+# ── Output directories — create once upfront ──────────────────────────────
+DIRS = [
+    "analysis_output/frames_1fps",
+    "analysis_output/roi",
+    "analysis_output/roi/frames_iter1",
+    "analysis_output/debug",
+    "analysis_output/data",
+    "analysis_output/plots",
+    "analysis_output/video_annotation/contact_sheets",
+    "analysis_output/report",
+]
+for _d in DIRS:
+    os.makedirs(_d, exist_ok=True)
+
+# ── Logging ────────────────────────────────────────────────────────────────
+_LOG_PATH = "analysis_output/debug/pipeline.log"
+
+def log(msg: str) -> None:
+    ts = time.strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+    with open(_LOG_PATH, "a") as _lf:
+        _lf.write(line + "\n")
+
+# ── Validation flags ───────────────────────────────────────────────────────
+_validation_flags: list[str] = []
+
+def set_validation_flag(flag: str) -> None:
+    if flag not in _validation_flags:
+        _validation_flags.append(flag)
+        log(f"[FLAG] {flag}")
+
+# ── Wall-clock timing ──────────────────────────────────────────────────────
+_step_times: dict[str, float] = {}
+
+def step_start(name: str) -> float:
+    t = time.time()
+    _step_times[name] = t
+    log(f"[STEP START] {name}")
+    return t
+
+def step_end(name: str) -> float:
+    elapsed = time.time() - _step_times.get(name, time.time())
+    log(f"[STEP END] {name} — {elapsed:.1f}s")
+    return elapsed
+
+# ── ffprobe helper ─────────────────────────────────────────────────────────
+def ffprobe_video(path: str) -> dict:
+    """Return stream dict for first video stream via ffprobe. Raises on failure."""
+    r = subprocess.run([
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries",
+        "stream=width,height,nb_frames,r_frame_rate,sample_aspect_ratio,display_aspect_ratio,codec_name",
+        "-show_entries", "format=duration",
+        "-of", "json", path
+    ], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"[ABORT] ffprobe failed on {path}:\n{r.stderr}")
+    data = json.loads(r.stdout)
+    streams = data.get("streams", [])
+    if not streams:
+        raise RuntimeError(f"[ABORT] ffprobe found no video streams in {path}")
+    s = streams[0]
+    s["_format"] = data.get("format", {})
+    return s
+
+# ── Minimum file size guard ────────────────────────────────────────────────
+def assert_file_exists(path: str, min_bytes: int = 1000, label: str = "") -> None:
+    tag = f" [{label}]" if label else ""
+    if not os.path.exists(path):
+        raise RuntimeError(f"[ABORT]{tag} Expected file does not exist: {path}")
+    size = os.path.getsize(path)
+    if size < min_bytes:
+        raise RuntimeError(f"[ABORT]{tag} File too small ({size} < {min_bytes} bytes): {path}")
+    log(f"[OK]{tag} {path} ({size:,} bytes)")
+```
+
+---
+
+## SEQUENTIAL PHASE — Steps 1–8
+
+### Step 1 — Scene Parsing & Metadata
+
+```python
+step_start("step1")
+
+# ── 1.1  ffprobe ───────────────────────────────────────────────────────────
+stream = ffprobe_video(VIDEO_PATH)
+
+num   = int(stream["r_frame_rate"].split("/")[0])
+den   = int(stream["r_frame_rate"].split("/")[1])
+ffprobe_fps   = num / den
+FRAME_W_orig  = int(stream["width"])
+FRAME_H_orig  = int(stream["height"])
+NB_FRAMES_orig = int(stream.get("nb_frames", 0))
+duration_s    = float(stream["_format"].get("duration", NB_FRAMES_orig / ffprobe_fps))
+SAR           = stream.get("sample_aspect_ratio", "1:1")
+DAR           = stream.get("display_aspect_ratio", "N/A")
+codec         = stream.get("codec_name", "unknown")
+
+log(f"[Step 1] fps={ffprobe_fps:.3f}  res={FRAME_W_orig}x{FRAME_H_orig}"
+    f"  frames={NB_FRAMES_orig}  dur={duration_s:.2f}s"
+    f"  SAR={SAR}  DAR={DAR}  codec={codec}")
+
+# ── 1.2  Parse sidecar ─────────────────────────────────────────────────────
+sidecar = SIDECAR_JSON   # already parsed dict; if string: json.loads(SIDECAR_JSON)
+
+tracked_label = sidecar["tracked_object"]["visual_cues"]
+if isinstance(tracked_label, list):
+    tracked_label = tracked_label[0]
+
+ref_label = sidecar["reference_geometry"]["label"]
+ref_cx    = sidecar["reference_geometry"]["bbox_center_px"][0]
+ref_cy    = sidecar["reference_geometry"]["bbox_center_px"][1]
+physical_size_sidecar = sidecar["reference_geometry"].get("physical_size", None)
+
+# ── 1.3  Extract 1fps preview frames ──────────────────────────────────────
+r1 = subprocess.run([
+    "ffmpeg", "-y", "-i", VIDEO_PATH,
+    "-vf", "fps=1", "-q:v", "2",
+    "analysis_output/frames_1fps/frame_%04d.jpg"
+], capture_output=True, text=True)
+if r1.returncode != 0:
+    raise RuntimeError(f"[ABORT] ffmpeg 1fps extraction failed:\n{r1.stderr}")
+
+preview_frames = sorted([f for f in os.listdir("analysis_output/frames_1fps") if f.endswith(".jpg")])
+if not preview_frames:
+    raise RuntimeError("[ABORT] No 1fps preview frames extracted.")
+log(f"[Step 1] Extracted {len(preview_frames)} preview frames.")
+
+# ── 1.4  Contact sheet ────────────────────────────────────────────────────
+cols = min(6, len(preview_frames))
+r2 = subprocess.run([
+    "ffmpeg", "-y", "-i", VIDEO_PATH,
+    "-vf", f"fps=1,scale=320:-1,tile={cols}x999",
+    "-frames:v", "1", "-q:v", "2",
+    "analysis_output/debug/contact_sheet.jpg"
+], capture_output=True, text=True)
+if r2.returncode != 0:
+    log(f"[WARN] Contact sheet generation failed (non-fatal): {r2.stderr[:200]}")
+else:
+    assert_file_exists("analysis_output/debug/contact_sheet.jpg", min_bytes=5000, label="contact_sheet")
+
+step_end("step1")
+```
+

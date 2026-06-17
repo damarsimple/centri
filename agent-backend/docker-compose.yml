@@ -1,0 +1,112 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - api
+    profiles: ["production"]
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      # Publish on the lab LAN (10.0.0.1) AND the wifi LAN (192.168.1.13) — the phone
+      # is on wifi and the app points at 192.168.1.13:8088. Bound to specific LAN IPs,
+      # not 0.0.0.0, so it is not exposed to the whole world.
+      - "10.0.0.1:8088:8000"
+      - "192.168.1.13:8088:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - API_KEY=${API_KEY}
+      - PI_MODEL=${PI_MODEL}
+      - TRACKING_API_URL=${TRACKING_API_URL}
+      - PI_INFERENCE_URL=${PI_INFERENCE_URL}
+      - TEMPLATE_DIR=/app/templates/basetemplate-turntable-1
+      - PROMPT_FILE=/app/prompts/orchestrator.txt
+      - WORKSPACE_DIR=/app/workspaces
+      - WORKSPACE_TTL_HOURS=${WORKSPACE_TTL_HOURS}
+      - PI_INFERENCE_API_KEY=${PI_INFERENCE_API_KEY}
+      - PI_ANALYZER_TIMEOUT=${PI_ANALYZER_TIMEOUT}
+      - LATEX_SKILL_PATH=${LATEX_SKILL_PATH}
+      - PYTHONPATH=/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./worker:/app/worker
+      - ./prompts:/app/prompts
+      - ./templates:/app/templates
+      - ./workspace_lib:/app/workspace_lib
+      - ./.pi:/root/.pi
+      - ./workspaces:/app/workspaces
+      - ./latex-skill:/latex-skill:ro
+
+  worker:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - API_KEY=${API_KEY}
+      - PI_MODEL=${PI_MODEL}
+      - TRACKING_API_URL=${TRACKING_API_URL}
+      - TEMPLATE_DIR=/app/templates/basetemplate-turntable-1
+      - PROMPT_FILE=/app/prompts/orchestrator.txt
+      - WORKSPACE_DIR=/app/workspaces
+      - WORKSPACE_TTL_HOURS=${WORKSPACE_TTL_HOURS}
+      - PI_TIMEOUT_SECONDS=${PI_TIMEOUT_SECONDS}
+      - PI_INFERENCE_URL=${PI_INFERENCE_URL}
+      - PI_INFERENCE_API_KEY=${PI_INFERENCE_API_KEY}
+      - XIAOMI_API_KEY=${XIAOMI_API_KEY}
+      - LATEX_SKILL_PATH=${LATEX_SKILL_PATH}
+      - PYTHONPATH=/app
+    command: celery -A worker.celery_app worker --loglevel=info --concurrency=1
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./worker:/app/worker
+      - ./prompts:/app/prompts
+      - ./templates:/app/templates
+      - ./workspace_lib:/app/workspace_lib
+      - ./.pi:/root/.pi
+      - ./workspaces:/app/workspaces
+      - ./latex-skill:/latex-skill:ro
+
+  beat:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - WORKSPACE_DIR=/app/workspaces
+      - WORKSPACE_TTL_HOURS=${WORKSPACE_TTL_HOURS}
+      - PYTHONPATH=/app
+    command: celery -A worker.celery_app beat --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./worker:/app/worker
+      - ./prompts:/app/prompts
+      - ./templates:/app/templates
+      - ./.pi:/root/.pi
+      - ./workspaces:/app/workspaces
+      - ./latex-skill:/latex-skill:ro
+
+volumes:
+  caddy_data:

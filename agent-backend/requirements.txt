@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+celery[redis]
+redis
+python-multipart
+pydantic
+python-dotenv
+slowapi
+requests
+numpy
+scipy
+opencv-python-headless
+matplotlib
+scikit-learn
+pandas

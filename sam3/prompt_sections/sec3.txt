@@ -1,0 +1,215 @@
+---
+
+### Coordinate Mapping Helpers
+
+```python
+def cropped_to_original(cx, cy, crop_meta):
+    """Map a point from cropped-video space back to original-frame space."""
+    return cx + crop_meta["x_off"], cy + crop_meta["y_off"]
+
+def original_to_cropped(ox, oy, crop_meta):
+    """Map a point from original-frame space to cropped-video space."""
+    return ox - crop_meta["x_off"], oy - crop_meta["y_off"]
+```
+
+---
+
+### Step 3 — Coordinate Validation
+
+```python
+import cv2
+from glob import glob
+
+step_start("step3")
+
+# ── CRITICAL: Coordinate Space ─────────────────────────────────────────────
+# The tracking API natively processes and returns coordinates in **Display Space**.
+# FFmpeg auto-rotates decoded frames before filters, meaning the `-vf crop`
+# filter also operates in Display Space.
+# Therefore, NO rotation transformation is needed here. The coordinates
+# from the tracker already match the decoded crop video exactly.
+
+# Extract the exact validation frame from the cropped video
+# Do NOT use fps=1 as it extracts t=0.5s, 1.5s etc. Use select=eq(n,FPS)
+crop_frames_dir = "analysis_output/roi/frames_iter1"
+fps_frame_idx = int(FPS)
+test_frame_path = f"{crop_frames_dir}/validation_frame_{fps_frame_idx}.jpg"
+
+r3 = subprocess.run([
+    "ffmpeg", "-y", "-i", final_cropped_path,
+    "-vf", f"select='eq(n\\,{fps_frame_idx})'", "-vframes", "1",
+    "-q:v", "2", test_frame_path
+], capture_output=True, text=True)
+
+if r3.returncode != 0:
+    raise RuntimeError(f"[ABORT] ffmpeg validation frame extraction failed:\n{r3.stderr}")
+
+test_frame = cv2.imread(test_frame_path)
+if test_frame is None:
+    raise RuntimeError(f"[ABORT] cv2 could not read validation frame: {test_frame_path}")
+
+H, W = test_frame.shape[:2]
+log(f"[COORD] Validation frame size: {W}x{H}")
+
+if W != crop_w or H != crop_h:
+    raise RuntimeError(f"[ABORT] Validation frame {W}x{H} does not match expected crop {crop_w}x{crop_h}.")
+
+with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+    cl.write(f"[Coord Validation]\n"
+             f"rotation_in_metadata : {rotation}\n"
+             f"validation_frame     : {test_frame_path}\n"
+             f"crop_dimensions      : {crop_w}x{crop_h}\n"
+             f"frame_dimensions_ok  : {W}x{H}\n\n")
+
+for label, detections in trajectories.items():
+    if not detections:
+        continue
+
+    det = min(detections, key=lambda d: abs(d["frame"] - fps_frame_idx))
+
+    x1, y1, x2, y2 = det["bbox"]
+    debug_img = test_frame.copy()
+    cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+    cv2.circle(debug_img, (int(det["cx"]), int(det["cy"])), 6, (0, 0, 255), -1)
+    
+    out_path = f"analysis_output/debug/coord_validation_{label}.jpg"
+    cv2.imwrite(out_path, debug_img)
+    assert_file_exists(out_path, min_bytes=5000, label=f"coord_validation_{label}")
+
+    cx_c, cy_c = (x1 + x2) / 2, (y1 + y2) / 2
+    if not (0 <= cx_c <= W and 0 <= cy_c <= H):
+        log(f"[WARN] '{label}' centre ({cx_c:.0f},{cy_c:.0f}) falls outside crop frame.")
+        set_validation_flag(f"coord_out_of_bounds_{label}")
+    else:
+        log(f"[COORD] '{label}' centre ({cx_c:.0f},{cy_c:.0f}) within crop frame — OK.")
+
+    with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+        cl.write(f"coord_validation_{label}: centre=({cx_c:.1f},{cy_c:.1f}) in_bounds={0<=cx_c<=W and 0<=cy_c<=H}\n")
+
+step_end("step3")
+```
+
+---
+
+### Step 4 — Pre-Calibration Bootstrap
+
+> **Purpose:** Compute the rotation center from the reference object detections so that Step 5 has a valid `cx_calibration, cy_calibration`.
+
+```python
+step_start("step4")
+
+ref_dets = trajectories[ref_label]
+
+ref_cx_vals = [d["cx"] for d in ref_dets if d.get("cx") is not None and not np.isnan(d["cx"])]
+ref_cy_vals = [d["cy"] for d in ref_dets if d.get("cy") is not None and not np.isnan(d["cy"])]
+
+n_reference_frames = len(ref_cx_vals)
+
+if n_reference_frames < 5:
+    raise RuntimeError(
+        f"[ABORT] Only {n_reference_frames} valid reference detections found for '{ref_label}'. "
+        "Cannot establish rotation center. Check API output."
+    )
+
+cx_calibration = float(np.median(ref_cx_vals))
+cy_calibration = float(np.median(ref_cy_vals))
+
+log(f"[Step 4] cx_calibration={cx_calibration:.1f}  cy_calibration={cy_calibration:.1f}  n_ref={n_reference_frames}")
+
+with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+    cl.write(
+        f"[Step 4 — Bootstrap Center]\n"
+        f"coordinate_space   : cropped-video\n"
+        f"n_reference_frames : {n_reference_frames}\n"
+        f"cx_calibration     : {cx_calibration:.3f}\n"
+        f"cy_calibration     : {cy_calibration:.3f}\n\n"
+    )
+
+step_end("step4")
+```
+
+---
+
+### Step 5 — Trajectory Cleaning (Circular Prior)
+
+```python
+step_start("step5")
+
+tracked_dets = trajectories[tracked_label]
+n_raw_frames = NB_FRAMES
+
+x_full = np.full(n_raw_frames, np.nan)
+y_full = np.full(n_raw_frames, np.nan)
+
+for d in tracked_dets:
+    fi = d["frame"]
+    if 0 <= fi < n_raw_frames and d.get("cx") is not None:
+        x_full[fi] = d["cx"]
+        y_full[fi] = d["cy"]
+
+valid_mask  = ~np.isnan(x_full)
+x_valid     = x_full[valid_mask]
+y_valid     = y_full[valid_mask]
+n_valid_frames = int(valid_mask.sum())
+
+tracking_coverage_pct = 100.0 * n_valid_frames / max(n_raw_frames, 1)
+log(f"[Step 5] valid={n_valid_frames}/{n_raw_frames} ({tracking_coverage_pct:.1f}%)")
+
+if tracking_coverage_pct < 80:
+    set_validation_flag("low_coverage")
+
+# RANSAC circle fit
+# Implement RANSAC here to find cx_fit, cy_fit, r_fit_px, inlier_mask
+# (Code logic for RANSAC omitted for brevity, ensure random seed 42 is used)
+# Assume n_inliers is computed.
+
+MIN_INLIERS = max(20, int(0.15 * n_valid_frames))
+
+if n_inliers < MIN_INLIERS:
+    set_validation_flag("ransac_insufficient_inliers")
+    cx_fit   = cx_calibration
+    cy_fit   = cy_calibration
+    r_fit_px = float(np.nanmedian(np.sqrt((x_valid - cx_calibration)**2 + (y_valid - cy_calibration)**2)))
+    inlier_mask = np.ones(len(x_valid), dtype=bool)
+    log(f"[RANSAC FALLBACK] {n_inliers} inliers < {MIN_INLIERS}. Using median radius: {r_fit_px:.1f} px")
+
+# Outlier rejection
+r_per_frame = np.sqrt((x_full - cx_calibration)**2 + (y_full - cy_calibration)**2)
+r_inliers   = r_per_frame[valid_mask][inlier_mask]
+sigma_r     = float(np.nanstd(r_inliers))
+r_med       = float(np.nanmedian(r_inliers))
+
+outlier_full = np.abs(r_per_frame - r_med) > np.maximum(2.5 * sigma_r, 15.0)
+x_full[outlier_full] = np.nan
+y_full[outlier_full] = np.nan
+n_outliers_rejected  = int(outlier_full.sum())
+log(f"[Step 5] Outliers rejected: {n_outliers_rejected}")
+
+center_drift_px = float(np.sqrt((cx_fit - cx_calibration)**2 + (cy_fit - cy_calibration)**2))
+
+if center_drift_px <= 10:
+    cx_active, cy_active = cx_calibration, cy_calibration
+    center_source = "tire_hub_median"
+else:
+    cx_active, cy_active = cx_fit, cy_fit
+    center_source = "ransac_fit"
+    set_validation_flag("center_switched_to_fit")
+
+log(f"[Step 5] center_drift={center_drift_px:.1f}px  source={center_source}  cx_active={cx_active:.1f}  cy_active={cy_active:.1f}")
+
+with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+    cl.write(
+        f"[Step 5 — Trajectory Cleaning]\n"
+        f"coordinate_space    : cropped-video\n"
+        f"n_raw_frames        : {n_raw_frames}\n"
+        f"n_valid_frames      : {n_valid_frames}\n"
+        f"n_inliers           : {n_inliers}\n"
+        f"n_outliers_rejected : {n_outliers_rejected}\n"
+        f"r_fit_px            : {r_fit_px:.3f}\n"
+        f"cx_fit, cy_fit      : {cx_fit:.3f}, {cy_fit:.3f}\n"
+        f"center_drift_px     : {center_drift_px:.3f}\n"
+        f"cx_active, cy_active: {cx_active:.3f}, {cy_active:.3f}  (source: {center_source})\n\n"
+    )
+
+step_end("step5")
+```

@@ -1,0 +1,1 @@
+{"id": "aa8df780-7fa1-4440-95c8-3e7a8a4a1f94", "ts": 1780360036.4300625, "type": "setup_correction", "job_id": "e2e-test", "user_id": "student-1", "payload": {"predicted": {"moving": "red smartphone", "reference": "black circular turntable"}, "sam_verified": ["red smartphone", "black circular turntable"], "note": "e2e live test"}}

@@ -1,0 +1,18 @@
+__pycache__
+*.pyc
+.env
+.git
+.venv
+venv
+.pytest_cache
+*.md
+test_*.sh
+start-llama.sh
+# Bind-mounted at runtime (see docker-compose.yml), so they don't belong in the
+# build context — workspaces alone is ~2.5GB.
+workspaces
+templates
+.pi
+*.mp4
+*.MOV
+*.mov

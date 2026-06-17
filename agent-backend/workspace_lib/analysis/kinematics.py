@@ -1,0 +1,365 @@
+"""Kinematics, active detection, period & phase analysis (old steps 7-8).
+
+Consolidation vs the old agent code: omega is computed ONCE here (unwrap ->
+Savitzky-Golay -> gradient -> median filter) and that single series drives active
+detection, summary stats, period, AND phase detection. The old code computed a
+separate preliminary omega in step7 for active detection and a different one in
+step8 for everything else, which is a chunk of why `stable_mean_omega` swung
+2.9->6.1 rad/s on the same video.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import numpy as np
+import scipy.ndimage
+import scipy.stats
+from scipy.signal import savgol_filter
+
+from . import common
+from .contract import Inputs
+from .geometry import Calibration
+
+
+@dataclass
+class Kinematics:
+    t_s: np.ndarray
+    r_px: np.ndarray
+    r_m: np.ndarray
+    theta_unwrapped: np.ndarray
+    omega: np.ndarray
+    v_m_s: np.ndarray
+    ac_m_s2: np.ndarray
+    active_mask: np.ndarray
+    rotation_direction: str
+    active_duration_s: float
+    # Tracked centroid in CROPPED space, AFTER outlier removal + short-gap fill —
+    # the exact series the kinematics were computed from. Written to kinematics.csv
+    # so figures plot points that sit on the fitted circle.
+    x_px: np.ndarray = field(default_factory=lambda: np.array([]))
+    y_px: np.ndarray = field(default_factory=lambda: np.array([]))
+    n_interpolated: int = 0
+    # summary (active intervals only)
+    mean_r_m: float = 0.0
+    std_r_m: float = 0.0
+    mean_omega: float = 0.0
+    std_omega: float = 0.0
+    mean_v: float = 0.0
+    mean_ac: float = 0.0
+    max_ac: float = 0.0
+    # period / frequency
+    period_s: float = 0.0
+    frequency_hz: float = 0.0
+    T_primary: float = 0.0
+    T_fft: float = 0.0
+    period_discrepancy: float = 0.0
+    # stable phase
+    stable_mean_omega: float = 0.0
+    stable_mean_ac: float = 0.0
+    stable_omega_r2: float = float("nan")
+    stable_omega_std_err: float = float("nan")
+    n_stable_segments: int = 0
+    increase_start_omega: float | None = None
+    increase_end_omega: float | None = None
+    decrease_end_omega: float | None = None
+    phase_labels: list = field(default_factory=list)
+    stable_segments: list = field(default_factory=list)
+
+
+def _segmented(signal, fn):
+    """Apply fn to each contiguous non-NaN run of `signal` independently."""
+    out = np.full_like(signal, np.nan, dtype=float)
+    labeled, n = scipy.ndimage.label(~np.isnan(signal))
+    for i in range(1, n + 1):
+        m = labeled == i
+        out[m] = fn(signal[m], m)
+    return out
+
+
+def _savgol_nan_safe(signal, window, polyorder):
+    def fn(seg, _m):
+        n = len(seg)
+        if n >= window:
+            return savgol_filter(seg, window, polyorder)
+        if n >= polyorder + 1:
+            w = n if n % 2 == 1 else n - 1
+            w = max(w, polyorder + 1)
+            if w % 2 == 0:
+                w -= 1
+            return savgol_filter(seg, w, polyorder) if w > polyorder else seg
+        return seg
+    return _segmented(signal, fn)
+
+
+# Bridge tracking dropouts no longer than this (seconds). Motion blur during a fast
+# spin makes SAM3 miss a few frames; on a circular path a short gap between two real
+# detections is safe to interpolate. Longer gaps stay NaN (honest — never extrapolate).
+MAX_GAP_S = 0.2
+
+
+def _fill_short_gaps(x_full, y_full, cx, cy, fps):
+    """Interpolate INTERIOR gaps <= MAX_GAP_S in polar (theta, r) space about the
+    center, then rebuild (x, y). Polar (not linear x/y) because the motion is
+    circular: theta is ~linear in time over a short gap and r ~constant, so the
+    filled points land ON the orbit rather than on a chord. Only fills between two
+    real detections; never the leading/trailing ends. Returns (x, y, n_filled)."""
+    x = x_full.copy()
+    y = y_full.copy()
+    valid = ~np.isnan(x) & ~np.isnan(y)
+    idx = np.where(valid)[0]
+    if idx.size < 2:
+        return x, y, 0
+    max_gap = max(1, int(round(MAX_GAP_S * fps)))
+    r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+    th = np.arctan2(y - cy, x - cx)
+    n_filled = 0
+    for a, b in zip(idx[:-1], idx[1:]):
+        gap = int(b - a - 1)
+        if gap <= 0 or gap > max_gap:
+            continue
+        dth = (th[b] - th[a] + np.pi) % (2 * np.pi) - np.pi  # shortest signed step
+        for j in range(1, gap + 1):
+            f = j / (gap + 1)
+            rj = r[a] + f * (r[b] - r[a])
+            tj = th[a] + f * dth
+            x[a + j] = cx + rj * np.cos(tj)
+            y[a + j] = cy + rj * np.sin(tj)
+        n_filled += gap
+    return x, y, n_filled
+
+
+def compute(inp: Inputs, cal: Calibration, x_full, y_full) -> Kinematics:
+    common.step_start("step8")
+    FPS = inp.fps
+    n = inp.n_raw_frames
+    t_s = np.arange(n) / FPS
+
+    # Fill short blur-dropout gaps along the orbit before deriving anything, so omega
+    # / active-detection / period see a continuous spin. Real-detection coverage in
+    # stats.json is unchanged (computed in calibrate, before this).
+    x_full, y_full, n_interpolated = _fill_short_gaps(x_full, y_full, cal.cx_px, cal.cy_px, FPS)
+    if n_interpolated:
+        common.set_validation_flag("interpolated_short_gaps")
+
+    dx = x_full - cal.cx_px
+    dy = y_full - cal.cy_px
+    r_px = np.sqrt(dx**2 + dy**2)
+    r_m = r_px / cal.px_per_m
+
+    theta_raw = np.arctan2(dy, dx)
+    theta_unwrapped = _segmented(theta_raw, lambda seg, _m: np.unwrap(seg))
+
+    window = max(11, 2 * (int(FPS) // 6) + 1)
+    if window % 2 == 0:
+        window += 1
+    theta_smooth = _savgol_nan_safe(theta_unwrapped, window, 3)
+
+    # Single omega source for everything downstream. A lone valid frame (an island
+    # between tracking gaps) has no defined angular velocity, and np.gradient raises
+    # on a <2-point array — return NaN for those so they stay gaps, not a crash.
+    def _grad(seg, m):
+        if len(seg) < 2:
+            return np.full_like(seg, np.nan, dtype=float)
+        return np.gradient(seg, t_s[m])
+    omega = _segmented(theta_smooth, _grad)
+    omega = scipy.ndimage.median_filter(omega, size=max(5, int(FPS // 10)), mode="nearest")
+
+    # ── Active detection (old step 7), now off the same omega ────────────────
+    common.step_start("step7")
+    omega_max = float(np.nanmax(np.abs(omega)))
+    omega_threshold_pct = 0.10 if inp.duration_s >= 10 else 0.20
+    omega_threshold = omega_threshold_pct * omega_max
+    min_active_frames = max(1, int(max(0.5, 1.0 / omega_threshold_pct / 10) * FPS))
+    active_raw = np.abs(omega) > omega_threshold
+    active_raw[np.isnan(omega)] = False
+    labeled, n_bursts = scipy.ndimage.label(active_raw)
+    active_mask = np.zeros(n, dtype=bool)
+    for i in range(1, n_bursts + 1):
+        burst = labeled == i
+        if burst.sum() >= min_active_frames:
+            active_mask |= burst
+    active_duration_s = float(active_mask.sum()) / FPS
+    np.save("analysis_output/data/active_mask.npy", active_mask)
+    common.step_end("step7")
+
+    omega_active = omega[active_mask & ~np.isnan(omega)]
+    if omega_active.size == 0:
+        common.set_validation_flag("no_active_rotation")
+        omega_active = omega[~np.isnan(omega)]
+
+    rotation_direction = "CCW" if float(np.nanmedian(omega_active)) > 0 else "CW"
+
+    v_m_s = np.abs(omega) * cal.r_fit_m
+    spike = 5.0 * float(np.nanmedian(np.abs(omega_active)))
+    omega_for_ac = np.where(np.abs(omega) > spike, np.nan, omega)
+    ac_m_s2 = omega_for_ac**2 * cal.r_fit_m
+    if np.any(np.abs(omega) > spike):
+        common.set_validation_flag("omega_spike")
+
+    k = Kinematics(
+        t_s=t_s, r_px=r_px, r_m=r_m, theta_unwrapped=theta_unwrapped,
+        omega=omega, v_m_s=v_m_s, ac_m_s2=ac_m_s2, active_mask=active_mask,
+        rotation_direction=rotation_direction, active_duration_s=active_duration_s,
+        x_px=x_full, y_px=y_full, n_interpolated=n_interpolated,
+    )
+
+    am = active_mask & ~np.isnan(omega)
+    k.mean_r_m = float(np.nanmean(r_m[active_mask])) if active_mask.any() else 0.0
+    k.std_r_m = float(np.nanstd(r_m[active_mask])) if active_mask.any() else 0.0
+    k.mean_omega = float(np.nanmean(omega[am])) if am.any() else 0.0
+    k.std_omega = float(np.nanstd(omega[am])) if am.any() else 0.0
+    k.mean_v = float(np.nanmean(v_m_s[active_mask])) if active_mask.any() else 0.0
+    k.mean_ac = float(np.nanmean(ac_m_s2[active_mask])) if active_mask.any() else 0.0
+    k.max_ac = float(np.nanmax(ac_m_s2[active_mask])) if active_mask.any() else 0.0
+    if k.mean_r_m and k.std_r_m / max(k.mean_r_m, 1e-9) > 0.30:
+        common.set_validation_flag("radius_unstable")
+
+    _period(k, inp, FPS)
+    _phases(k, inp, FPS, theta_smooth)
+    common.step_end("step8")
+    return k
+
+
+def _period(k: Kinematics, inp: Inputs, FPS: float) -> None:
+    omega_active = k.omega[k.active_mask & ~np.isnan(k.omega)]
+    med = float(np.nanmedian(np.abs(omega_active))) if omega_active.size else 0.0
+    k.T_primary = float(2 * np.pi / med) if med > 0 else 0.0
+    k.frequency_hz = 1.0 / k.T_primary if k.T_primary > 0 else 0.0
+    k.period_s = k.T_primary
+
+    # Longest contiguous active run, in seconds.
+    runs, cur = [], 0
+    for a in k.active_mask:
+        cur = cur + 1 if a else 0
+        if not a and cur:
+            runs.append(cur)
+    if cur:
+        runs.append(cur)
+    longest_s = float(max(runs, default=0)) / FPS
+
+    if longest_s < 3 * max(k.T_primary, 1e-9):
+        common.set_validation_flag("fft_skipped_insufficient_data")
+        k.T_fft = k.T_primary
+    else:
+        k.T_fft = _fft_period(k, FPS) or k.T_primary
+
+    k.period_discrepancy = (abs(k.T_primary - k.T_fft) / k.T_primary) if k.T_primary > 0 else 0.0
+    if k.period_discrepancy > 0.05:
+        common.set_validation_flag("period_mismatch")
+
+
+def _fft_period(k: Kinematics, FPS: float) -> float | None:
+    theta = k.theta_unwrapped[k.active_mask]
+    t = k.t_s[k.active_mask]
+    valid = ~np.isnan(theta)
+    if valid.sum() < 4:
+        return None
+    labeled, nseg = scipy.ndimage.label(valid)
+    segs = []
+    for i in range(1, nseg + 1):
+        m = labeled == i
+        st, sa = t[m], theta[m]
+        segs.append(sa - np.mean(sa))
+    if not segs or len(segs[0]) < 4:
+        return None
+    detr = np.concatenate(segs)
+    dt = 1.0 / FPS
+    fft_vals = np.abs(np.fft.rfft(detr))[1:]
+    fft_freqs = np.fft.rfftfreq(len(detr), dt)[1:]
+    if fft_freqs.size == 0:
+        return None
+    peak = float(fft_freqs[int(np.argmax(fft_vals))])
+    return 1.0 / peak if peak > 0 else None
+
+
+def _phases(k: Kinematics, inp: Inputs, FPS: float, theta_smooth) -> None:
+    n = inp.n_raw_frames
+    smoothed = scipy.ndimage.median_filter(k.omega, size=max(5, int(FPS * 0.5)), mode="nearest")
+    domega = _segmented(smoothed, lambda seg, m: np.gradient(seg, k.t_s[m]))
+    max_abs = float(np.nanmax(np.abs(domega))) if np.isfinite(domega).any() else 0.0
+    inc_thr, dec_thr = 0.10 * max_abs, -0.10 * max_abs
+
+    labels = np.full(n, "INACTIVE", dtype=object)
+    labels[k.active_mask] = "STABLE"
+    min_phase = max(1, int(0.5 * FPS))
+    cur, start = "STABLE", 0
+    for i in range(1, n):
+        if not k.active_mask[i]:
+            cur = "STABLE"
+            continue
+        new = "INCREASE" if domega[i] > inc_thr else "DECREASE" if domega[i] < dec_thr else "STABLE"
+        if new != cur:
+            if i - start >= min_phase:
+                labels[start:i] = cur
+            cur, start = new, i
+    labels[start:] = cur
+
+    stable_mask = labels == "STABLE"
+    segments, inseg, s0 = [], False, 0
+    for i in range(n):
+        if stable_mask[i] and not inseg:
+            inseg, s0 = True, i
+        elif not stable_mask[i] and inseg:
+            inseg = False
+            segments.append((s0, i))
+    if inseg:
+        segments.append((s0, n))
+
+    slopes, weights, r2s, errs = [], [], [], []
+    for a, b in segments:
+        m = np.zeros(n, dtype=bool)
+        m[a:b] = True
+        sel = m & ~np.isnan(k.theta_unwrapped)
+        if sel.sum() < 2:
+            continue
+        slope, _i, r2, _p, err = scipy.stats.linregress(k.t_s[sel], k.theta_unwrapped[sel])
+        if r2 < 0.99:
+            common.set_validation_flag("unstable_phase_linearity")
+        slopes.append(float(slope)); weights.append(float(sel.sum()))
+        r2s.append(float(r2)); errs.append(float(err))
+
+    stable_ac_mask = np.zeros(n, dtype=bool)
+    for a, b in segments:
+        stable_ac_mask[a:b] = True
+
+    if not slopes or stable_mask.sum() < FPS * 0.5:
+        common.set_validation_flag("no_stable_phase_detected")
+        oa = k.omega[k.active_mask & ~np.isnan(k.omega)]
+        k.stable_mean_omega = float(np.nanmedian(np.abs(oa))) if oa.size else 0.0
+        k.stable_omega_r2 = float("nan")
+        k.stable_omega_std_err = float("nan")
+    else:
+        w = np.array(weights)
+        k.stable_mean_omega = float(abs(np.average(slopes, weights=w)))
+        k.stable_omega_r2 = float(np.average(r2s, weights=w))
+        k.stable_omega_std_err = float(np.average(errs, weights=w))
+    k.stable_mean_ac = (float(np.nanmean(k.ac_m_s2[stable_ac_mask]))
+                        if stable_ac_mask.any() else k.mean_ac)
+    k.n_stable_segments = len(segments)
+    k.stable_segments = [[int(a), int(b)] for a, b in segments]
+    k.phase_labels = labels.tolist()
+
+    # Phase-boundary omega samples.
+    inc_start = inc_end = dec_end = None
+    i = 0
+    while i < n:
+        p = labels[i]
+        j = i
+        while j < n and labels[j] == p:
+            j += 1
+        if p == "INCREASE":
+            if inc_start is None:
+                for x in range(i, j):
+                    if not np.isnan(k.omega[x]):
+                        inc_start = float(k.omega[x]); break
+            for x in range(j - 1, i - 1, -1):
+                if not np.isnan(k.omega[x]):
+                    inc_end = float(k.omega[x]); break
+        elif p == "DECREASE":
+            for x in range(j - 1, i - 1, -1):
+                if not np.isnan(k.omega[x]):
+                    dec_end = float(k.omega[x]); break
+        i = j
+    k.increase_start_omega = inc_start
+    k.increase_end_omega = inc_end
+    k.decrease_end_omega = dec_end

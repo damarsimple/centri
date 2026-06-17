@@ -1,0 +1,279 @@
+---
+
+### Step 2 — ROI Detection & Crop (1 API Call, Cached)
+
+> **Purpose:** Crop the video to the region of interest before sending to the tracking API. A tight, object-centred crop eliminates background clutter that degrades SAM 2 mask propagation. All pixel coordinates downstream are in **cropped-video space**.
+>
+> **This step makes AT MOST 1 HTTP API call. If `api_cache.json` exists from a previous run, the API is NOT called at all (cache HIT).**
+> Crop-space trajectories are produced by subtracting the crop offset from full-frame coordinates — NOT by calling the API again.
+>
+> **Tracking is done by the remote server via `requests.post()`. Do NOT import or run any tracking model locally.**
+
+**2.1 — Load Cache or Call API (exactly once, ever)**
+
+```python
+import requests
+
+step_start("step2")
+
+CACHE_PATH = "analysis_output/data/api_cache.json"
+targets_json = json.dumps([tracked_label, ref_label])
+
+if os.path.exists(CACHE_PATH):
+    log("[API] Cache HIT — loading from api_cache.json (no API call)")
+    with open(CACHE_PATH) as f:
+        cache = json.load(f)
+    trajectories_full = cache["trajectories"]
+    video_info        = cache["video_info"]
+else:
+    log("[API] Cache MISS — calling tracking API (this is the ONLY API call)")
+    api_timeout = max(600, int(duration_s * 18))
+    log(f"[API] timeout={api_timeout}s")
+
+    with open(VIDEO_PATH, "rb") as vf:
+        resp = requests.post(
+            f"{TRACKING_API_URL}/track",
+            files={"file": ("input.mp4", vf, "video/mp4")},
+            data={"targets": targets_json},
+            timeout=api_timeout,
+        )
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"[ABORT] API returned {resp.status_code}: {resp.text[:500]}")
+
+    api_result = resp.json()
+    if api_result.get("status") != "success":
+        raise RuntimeError(f"[ABORT] API tracking failed: {api_result}")
+
+    trajectories_full = api_result["trajectories"]
+    video_info        = api_result["video_info"]
+
+    # Verify both labels were returned
+    missing = [l for l in [tracked_label, ref_label] if l not in trajectories_full]
+    if missing:
+        raise RuntimeError(f"[ABORT] API response missing trajectories for: {missing}. Available keys: {list(trajectories_full.keys())}")
+
+    with open(CACHE_PATH, "w") as f:
+        json.dump({
+            "video_file":    os.path.basename(VIDEO_PATH),
+            "trajectories":  trajectories_full,
+            "video_info":    video_info,
+        }, f)
+    log(f"[API] Cache saved → {CACHE_PATH}")
+
+# ── CRITICAL: Handle Auto-Rotation from FFmpeg ────────────────────────────
+# The API returns the raw codec dimensions in `video_info`.
+# However, ffmpeg (and our tracker) auto-rotates the decoded frames based on metadata.
+# If the rotation is ±90 or ±270, the display dimensions are swapped.
+# All tracking coordinates are natively in this display space.
+rotation = video_info.get("rotation", 0)
+if abs(rotation) in (90, 270):
+    FRAME_W = video_info["height"]
+    FRAME_H = video_info["width"]
+    log(f"[API] Video has {rotation}° rotation. Swapped dimensions to display space: {FRAME_W}x{FRAME_H}")
+else:
+    FRAME_W = video_info["width"]
+    FRAME_H = video_info["height"]
+
+NB_FRAMES = video_info["nb_frames"]
+FPS       = video_info["fps"]
+
+# FPS reconciliation — ffprobe is authoritative
+if abs(FPS - ffprobe_fps) / ffprobe_fps > 0.01:
+    log(f"[API] FPS mismatch: API={FPS:.3f}, ffprobe={ffprobe_fps:.3f}. Using ffprobe.")
+    FPS = ffprobe_fps
+
+# Detection counts
+for lbl in [tracked_label, ref_label]:
+    n = len([d for d in trajectories_full.get(lbl, []) if d.get("cx") is not None])
+    log(f"[API] '{lbl}' valid detections: {n} / {NB_FRAMES}")
+```
+
+**2.2 — Compute Orbit-Aware Crop Box**
+
+```python
+def compute_crop_box(trajectories, tracked_label, ref_label, fw, fh, pad=1.3):
+    """
+    Compute a padded bounding box that covers all detections of both labels.
+    Returns (x_off, y_off, crop_w, crop_h) with even dimensions (libx264 req).
+    """
+    all_bboxes = []
+    for label in [tracked_label, ref_label]:
+        for det in trajectories.get(label, []):
+            if det.get("bbox"):
+                all_bboxes.append(det["bbox"])
+
+    if not all_bboxes:
+        log("[ROI] No bboxes found — returning full frame.")
+        return (0, 0, fw, fh)
+
+    bboxes = np.array(all_bboxes, dtype=float)
+    env_x0, env_y0 = bboxes[:, 0].min(), bboxes[:, 1].min()
+    env_x1, env_y1 = bboxes[:, 2].max(), bboxes[:, 3].max()
+    env_cx = (env_x0 + env_x1) / 2
+    env_cy = (env_y0 + env_y1) / 2
+
+    crop_w = int(min((env_x1 - env_x0) * pad, fw))
+    crop_h = int(min((env_y1 - env_y0) * pad, fh))
+
+    crop_w = crop_w if crop_w % 2 == 0 else crop_w - 1
+    crop_h = crop_h if crop_h % 2 == 0 else crop_h - 1
+
+    x_off = int(max(0, min(env_cx - crop_w / 2, fw - crop_w)))
+    y_off = int(max(0, min(env_cy - crop_h / 2, fh - crop_h)))
+
+    x_off = max(0, min(x_off, fw - crop_w))
+    y_off = max(0, min(y_off, fh - crop_h))
+
+    return (x_off, y_off, crop_w, crop_h)
+
+pad      = 1.3
+crop_box = compute_crop_box(trajectories_full, tracked_label, ref_label, FRAME_W, FRAME_H, pad)
+```
+
+**2.3 — Crop Validation Loop (math only)**
+
+Validate the crop by transforming full-frame bounding boxes into crop-space. If validation fails, widen and retry.
+
+```python
+MAX_ITER           = 3
+COVERAGE_THRESHOLD = 0.80   # ≥ 80% of detections must land inside crop
+MARGIN_THRESHOLD   = 20     # px — bbox must not clip the crop boundary
+
+for iteration in range(1, MAX_ITER + 1):
+    x_off, y_off, crop_w, crop_h = crop_box
+    tracked_dets = trajectories_full.get(tracked_label, [])
+
+    total_detections = len(tracked_dets)
+    if total_detections == 0:
+        log("[ROI] No detections for tracked label — falling back to full frame.")
+        crop_box = (0, 0, FRAME_W, FRAME_H)
+        set_validation_flag("roi_crop_failed_fallback")
+        break
+
+    n_in_crop, margins = 0, []
+    for d in tracked_dets:
+        bx0, by0, bx1, by1 = d["bbox"]
+        cx0, cy0 = bx0 - x_off, by0 - y_off
+        cx1, cy1 = bx1 - x_off, by1 - y_off
+        ccx = (cx0 + cx1) / 2
+        ccy = (cy0 + cy1) / 2
+        if 0 <= ccx <= crop_w and 0 <= ccy <= crop_h:
+            n_in_crop += 1
+            m_left   = cx0 if x_off > 0 else 9999.0
+            m_top    = cy0 if y_off > 0 else 9999.0
+            m_right  = crop_w - cx1 if x_off + crop_w < FRAME_W else 9999.0
+            m_bottom = crop_h - cy1 if y_off + crop_h < FRAME_H else 9999.0
+            margins += [m_left, m_top, m_right, m_bottom]
+
+    coverage   = n_in_crop / total_detections
+    min_margin = float(np.min(margins)) if margins else 0.0
+
+    log(f"[ROI iter {iteration}] coverage={coverage:.2f}  min_margin={min_margin:.1f}px  crop={crop_box}")
+
+    if coverage >= COVERAGE_THRESHOLD and min_margin >= MARGIN_THRESHOLD:
+        log(f"[ROI] Accepted at iteration {iteration}.")
+        break
+
+    if coverage < COVERAGE_THRESHOLD:
+        log(f"[ROI] Low coverage ({coverage:.2f} < {COVERAGE_THRESHOLD}). Widening by 15%.")
+    else:
+        log(f"[ROI] Margin too small ({min_margin:.1f}px < {MARGIN_THRESHOLD}px). Widening by 15%.")
+
+    pad *= 1.15
+    crop_box = compute_crop_box(trajectories_full, tracked_label, ref_label, FRAME_W, FRAME_H, pad)
+
+    if iteration == MAX_ITER:
+        set_validation_flag("roi_crop_failed_fallback")
+        log("[ROI] All iterations exhausted — falling back to full frame.")
+        crop_box = (0, 0, FRAME_W, FRAME_H)
+
+x_off, y_off, crop_w, crop_h = crop_box
+use_full_frame = (crop_box == (0, 0, FRAME_W, FRAME_H))
+```
+
+**2.4 — Transform Trajectories & Crop Video**
+
+```python
+def transform_to_crop_space(trajectories_full, x_off, y_off):
+    cropped = {}
+    for label, dets in trajectories_full.items():
+        cropped[label] = []
+        for d in dets:
+            bx0, by0, bx1, by1 = d["bbox"]
+            new_det = {
+                "frame": d["frame"],
+                "cx":    d["cx"] - x_off,
+                "cy":    d["cy"] - y_off,
+                "bbox":  [bx0 - x_off, by0 - y_off, bx1 - x_off, by1 - y_off],
+            }
+            if "obox" in d:
+                new_det["obox"] = [[p[0] - x_off, p[1] - y_off] for p in d["obox"]]
+            cropped[label].append(new_det)
+    return cropped
+
+MIN_VIDEO_BYTES = 50_000
+
+if use_full_frame:
+    trajectories       = trajectories_full
+    final_cropped_path = VIDEO_PATH
+    log(f"[ROI] Full-frame path — no ffmpeg crop. Using: {VIDEO_PATH}")
+    assert_file_exists(VIDEO_PATH, min_bytes=MIN_VIDEO_BYTES, label="source_video")
+else:
+    trajectories       = transform_to_crop_space(trajectories_full, x_off, y_off)
+    final_cropped_path = "analysis_output/roi/cropped.mp4"
+
+    log(f"[ROI] Cropping {FRAME_W}x{FRAME_H} → {crop_w}x{crop_h} @ offset ({x_off},{y_off})")
+
+    ffmpeg_crop = subprocess.run([
+        "ffmpeg", "-y", "-i", VIDEO_PATH,
+        "-vf",    f"crop={crop_w}:{crop_h}:{x_off}:{y_off}",
+        "-c:v",   "libx264", "-crf", "18", "-preset", "fast",
+        final_cropped_path
+    ], capture_output=True, text=True)
+
+    if ffmpeg_crop.returncode != 0:
+        raise RuntimeError(f"[ABORT] ffmpeg crop failed:\n{ffmpeg_crop.stderr}")
+
+    assert_file_exists(final_cropped_path, min_bytes=MIN_VIDEO_BYTES, label="cropped.mp4")
+
+    crop_stream = ffprobe_video(final_cropped_path)
+    actual_w, actual_h = int(crop_stream["width"]), int(crop_stream["height"])
+
+    if actual_w != crop_w or actual_h != crop_h:
+        raise RuntimeError(f"[ABORT] Cropped video dimensions mismatch: expected {crop_w}x{crop_h}, got {actual_w}x{actual_h}.")
+
+    actual_nb = int(crop_stream.get("nb_frames", 0))
+    if actual_nb < 1:
+        raise RuntimeError(f"[ABORT] Cropped video reports 0 frames: {final_cropped_path}")
+
+    log(f"[ROI] Cropped video verified: {actual_w}x{actual_h}, {actual_nb} frames — {final_cropped_path}")
+```
+
+**2.5 — Store Crop Metadata**
+
+```python
+crop_meta = {
+    "x_off":               x_off,
+    "y_off":               y_off,
+    "crop_w":              crop_w,
+    "crop_h":              crop_h,
+    "pad":                 pad,
+    "iterations":          iteration,
+    "final_coverage":      coverage,
+    "final_min_margin":    min_margin,
+    "source_video":        VIDEO_PATH,
+    "cropped_video":       final_cropped_path,
+    "original_frame_size": [FRAME_W, FRAME_H],
+    "fallback":            use_full_frame,
+}
+
+with open("analysis_output/roi/crop_meta.json", "w") as f:
+    json.dump(crop_meta, f, indent=2)
+
+with open("analysis_output/data/roi_crop_meta.json", "w") as f:
+    json.dump(crop_meta, f, indent=2)
+
+step_end("step2")
+```
+

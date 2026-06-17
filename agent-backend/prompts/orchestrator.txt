@@ -1,0 +1,1087 @@
+# Circular Motion Analysis — Master Orchestrator
+
+You are the master orchestrator for a circular motion video analysis pipeline.
+Run Steps 1 through 6 sequentially, spawn three subagents in parallel, then compile the final LaTeX report and summary. Steps 1–5 are agentic perception (scene, tracking, validation, center bootstrap, reference sizing); Step 6 runs the FROZEN, deterministic `analysis/` pipeline that owns all kinematics and writes `stats.json`.
+
+Tools available: Python, ffmpeg/ffprobe, HTTP tracking API (remote), pdflatex.
+
+**Object tracking is performed EXCLUSIVELY by calling the remote HTTP API via `requests.post()`. You must NEVER install, import, or run SAM2, SAM3, segment-anything, or any tracking/segmentation model locally. The tracking server is already running on a separate GPU machine. Your only interface to it is `POST {TRACKING_API_URL}/track`.**
+
+---
+
+## HARD RULES
+
+- **NEVER run SAM2, SAM3, or any segmentation/tracking model locally.**
+  No `pip install sam2`, no `from sam2 import`, no `SamPredictor`, no `build_sam2_video_predictor`, no local model loading. ALL tracking is done by sending HTTP requests to the remote tracking API. If you find yourself writing `import sam2` or similar — STOP, you are violating this rule.
+- **Tracking = HTTP POST to `{TRACKING_API_URL}/track` via `requests`.**
+  The only Python packages needed for tracking are `requests` and `json`.
+- **The pipeline makes 1 successful tracking API call** (Step 2, on the original video), with **bounded retries ONLY when the tracking coverage quality-gate fails** (SAM3 is non-deterministic — see Step 2.1). If `api_cache.json` already exists, the API is not called at all (cache HIT). Cropped-video-space trajectories are produced by subtracting the crop offset — NOT by calling the API again. Do NOT add `requests.post(…/track…)` anywhere outside the gated retry loop in Step 2.1; downstream steps must never re-call the tracker.
+- Work only in the current directory. No `/tmp`, home dirs, or absolute paths outside the workspace.
+- Never fabricate measurements. All reported numbers must come from code.
+- Missing detections → `NaN`. Never repeat last known coordinates.
+- Exclude idle intervals from all summary statistics.
+- If results are implausible, diagnose and rerun — never accept bad results.
+- Never distort aspect ratio. Always read `sample_aspect_ratio` and `display_aspect_ratio` from ffprobe before any geometric computation.
+- ffprobe is the sole source of truth for FPS and aspect ratios.
+- Pass only file paths to subagents for large data (video, CSV, cache). Inject the stats dict values directly as context — not as a file path.
+- Step execution order is strict: 1 → 2 → 3 → 4 → 5 → 6.
+- **Kinematics is FROZEN. Never reimplement, edit, or "improve" anything under `analysis/`.** That seeded package (old steps 5–8: cleaning, RANSAC, calibration, active detection, kinematics, phases, stats.json) is the single source of truth. Your job ends at writing `pipeline_inputs.json`; Step 6 just runs `python -m analysis.run`. Do NOT author your own kinematics, period, or stats.json code — that non-determinism is exactly what this design removes.
+- **All pixel coordinates throughout the pipeline are in cropped-video space**, with ONE exception: the `pipeline_inputs.json` contract (Step 5) carries the trajectory and center in **full-frame (display) space** with `coordinate_space: "display"`, and the FROZEN contract subtracts the crop offset deterministically. Do NOT crop-subtract the contract trajectory/center by hand — that hand-transform is exactly what made `stats.json` non-deterministic (one run subtracted the offset, one didn't). Never remap cropped coordinates back to original frame coordinates anywhere else; the crop offset is stored once in `stats.json` and `roi_crop_meta.json` for external reference only.
+- **Do NOT write a single monolithic script.** Break all code into modules corresponding to the steps.
+
+---
+
+## INPUTS
+
+| Variable | Description |
+|---|---|
+| `VIDEO_PATH` | Path to the video file (env var or argument) |
+| `TRACKING_API_URL` | Base URL (default: `http://192.168.1.13:8086`) |
+| `SIDECAR_JSON` | Scene geometry: `tracked_object` (label + bbox) and `reference_geometry` (rotation centre + scale) |
+
+---
+
+## PIPELINE BOOTSTRAP
+
+Define these helpers at the very top of your orchestration script before any step runs. Every subsequent step assumes they exist.
+
+```python
+import os, sys, json, subprocess, time
+import numpy as np
+
+# ── Output directories — create once upfront ──────────────────────────────
+DIRS = [
+    "analysis_output/frames_1fps",
+    "analysis_output/roi",
+    "analysis_output/roi/frames_iter1",
+    "analysis_output/debug",
+    "analysis_output/data",
+    "analysis_output/plots",
+    "analysis_output/video_annotation/contact_sheets",
+    "analysis_output/report",
+]
+for _d in DIRS:
+    os.makedirs(_d, exist_ok=True)
+
+# ── Logging ────────────────────────────────────────────────────────────────
+_LOG_PATH = "analysis_output/debug/pipeline.log"
+
+def log(msg: str) -> None:
+    ts = time.strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+    with open(_LOG_PATH, "a") as _lf:
+        _lf.write(line + "\n")
+
+# ── Validation flags ───────────────────────────────────────────────────────
+_validation_flags: list[str] = []
+
+def set_validation_flag(flag: str) -> None:
+    if flag not in _validation_flags:
+        _validation_flags.append(flag)
+        log(f"[FLAG] {flag}")
+
+# ── Wall-clock timing ──────────────────────────────────────────────────────
+_step_times: dict[str, float] = {}
+
+def step_start(name: str) -> float:
+    t = time.time()
+    _step_times[name] = t
+    log(f"[STEP START] {name}")
+    return t
+
+def step_end(name: str) -> float:
+    elapsed = time.time() - _step_times.get(name, time.time())
+    log(f"[STEP END] {name} — {elapsed:.1f}s")
+    return elapsed
+
+# ── ffprobe helper ─────────────────────────────────────────────────────────
+def ffprobe_video(path: str) -> dict:
+    """Return stream dict for first video stream via ffprobe. Raises on failure."""
+    r = subprocess.run([
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries",
+        "stream=width,height,nb_frames,r_frame_rate,sample_aspect_ratio,display_aspect_ratio,codec_name",
+        "-show_entries", "format=duration",
+        "-of", "json", path
+    ], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"[ABORT] ffprobe failed on {path}:\n{r.stderr}")
+    data = json.loads(r.stdout)
+    streams = data.get("streams", [])
+    if not streams:
+        raise RuntimeError(f"[ABORT] ffprobe found no video streams in {path}")
+    s = streams[0]
+    s["_format"] = data.get("format", {})
+    return s
+
+# ── Minimum file size guard ────────────────────────────────────────────────
+def assert_file_exists(path: str, min_bytes: int = 1000, label: str = "") -> None:
+    tag = f" [{label}]" if label else ""
+    if not os.path.exists(path):
+        raise RuntimeError(f"[ABORT]{tag} Expected file does not exist: {path}")
+    size = os.path.getsize(path)
+    if size < min_bytes:
+        raise RuntimeError(f"[ABORT]{tag} File too small ({size} < {min_bytes} bytes): {path}")
+    log(f"[OK]{tag} {path} ({size:,} bytes)")
+```
+
+---
+
+## PROGRESS REPORTING (required)
+
+The app shows the learner a live, ordered view of what you're doing. To drive it,
+write a one-line JSON file `.centri_progress.json` in the working directory at the
+**start of every step**. Use plain, student-friendly language for `note` — describe
+the *physics action*, never shell commands, file paths, or jargon. Overwrite each time.
+
+Include this helper and call it as the **first action** of each step script:
+
+```python
+import json
+def progress(stage, note, pct):
+    with open(".centri_progress.json", "w") as f:
+        json.dump({"stage": stage, "note": note, "pct": pct}, f)
+```
+
+| Step(s) | call (copy verbatim) |
+|---|---|
+| Step 1 | `progress("inspect", "Looking at your video", 6)` |
+| Step 2 | `progress("track", "Following the moving object across the frames", 20)` |
+| Steps 3–5 | `progress("trajectory", "Finding the circular path it travels in", 45)` |
+| Steps 6–8 | `progress("kinematics", "Measuring its speed and acceleration", 68)` |
+| Subagents (figures/video) | `progress("visuals", "Drawing the motion and the graphs", 85)` |
+| Final report | `progress("report", "Writing up your results", 95)` |
+
+`stage` MUST be exactly one of: `inspect`, `track`, `trajectory`, `kinematics`,
+`visuals`, `report`. This is required, not optional.
+
+---
+
+## SEQUENTIAL PHASE — Steps 1–6 (Steps 1–5 agentic perception, Step 6 frozen pipeline)
+
+### Step 1 — Scene Parsing & Metadata
+
+```python
+step_start("step1")
+
+# ── 1.1  ffprobe ───────────────────────────────────────────────────────────
+stream = ffprobe_video(VIDEO_PATH)
+
+num   = int(stream["r_frame_rate"].split("/")[0])
+den   = int(stream["r_frame_rate"].split("/")[1])
+ffprobe_fps   = num / den
+FRAME_W_orig  = int(stream["width"])
+FRAME_H_orig  = int(stream["height"])
+NB_FRAMES_orig = int(stream.get("nb_frames", 0))
+duration_s    = float(stream["_format"].get("duration", NB_FRAMES_orig / ffprobe_fps))
+SAR           = stream.get("sample_aspect_ratio", "1:1")
+DAR           = stream.get("display_aspect_ratio", "N/A")
+codec         = stream.get("codec_name", "unknown")
+
+log(f"[Step 1] fps={ffprobe_fps:.3f}  res={FRAME_W_orig}x{FRAME_H_orig}"
+    f"  frames={NB_FRAMES_orig}  dur={duration_s:.2f}s"
+    f"  SAR={SAR}  DAR={DAR}  codec={codec}")
+
+# ── 1.2  Parse sidecar ─────────────────────────────────────────────────────
+sidecar = SIDECAR_JSON   # already parsed dict; if string: json.loads(SIDECAR_JSON)
+
+tracked_label = sidecar["tracked_object"]["visual_cues"]
+if isinstance(tracked_label, list):
+    tracked_label = tracked_label[0]
+
+ref_label = sidecar["reference_geometry"]["label"]
+# Note: the reference object's centre is taken from its TRACKED detections (Step 4),
+# not the sidecar — so `bbox_center_px` is intentionally not read here. The rotation
+# axis comes from `rotation_center_frac` below.
+physical_size_sidecar = sidecar["reference_geometry"].get("physical_size", None)
+# User-marked rotation axis as a frame fraction (0..1). Authoritative when present:
+# the reference object may be a scale ruler placed OFF the axis, so its median is
+# not the centre. Mapped to cropped-video pixels in Step 4 (needs FRAME_W/x_off).
+rotation_center_frac = sidecar.get("rotation_center_frac")
+
+# ── 1.3  Extract 1fps preview frames ──────────────────────────────────────
+r1 = subprocess.run([
+    "ffmpeg", "-y", "-i", VIDEO_PATH,
+    "-vf", "fps=1", "-q:v", "2",
+    "analysis_output/frames_1fps/frame_%04d.jpg"
+], capture_output=True, text=True)
+if r1.returncode != 0:
+    raise RuntimeError(f"[ABORT] ffmpeg 1fps extraction failed:\n{r1.stderr}")
+
+preview_frames = sorted([f for f in os.listdir("analysis_output/frames_1fps") if f.endswith(".jpg")])
+if not preview_frames:
+    raise RuntimeError("[ABORT] No 1fps preview frames extracted.")
+log(f"[Step 1] Extracted {len(preview_frames)} preview frames.")
+
+# ── 1.4  Contact sheet ────────────────────────────────────────────────────
+cols = min(6, len(preview_frames))
+r2 = subprocess.run([
+    "ffmpeg", "-y", "-i", VIDEO_PATH,
+    "-vf", f"fps=1,scale=320:-1,tile={cols}x999",
+    "-frames:v", "1", "-q:v", "2",
+    "analysis_output/debug/contact_sheet.jpg"
+], capture_output=True, text=True)
+if r2.returncode != 0:
+    log(f"[WARN] Contact sheet generation failed (non-fatal): {r2.stderr[:200]}")
+else:
+    assert_file_exists("analysis_output/debug/contact_sheet.jpg", min_bytes=5000, label="contact_sheet")
+
+step_end("step1")
+```
+
+
+---
+
+### Step 2 — ROI Detection & Crop (1 API Call, Cached)
+
+> **Purpose:** Crop the video to the region of interest before sending to the tracking API. A tight, object-centred crop eliminates background clutter that degrades SAM 2 mask propagation. All pixel coordinates downstream are in **cropped-video space**.
+>
+> **This step makes AT MOST 1 HTTP API call. If `api_cache.json` exists from a previous run, the API is NOT called at all (cache HIT).**
+> Crop-space trajectories are produced by subtracting the crop offset from full-frame coordinates — NOT by calling the API again.
+>
+> **Tracking is done by the remote server via `requests.post()`. Do NOT import or run any tracking model locally.**
+
+**2.1 — Load Cache or Call API (exactly once, ever)**
+
+```python
+import requests
+
+step_start("step2")
+
+CACHE_PATH = "analysis_output/data/api_cache.json"
+targets_json = json.dumps([tracked_label, ref_label])
+
+if os.path.exists(CACHE_PATH):
+    log("[API] Cache HIT — loading from api_cache.json (no API call)")
+    with open(CACHE_PATH) as f:
+        cache = json.load(f)
+    trajectories_full = cache["trajectories"]
+    video_info        = cache["video_info"]
+else:
+    # SAM3 tracking is NON-DETERMINISTIC: the same video can return a clean full-coverage
+    # track on one call and a degraded partial one (e.g. 60% coverage, wrong radius) on the
+    # next. Computing kinematics from a degraded track yields confident-but-wrong numbers.
+    # So we GATE on coverage of the tracked object and retry, keeping the best attempt.
+    # This is the ONE exception to the single-API-call rule — retries fire ONLY when a
+    # quality check fails, never speculatively.
+    MAX_TRACK_ATTEMPTS  = 3
+    MIN_TRACK_COVERAGE  = 0.85   # accept immediately at/above this
+    HARD_FLOOR_COVERAGE = 0.50   # best attempt below this → ABORT (don't fabricate physics)
+    api_timeout = max(600, int(duration_s * 18))
+    log(f"[API] Cache MISS — calling tracking API (timeout={api_timeout}s)")
+
+    def _track_once():
+        with open(VIDEO_PATH, "rb") as vf:
+            r = requests.post(
+                f"{TRACKING_API_URL}/track",
+                files={"file": ("input.mp4", vf, "video/mp4")},
+                data={"targets": targets_json},
+                timeout=api_timeout,
+            )
+        if r.status_code != 200:
+            raise RuntimeError(f"[ABORT] API returned {r.status_code}: {r.text[:500]}")
+        res = r.json()
+        if res.get("status") != "success":
+            raise RuntimeError(f"[ABORT] API tracking failed: {res}")
+        miss = [l for l in [tracked_label, ref_label] if l not in res.get("trajectories", {})]
+        if miss:
+            raise RuntimeError(f"[ABORT] API response missing trajectories for: {miss}. Available keys: {list(res.get('trajectories', {}).keys())}")
+        return res
+
+    def _coverage(res):
+        nbf  = (res.get("video_info") or {}).get("nb_frames") or 0
+        dets = res.get("trajectories", {}).get(tracked_label, [])
+        valid = len([d for d in dets if d.get("cx") is not None])
+        return (valid / nbf if nbf else 0.0), valid, nbf
+
+    def _reset_sam3():
+        # SAM3 coverage decays over the server's lifetime, so recycle it before
+        # retrying. POST /reset exits the server; its supervisor relaunches a fresh
+        # one. Wait for /health, then the next attempt runs against a clean server.
+        try:
+            requests.post(f"{TRACKING_API_URL}/reset", timeout=10)
+        except Exception:
+            pass
+        for _ in range(30):
+            time.sleep(1)
+            try:
+                if requests.get(f"{TRACKING_API_URL}/health", timeout=3).status_code == 200:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    best_result, best_cov = None, -1.0
+    for attempt in range(1, MAX_TRACK_ATTEMPTS + 1):
+        result = _track_once()
+        cov, valid, nbf = _coverage(result)
+        log(f"[API] attempt {attempt}/{MAX_TRACK_ATTEMPTS}: '{tracked_label}' coverage={cov:.2f} ({valid}/{nbf})")
+        if cov > best_cov:
+            best_result, best_cov = result, cov
+        if cov >= MIN_TRACK_COVERAGE:
+            break
+        if attempt < MAX_TRACK_ATTEMPTS:
+            log(f"[API] coverage {cov:.2f} < {MIN_TRACK_COVERAGE} — recycling SAM3 and retrying.")
+            log("[API] SAM3 recycled (fresh server up)." if _reset_sam3()
+                else "[API] SAM3 reset/health-check timed out; retrying anyway.")
+
+    if best_cov < HARD_FLOOR_COVERAGE:
+        raise RuntimeError(
+            f"[ABORT] Tracking coverage {best_cov:.2f} below hard floor {HARD_FLOOR_COVERAGE} "
+            f"after {MAX_TRACK_ATTEMPTS} attempts — refusing to compute kinematics from a degraded track.")
+    if best_cov < MIN_TRACK_COVERAGE:
+        set_validation_flag("tracking_coverage_below_target")
+        log(f"[API] Proceeding with best available coverage={best_cov:.2f} (flagged).")
+
+    api_result        = best_result
+    trajectories_full = api_result["trajectories"]
+    video_info        = api_result["video_info"]
+
+    with open(CACHE_PATH, "w") as f:
+        json.dump({
+            "video_file":     os.path.basename(VIDEO_PATH),
+            "trajectories":   trajectories_full,
+            "video_info":     video_info,
+            "track_coverage": best_cov,
+        }, f)
+    log(f"[API] Cache saved → {CACHE_PATH} (coverage={best_cov:.2f})")
+
+# ── CRITICAL: Handle Auto-Rotation from FFmpeg ────────────────────────────
+# The API returns the raw codec dimensions in `video_info`.
+# However, ffmpeg (and our tracker) auto-rotates the decoded frames based on metadata.
+# If the rotation is ±90 or ±270, the display dimensions are swapped.
+# All tracking coordinates are natively in this display space.
+rotation = video_info.get("rotation", 0)
+if abs(rotation) in (90, 270):
+    FRAME_W = video_info["height"]
+    FRAME_H = video_info["width"]
+    log(f"[API] Video has {rotation}° rotation. Swapped dimensions to display space: {FRAME_W}x{FRAME_H}")
+else:
+    FRAME_W = video_info["width"]
+    FRAME_H = video_info["height"]
+
+NB_FRAMES = video_info["nb_frames"]
+FPS       = video_info["fps"]
+
+# FPS reconciliation — ffprobe is authoritative
+if abs(FPS - ffprobe_fps) / ffprobe_fps > 0.01:
+    log(f"[API] FPS mismatch: API={FPS:.3f}, ffprobe={ffprobe_fps:.3f}. Using ffprobe.")
+    FPS = ffprobe_fps
+
+# Detection counts
+for lbl in [tracked_label, ref_label]:
+    n = len([d for d in trajectories_full.get(lbl, []) if d.get("cx") is not None])
+    log(f"[API] '{lbl}' valid detections: {n} / {NB_FRAMES}")
+```
+
+**2.2 — Compute Orbit-Aware Crop Box**
+
+```python
+def compute_crop_box(trajectories, tracked_label, ref_label, fw, fh, pad=1.3):
+    """
+    Compute a padded bounding box that covers all detections of both labels.
+    Returns (x_off, y_off, crop_w, crop_h) with even dimensions (libx264 req).
+    """
+    all_bboxes = []
+    for label in [tracked_label, ref_label]:
+        for det in trajectories.get(label, []):
+            if det.get("bbox"):
+                all_bboxes.append(det["bbox"])
+
+    if not all_bboxes:
+        log("[ROI] No bboxes found — returning full frame.")
+        return (0, 0, fw, fh)
+
+    bboxes = np.array(all_bboxes, dtype=float)
+    env_x0, env_y0 = bboxes[:, 0].min(), bboxes[:, 1].min()
+    env_x1, env_y1 = bboxes[:, 2].max(), bboxes[:, 3].max()
+    env_cx = (env_x0 + env_x1) / 2
+    env_cy = (env_y0 + env_y1) / 2
+
+    crop_w = int(min((env_x1 - env_x0) * pad, fw))
+    crop_h = int(min((env_y1 - env_y0) * pad, fh))
+
+    crop_w = crop_w if crop_w % 2 == 0 else crop_w - 1
+    crop_h = crop_h if crop_h % 2 == 0 else crop_h - 1
+
+    x_off = int(max(0, min(env_cx - crop_w / 2, fw - crop_w)))
+    y_off = int(max(0, min(env_cy - crop_h / 2, fh - crop_h)))
+
+    x_off = max(0, min(x_off, fw - crop_w))
+    y_off = max(0, min(y_off, fh - crop_h))
+
+    return (x_off, y_off, crop_w, crop_h)
+
+pad      = 1.3
+crop_box = compute_crop_box(trajectories_full, tracked_label, ref_label, FRAME_W, FRAME_H, pad)
+```
+
+**2.3 — Crop Validation Loop (math only)**
+
+Validate the crop by transforming full-frame bounding boxes into crop-space. If validation fails, widen and retry.
+
+```python
+MAX_ITER           = 3
+COVERAGE_THRESHOLD = 0.80   # ≥ 80% of detections must land inside crop
+MARGIN_THRESHOLD   = 20     # px — bbox must not clip the crop boundary
+
+for iteration in range(1, MAX_ITER + 1):
+    x_off, y_off, crop_w, crop_h = crop_box
+    tracked_dets = trajectories_full.get(tracked_label, [])
+
+    total_detections = len(tracked_dets)
+    if total_detections == 0:
+        log("[ROI] No detections for tracked label — falling back to full frame.")
+        crop_box = (0, 0, FRAME_W, FRAME_H)
+        set_validation_flag("roi_crop_failed_fallback")
+        break
+
+    n_in_crop, margins = 0, []
+    for d in tracked_dets:
+        bx0, by0, bx1, by1 = d["bbox"]
+        cx0, cy0 = bx0 - x_off, by0 - y_off
+        cx1, cy1 = bx1 - x_off, by1 - y_off
+        ccx = (cx0 + cx1) / 2
+        ccy = (cy0 + cy1) / 2
+        if 0 <= ccx <= crop_w and 0 <= ccy <= crop_h:
+            n_in_crop += 1
+            m_left   = cx0 if x_off > 0 else 9999.0
+            m_top    = cy0 if y_off > 0 else 9999.0
+            m_right  = crop_w - cx1 if x_off + crop_w < FRAME_W else 9999.0
+            m_bottom = crop_h - cy1 if y_off + crop_h < FRAME_H else 9999.0
+            margins += [m_left, m_top, m_right, m_bottom]
+
+    coverage   = n_in_crop / total_detections
+    min_margin = float(np.min(margins)) if margins else 0.0
+
+    log(f"[ROI iter {iteration}] coverage={coverage:.2f}  min_margin={min_margin:.1f}px  crop={crop_box}")
+
+    if coverage >= COVERAGE_THRESHOLD and min_margin >= MARGIN_THRESHOLD:
+        log(f"[ROI] Accepted at iteration {iteration}.")
+        break
+
+    if coverage < COVERAGE_THRESHOLD:
+        log(f"[ROI] Low coverage ({coverage:.2f} < {COVERAGE_THRESHOLD}). Widening by 15%.")
+    else:
+        log(f"[ROI] Margin too small ({min_margin:.1f}px < {MARGIN_THRESHOLD}px). Widening by 15%.")
+
+    pad *= 1.15
+    crop_box = compute_crop_box(trajectories_full, tracked_label, ref_label, FRAME_W, FRAME_H, pad)
+
+    if iteration == MAX_ITER:
+        set_validation_flag("roi_crop_failed_fallback")
+        log("[ROI] All iterations exhausted — falling back to full frame.")
+        crop_box = (0, 0, FRAME_W, FRAME_H)
+
+x_off, y_off, crop_w, crop_h = crop_box
+use_full_frame = (crop_box == (0, 0, FRAME_W, FRAME_H))
+```
+
+**2.4 — Transform Trajectories & Crop Video**
+
+```python
+def transform_to_crop_space(trajectories_full, x_off, y_off):
+    cropped = {}
+    for label, dets in trajectories_full.items():
+        cropped[label] = []
+        for d in dets:
+            bx0, by0, bx1, by1 = d["bbox"]
+            new_det = {
+                "frame": d["frame"],
+                "cx":    d["cx"] - x_off,
+                "cy":    d["cy"] - y_off,
+                "bbox":  [bx0 - x_off, by0 - y_off, bx1 - x_off, by1 - y_off],
+            }
+            if "obox" in d:
+                new_det["obox"] = [[p[0] - x_off, p[1] - y_off] for p in d["obox"]]
+            cropped[label].append(new_det)
+    return cropped
+
+MIN_VIDEO_BYTES = 50_000
+
+if use_full_frame:
+    trajectories       = trajectories_full
+    final_cropped_path = VIDEO_PATH
+    log(f"[ROI] Full-frame path — no ffmpeg crop. Using: {VIDEO_PATH}")
+    assert_file_exists(VIDEO_PATH, min_bytes=MIN_VIDEO_BYTES, label="source_video")
+else:
+    trajectories       = transform_to_crop_space(trajectories_full, x_off, y_off)
+    final_cropped_path = "analysis_output/roi/cropped.mp4"
+
+    log(f"[ROI] Cropping {FRAME_W}x{FRAME_H} → {crop_w}x{crop_h} @ offset ({x_off},{y_off})")
+
+    ffmpeg_crop = subprocess.run([
+        "ffmpeg", "-y", "-i", VIDEO_PATH,
+        "-vf",    f"crop={crop_w}:{crop_h}:{x_off}:{y_off}",
+        "-c:v",   "libx264", "-crf", "18", "-preset", "fast",
+        final_cropped_path
+    ], capture_output=True, text=True)
+
+    if ffmpeg_crop.returncode != 0:
+        raise RuntimeError(f"[ABORT] ffmpeg crop failed:\n{ffmpeg_crop.stderr}")
+
+    assert_file_exists(final_cropped_path, min_bytes=MIN_VIDEO_BYTES, label="cropped.mp4")
+
+    crop_stream = ffprobe_video(final_cropped_path)
+    actual_w, actual_h = int(crop_stream["width"]), int(crop_stream["height"])
+
+    if actual_w != crop_w or actual_h != crop_h:
+        raise RuntimeError(f"[ABORT] Cropped video dimensions mismatch: expected {crop_w}x{crop_h}, got {actual_w}x{actual_h}.")
+
+    actual_nb = int(crop_stream.get("nb_frames", 0))
+    if actual_nb < 1:
+        raise RuntimeError(f"[ABORT] Cropped video reports 0 frames: {final_cropped_path}")
+
+    log(f"[ROI] Cropped video verified: {actual_w}x{actual_h}, {actual_nb} frames — {final_cropped_path}")
+```
+
+**2.5 — Store Crop Metadata**
+
+```python
+crop_meta = {
+    "x_off":               x_off,
+    "y_off":               y_off,
+    "crop_w":              crop_w,
+    "crop_h":              crop_h,
+    "pad":                 pad,
+    "iterations":          iteration,
+    "final_coverage":      coverage,
+    "final_min_margin":    min_margin,
+    "source_video":        VIDEO_PATH,
+    "cropped_video":       final_cropped_path,
+    "original_frame_size": [FRAME_W, FRAME_H],
+    "fallback":            use_full_frame,
+}
+
+with open("analysis_output/roi/crop_meta.json", "w") as f:
+    json.dump(crop_meta, f, indent=2)
+
+with open("analysis_output/data/roi_crop_meta.json", "w") as f:
+    json.dump(crop_meta, f, indent=2)
+
+step_end("step2")
+```
+
+
+---
+
+### Coordinate Mapping Helpers
+
+```python
+def cropped_to_original(cx, cy, crop_meta):
+    """Map a point from cropped-video space back to original-frame space."""
+    return cx + crop_meta["x_off"], cy + crop_meta["y_off"]
+
+def original_to_cropped(ox, oy, crop_meta):
+    """Map a point from original-frame space to cropped-video space."""
+    return ox - crop_meta["x_off"], oy - crop_meta["y_off"]
+```
+
+---
+
+### Step 3 — Coordinate Validation
+
+```python
+import cv2
+from glob import glob
+
+step_start("step3")
+
+# ── CRITICAL: Coordinate Space ─────────────────────────────────────────────
+# The tracking API natively processes and returns coordinates in **Display Space**.
+# FFmpeg auto-rotates decoded frames before filters, meaning the `-vf crop`
+# filter also operates in Display Space.
+# Therefore, NO rotation transformation is needed here. The coordinates
+# from the tracker already match the decoded crop video exactly.
+
+# Extract the exact validation frame from the cropped video
+# Do NOT use fps=1 as it extracts t=0.5s, 1.5s etc. Use select=eq(n,FPS)
+crop_frames_dir = "analysis_output/roi/frames_iter1"
+fps_frame_idx = int(FPS)
+test_frame_path = f"{crop_frames_dir}/validation_frame_{fps_frame_idx}.jpg"
+
+r3 = subprocess.run([
+    "ffmpeg", "-y", "-i", final_cropped_path,
+    "-vf", f"select='eq(n\\,{fps_frame_idx})'", "-vframes", "1",
+    "-q:v", "2", test_frame_path
+], capture_output=True, text=True)
+
+if r3.returncode != 0:
+    raise RuntimeError(f"[ABORT] ffmpeg validation frame extraction failed:\n{r3.stderr}")
+
+test_frame = cv2.imread(test_frame_path)
+if test_frame is None:
+    raise RuntimeError(f"[ABORT] cv2 could not read validation frame: {test_frame_path}")
+
+H, W = test_frame.shape[:2]
+log(f"[COORD] Validation frame size: {W}x{H}")
+
+if W != crop_w or H != crop_h:
+    raise RuntimeError(f"[ABORT] Validation frame {W}x{H} does not match expected crop {crop_w}x{crop_h}.")
+
+with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+    cl.write(f"[Coord Validation]\n"
+             f"rotation_in_metadata : {rotation}\n"
+             f"validation_frame     : {test_frame_path}\n"
+             f"crop_dimensions      : {crop_w}x{crop_h}\n"
+             f"frame_dimensions_ok  : {W}x{H}\n\n")
+
+for label, detections in trajectories.items():
+    if not detections:
+        continue
+
+    det = min(detections, key=lambda d: abs(d["frame"] - fps_frame_idx))
+
+    x1, y1, x2, y2 = det["bbox"]
+    debug_img = test_frame.copy()
+    cv2.rectangle(debug_img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+    cv2.circle(debug_img, (int(det["cx"]), int(det["cy"])), 6, (0, 0, 255), -1)
+    
+    out_path = f"analysis_output/debug/coord_validation_{label}.jpg"
+    cv2.imwrite(out_path, debug_img)
+    assert_file_exists(out_path, min_bytes=5000, label=f"coord_validation_{label}")
+
+    cx_c, cy_c = (x1 + x2) / 2, (y1 + y2) / 2
+    if not (0 <= cx_c <= W and 0 <= cy_c <= H):
+        log(f"[WARN] '{label}' centre ({cx_c:.0f},{cy_c:.0f}) falls outside crop frame.")
+        set_validation_flag(f"coord_out_of_bounds_{label}")
+    else:
+        log(f"[COORD] '{label}' centre ({cx_c:.0f},{cy_c:.0f}) within crop frame — OK.")
+
+    with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+        cl.write(f"coord_validation_{label}: centre=({cx_c:.1f},{cy_c:.1f}) in_bounds={0<=cx_c<=W and 0<=cy_c<=H}\n")
+
+step_end("step3")
+```
+
+---
+
+### Step 4 — Pre-Calibration Bootstrap
+
+> **Purpose:** Compute the rotation center from the reference object detections so that Step 5 has a valid `cx_calibration, cy_calibration`.
+
+```python
+step_start("step4")
+
+ref_dets = trajectories[ref_label]
+
+ref_cx_vals = [d["cx"] for d in ref_dets if d.get("cx") is not None and not np.isnan(d["cx"])]
+ref_cy_vals = [d["cy"] for d in ref_dets if d.get("cy") is not None and not np.isnan(d["cy"])]
+
+n_reference_frames = len(ref_cx_vals)
+
+if n_reference_frames < 5:
+    raise RuntimeError(
+        f"[ABORT] Only {n_reference_frames} valid reference detections found for '{ref_label}'. "
+        "Cannot establish rotation center. Check API output."
+    )
+
+cx_calibration = float(np.median(ref_cx_vals))
+cy_calibration = float(np.median(ref_cy_vals))
+
+# If the user marked a rotation axis, it is authoritative. The reference object is
+# kept ONLY for scale (its detected size → px/m). Map the frame fraction to
+# cropped-video pixels: frac × decoded full-frame dims, minus the ROI crop offset.
+user_center_used = False
+if rotation_center_frac and len(rotation_center_frac) == 2:
+    _ucx_full = float(rotation_center_frac[0]) * FRAME_W
+    _ucy_full = float(rotation_center_frac[1]) * FRAME_H
+    cx_calibration = _ucx_full - x_off
+    cy_calibration = _ucy_full - y_off
+    user_center_used = True
+    set_validation_flag("center_from_user_mark")
+    log(f"[Step 4] USER-marked rotation center frac={rotation_center_frac} → "
+        f"full=({_ucx_full:.1f},{_ucy_full:.1f})  crop=({cx_calibration:.1f},{cy_calibration:.1f})")
+
+log(f"[Step 4] cx_calibration={cx_calibration:.1f}  cy_calibration={cy_calibration:.1f}  n_ref={n_reference_frames}")
+
+with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+    cl.write(
+        f"[Step 4 — Bootstrap Center]\n"
+        f"coordinate_space   : cropped-video\n"
+        f"n_reference_frames : {n_reference_frames}\n"
+        f"cx_calibration     : {cx_calibration:.3f}\n"
+        f"cy_calibration     : {cy_calibration:.3f}\n\n"
+    )
+
+step_end("step4")
+```
+
+---
+
+### Step 5 — Reference Sizing & Pipeline Input Contract
+
+> **Purpose:** Measure the reference object's pixel size, resolve its real-world
+> size, and hand the tracking data to the FROZEN pipeline. You do NOT compute
+> kinematics, RANSAC, calibration, period, phases, or stats.json yourself — the
+> seeded `analysis/` package owns all of that (old steps 5–8). Re-authoring it is
+> what produced 28 different stats.json schemas and invalid `NaN`. Your only job
+> here is to produce `pipeline_inputs.json` (the contract in `analysis/contract.py`).
+
+```python
+step_start("step5")
+
+# ── Reference object pixel diameter (from its tracked bboxes) ───────────────
+width_px_vals, height_px_vals = [], []
+for d in trajectories[ref_label]:
+    if d.get("bbox"):
+        bx0, by0, bx1, by1 = d["bbox"]
+        width_px_vals.append(bx1 - bx0)
+        height_px_vals.append(by1 - by0)
+if not width_px_vals:
+    raise RuntimeError(f"[ABORT] No valid bboxes for reference '{ref_label}'.")
+width_px_median  = float(np.median(width_px_vals))
+height_px_median = float(np.median(height_px_vals))
+diameter_px      = (width_px_median + height_px_median) / 2.0
+if abs(width_px_median - height_px_median) / diameter_px > 0.15:
+    set_validation_flag("bbox_aspect_suspicious")
+
+# ── Real-world size of the reference object ─────────────────────────────────
+if physical_size_sidecar is not None:
+    physical_size_m, physical_size_source = float(physical_size_sidecar), "sidecar"
+else:
+    # Fill in a world-knowledge estimate for ref_label (metres).
+    physical_size_m, physical_size_source = 0.3000, "world_knowledge"
+    set_validation_flag("physical_size_estimated")
+
+# ── Short, human-friendly scene title for artifact titles ───────────────────
+# Used as the title on every plot and the report (e.g. "red phone on turntable").
+# Condense the raw labels into 2–5 plain words: drop filler ("smartphone with red
+# screen" → "red phone", "black circular turntable" → "turntable"), join with "on".
+# It is cosmetic only — the frozen contract falls back to "<tracked> on <ref>" if
+# omitted, so never block on it.
+scene_title = f"{tracked_label} on {ref_label}"   # replace with a cleaner short form
+
+# ── Per-frame tracked-object centroid, FULL-FRAME (display) space ────────────
+# CRITICAL: emit the RAW tracker coordinates (full-frame / display space) — use
+# `trajectories_full`, NOT the cropped `trajectories`. Do NOT subtract x_off/y_off
+# here. The FROZEN contract (analysis/contract.py) subtracts the crop offset from
+# BOTH the trajectory and the center together, so they are guaranteed to share one
+# space. (Crop-subtracting the trajectory by hand here is what made IMG_3072
+# non-deterministic: one run subtracted, one didn't, while the center stayed
+# cropped → 87 px mismatch → garbage period / stable_omega.)
+tracked_by_frame = {d["frame"]: d for d in trajectories_full[tracked_label]}
+def _coord(i, key):
+    d = tracked_by_frame.get(i)
+    if d is None or d.get(key) is None:
+        return None
+    v = float(d[key])
+    return None if np.isnan(v) else v
+traj_x = [_coord(i, "cx") for i in range(NB_FRAMES)]
+traj_y = [_coord(i, "cy") for i in range(NB_FRAMES)]
+
+# Center in the SAME full-frame space. cx_calibration/cy_calibration are cropped
+# (Step 4 subtracted the offset); add it back so the contract can subtract once,
+# uniformly, for trajectory and center alike.
+center_cx_full = float(cx_calibration) + float(x_off)
+center_cy_full = float(cy_calibration) + float(y_off)
+
+# ── Write the input contract (REQUIRED keys: see analysis/contract.py) ──────
+# coordinate_space="display" tells the frozen contract these are full-frame pixels;
+# it performs the one, deterministic display→cropped conversion using roi_crop.
+pipeline_inputs = {
+    "fps": float(FPS),
+    "duration_s": float(duration_s),
+    "n_raw_frames": int(NB_FRAMES),
+    "object_name": object_name,
+    "scene_title": scene_title,
+    "tracked_label": tracked_label,
+    "ref_label": ref_label,
+    "coordinate_space": "display",
+    "trajectory_x_px": traj_x,
+    "trajectory_y_px": traj_y,
+    "center": {
+        "cx_px": center_cx_full,
+        "cy_px": center_cy_full,
+        "source": "user_mark" if user_center_used else "bootstrap",
+    },
+    "reference": {
+        "diameter_px": float(diameter_px),
+        "physical_size_m": float(physical_size_m),
+        "physical_size_source": physical_size_source,
+    },
+    "roi_crop": {
+        "x_off": int(x_off), "y_off": int(y_off),
+        "crop_w": int(crop_w), "crop_h": int(crop_h),
+        "fallback": bool(use_full_frame),
+    },
+}
+import json as _json
+with open("analysis_output/data/pipeline_inputs.json", "w") as f:
+    _json.dump(pipeline_inputs, f, indent=2)
+log(f"[Step 5] pipeline_inputs.json written: diameter_px={diameter_px:.1f} "
+    f"physical_size_m={physical_size_m} source={pipeline_inputs['center']['source']}")
+step_end("step5")
+```
+
+---
+
+### Step 6 — Run the Frozen Kinematics Pipeline
+
+> **HARD RULE — do NOT modify, read-and-reimplement, or "improve" anything under
+> `analysis/`.** It is vetted, version-controlled, and deterministic. It reads
+> `pipeline_inputs.json` and writes `kinematics.csv` + `stats.json` (locked schema
+> documented in `analysis/README.md`). Just invoke it and load the result.
+
+```python
+step_start("step8")  # the progress feed keys off step8 markers for this stage
+import subprocess, sys, json as _json
+
+proc = subprocess.run([sys.executable, "-m", "analysis.run"],
+                      capture_output=True, text=True)
+if proc.stdout.strip():
+    log(proc.stdout.strip())
+if proc.returncode != 0:
+    raise RuntimeError(f"[ABORT] analysis pipeline failed (exit {proc.returncode}):\n{proc.stderr}")
+
+with open("analysis_output/data/stats.json") as f:
+    stats = _json.load(f)   # locked schema — see analysis/README.md
+
+# Expose every flat name the LaTeX report templating AND the three subagents
+# consume as injected context (their prompts list flat names, not nested paths).
+_sum, _pf       = stats["summary"], stats["period_and_frequency"]
+_stable, _bnd   = stats["stable_phase"], stats["phase_boundaries"]
+_cal, _trk      = stats["calibration"], stats["tracking"]
+object_name          = stats["object_name"]
+px_per_m             = _cal["px_per_m"]
+cx_px                = _cal["cx_px"]
+cy_px                = _cal["cy_px"]
+mean_r_m             = _sum["mean_r_m"]
+std_r_m              = _sum["std_r_m"]
+mean_omega           = _sum["mean_omega"]
+std_omega            = _sum["std_omega"]
+mean_v               = _sum["mean_v"]
+mean_ac              = _sum["mean_ac"]
+max_ac               = _sum["max_ac"]
+rotation_direction   = _sum["rotation_direction"]
+period_s             = _pf["period_s"]
+frequency_hz         = _pf["frequency_hz"]
+stable_mean_omega    = _stable["stable_mean_omega"]
+stable_mean_ac       = _stable["stable_mean_ac"]
+increase_start_omega = _bnd["increase_start_omega"]
+increase_end_omega   = _bnd["increase_end_omega"]
+decrease_end_omega   = _bnd["decrease_end_omega"]
+active_duration_s    = _trk["active_duration_s"]
+tracking_coverage_pct = _trk["coverage_pct"]
+validation_flags     = stats["validation_flags"]
+log(f"[Step 6] pipeline OK — period_s={period_s} stable_mean_omega={stable_mean_omega} "
+    f"flags={validation_flags}")
+step_end("step8")
+```
+
+> Note for the LaTeX/report and subagent steps below: read every measured value
+> from `stats` using the locked schema (e.g. `stats["summary"]["mean_omega"]`,
+> `stats["period_and_frequency"]["period_s"]`, `stats["stable_phase"]
+> ["stable_mean_omega"]`). The flat locals above exist only for the existing
+> `\newcommand` placeholder substitution. A value may be `None` (JSON null) when
+> a phase was absent — guard formatting accordingly.
+
+---
+
+## PARALLEL WAVE — render with seeded code, then subagents VERIFY
+
+DON'T use any worktress or GIT features.
+
+**STEP 0 (REQUIRED, do this FIRST — these are seeded, deterministic, and must always
+run; never hand-author figures or the annotated video):**
+```bash
+python -m analysis.render.figures      # 9 plots + summary_panel.png + figure_qa.json
+python -m analysis.verify_figures      # must print FIGURE_VERIFY OK
+python -m analysis.render.annotate     # annotated_video.mp4 (banner + symbols-only)
+```
+These produce the plots and the annotated video correctly (right cropped coordinate
+space, scene title, overlays scaled to the frame, NO numeric values on the video). The
+question generator (Subagent C) has no seeded module — it stays a real LLM subagent.
+
+After STEP 0, spawn the subagents — but with STEP 0 done their role is **verification
+and optional light polish only**, NOT re-authoring. Subagent A (video) and B (figures)
+must run/inspect the seeded output above; if a result genuinely looks wrong they may
+adapt the relevant `analysis/render/*.py` and re-run it — they must NEVER write a fresh
+overlay/plot from scratch, plot from `api_cache.json`, or draw numeric values on the
+video. Subagent C generates the questions.
+
+Pass each subagent:
+1. Its subagent definition file (as system prompt)
+2. The stats dict values injected directly as context
+3. File paths only for large data (cropped video, CSV, cache JSON)
+
+Note for all subagents: pixel coordinates in all data files are in
+**cropped-video space**. The `roi_crop` block in `stats.json` contains the
+offset to the original frame if needed.
+
+### Subagent A — Video Annotation
+- Definition: `.pi/agents/video-annotation-subagent.md`
+- Input video: `cropped_video_path` from stats.json (the cropped video)
+- Output: `analysis_output/video_annotation/annotated_video.mp4`
+- **The overlay is SEEDED, deterministic code** — `python -m analysis.render.annotate`
+  draws the bright-green orbit, the `r`/`v`/`ac`/`w` symbols + legend, the scene title,
+  symbols-only (no numeric values), in cropped space. The subagent RUNS it and verifies a
+  contact sheet — it must NOT hand-roll a weaker overlay or print measured numbers (the
+  old hand-authored video drew stray rainbow circles and a numeric readout box, breaking
+  the no-values rule). Relaxed: small visual tweaks allowed, the pedagogy rule is not.
+- Separate deliverable — not embedded in LaTeX. Does not block LaTeX compilation.
+
+### Subagent B — Figure Generation
+- Definition: `.pi/agents/figures-gen-subagent.md`
+- **The plots are now SEEDED, deterministic code** — `python -m analysis.render.figures`
+  writes all 9 plots + `summary_panel.png` + `figure_qa.json` from `stats.json` +
+  `kinematics.csv` (correct cropped space, scene title in every title). The subagent's
+  job is RELAXED to: run that module first, then look at the output and only patch a
+  panel if it genuinely looks wrong. It must NOT re-author the plots from scratch or
+  plot geometry from `api_cache.json`. (Relaxed vs the frozen kinematics — small
+  aesthetic tweaks are allowed; the maths/coordinates are not.)
+- Outputs: all plots in `analysis_output/plots/` + `figure_qa.json` (plot provenance)
+- **LaTeX compilation waits for this subagent AND the figure-verification phase below.**
+
+### Subagent C — Question Generation
+- Definition: `.pi/agents/question-gen-subagent.md`
+- Output: `analysis_output/data/questions.json`
+- **LaTeX compilation waits for this subagent.**
+- Needs only `stats.json` — no dependency on figures.
+
+---
+
+## FIGURE VERIFICATION PHASE — runs after Subagent B, before LaTeX
+
+The figure subagent is an LLM and has repeatedly plotted trajectory geometry in the
+wrong coordinate space (points from `api_cache.json` full-frame while the centre is
+cropped → the fitted circle floats `roi_crop.y_off` px off the orbit). Gate the
+figures before the report uses them.
+
+**Step 1 — Deterministic check (always; instant, no LLM):**
+```bash
+python -m analysis.verify_figures
+```
+Exit 0 = pass → **the happy path ends here; go straight to the LaTeX gate.** Exit 1 =
+fail; it writes `analysis_output/plots/figure_verify.json` with a `failures` list.
+
+**Step 2 — Recovery (only if Step 1 FAILED):** the visual QA subagent runs *here*, as
+part of fixing a known-bad figure — not on every job (it is a full multimodal pass and
+roughly doubles the back-half time, so it is reserved for failures).
+
+Retry loop (max 2 retries), entered only on a Step-1 failure:
+1. Spawn `pi-subagent` with definition `.pi/agents/figure-qa-subagent.md` (pass the plot
+   paths + `(cx_px, cy_px)` and `r_fit_px`); it writes
+   `analysis_output/plots/figure_visual_qa.json` with `passed` + `feedback`.
+2. Re-spawn **Subagent B** with the combined `figure_verify.json` + `figure_visual_qa.json`
+   feedback injected as extra context.
+3. Re-run `python -m analysis.verify_figures`. Stop when it passes or after 2 retries.
+
+If still failing after 2 retries, proceed but add `"figures_unverified"` to a note in
+`report.md` (never silently ship a known-bad figure). Do NOT edit `analysis/` — only
+re-run the subagent.
+
+---
+
+## GATED PHASE — LaTeX Report
+
+Begins only after **all** of these exist / hold:
+- `analysis_output/plots/summary_panel.png` (Subagent B complete)
+- `analysis_output/data/questions.json` (Subagent C complete)
+- figure verification passed (deterministic + visual), or retries exhausted
+
+**The `.tex` is now SEEDED, deterministic code — do NOT hand-write LaTeX.** Authoring
+the document by hand was the most fragile step: it shipped PDFs with missing images
+(a hand-written `\includegraphics{plots/...}` path that does not resolve from the
+report dir — pdflatex emits a blank box, not an error, so the job "succeeds" imageless)
+and invalid macros (`\SI{N/A}{rad/s}` from unguarded null stats). Both are gone:
+
+**9.1 — Generate the `.tex` from the frozen stats + questions:**
+```bash
+python -m analysis.render.report
+```
+This writes `analysis_output/report/student_edition.tex` and `teacher_key.tex` from
+`stats.json` + `questions.json` (Subagent C must have finished). It sets
+`\graphicspath` so every figure resolves regardless of compile CWD, null-guards every
+value, LaTeX-escapes all text, embeds the scene title, and puts answers + hints in the
+teacher key. Do NOT edit the graphics paths or re-author the document.
+
+**9.2 — Compile both PDFs in parallel using the latex-document-skill** (not raw pdflatex):
+```bash
+bash /latex-skill/scripts/compile_latex.sh analysis_output/report/student_edition.tex --preview --preview-dir analysis_output/report &
+bash /latex-skill/scripts/compile_latex.sh analysis_output/report/teacher_key.tex --preview --preview-dir analysis_output/report &
+wait
+```
+
+**9.3 — VERIFY (relaxed — your job here):** after compiling, confirm both PDFs exist
+and actually contain the figures (e.g. `pdfimages -list analysis_output/report/student_edition.pdf`
+should list images, not be empty). If a compile fails, read the `.log` and
+`/latex-skill/references/debugging-guide.md`; you may fix a LaTeX *error* (a stray
+character the escaper missed, a package issue) but you must NOT remove `\graphicspath`,
+change the `plots/` image names, or re-author the document — re-run `analysis.render.report`
+to regenerate instead. If a figure is missing from the PDF, the cause is almost always
+that `plots/<name>.png` was not produced by Subagent B — fix the figure, not the `.tex`.
+
+Outputs:
+- `analysis_output/report/student_edition.pdf`
+- `analysis_output/report/teacher_key.pdf`
+
+---
+
+## FINAL STEP — report.md
+
+Write only after all subagents and LaTeX compilation are complete.
+
+Include:
+1. Wall-clock timings per step (including subagent durations)
+2. Cache status (HIT/MISS; API response time if MISS)
+3. ROI crop summary: iterations attempted, final crop box, coverage, margin, fallback triggered (yes/no), note: validation was math-based (no re-tracking)
+4. Calibration: `px_per_m`, `(cx, cy)`, center source, coordinate space note
+5. Summary statistics table
+6. Phase boundaries from `phases.json`
+7. Validation flags raised (if any)
+8. Question bank summary (count, Bloom's distribution, regenerations)
+9. Subagent status: completed / failed / skipped (A, B, C)
+10. Full output file manifest — all PDFs, videos, plots, CSVs, JSONs
+
+---
+
+## OUTPUT STRUCTURE
+
+```
+analysis_output/
+  frames_1fps/                          ← original video 1fps frames (Step 1)
+  roi/
+    cropped.mp4                         ← final accepted crop
+    crop_meta.json                      ← crop offset + validation metadata
+    frames_iter1/                       ← 1fps frames of cropped video
+  debug/
+    contact_sheet.jpg                   ← original video contact sheet
+    coord_validation_<label>.jpg        ← one per tracked label
+    calibration_log.txt
+    pdflatex_error.log                  (if compilation fails)
+  plots/
+    annotated_image.png
+    annotated_graph.png
+    annotated_table.png
+    trajectory.png
+    radius_t.png
+    theta_t.png
+    omega_t.png
+    ac_t.png
+    summary_panel.png
+  data/
+    api_cache.json                      ← cached API response (prevents re-calls)
+    roi_crop_meta.json
+    stats.json
+    active_mask.npy
+    kinematics.csv
+    phases.json
+    questions.json
+    question_quality_log.json
+    bloom_distribution.json
+  video_annotation/
+    annotated_video.mp4                 ← annotated cropped video
+    contact_sheets/
+    refinement_log.json
+  report/
+    student_edition.tex
+    student_edition.pdf
+    teacher_key.tex
+    teacher_key.pdf
+  report.md
+```
+
+

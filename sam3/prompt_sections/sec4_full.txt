@@ -1,0 +1,336 @@
+---
+
+### Step 6 — Calibration
+
+```python
+step_start("step6")
+
+cx_px = cx_calibration
+cy_px = cy_calibration
+
+width_px_vals, height_px_vals = [], []
+for d in trajectories[ref_label]:
+    if d.get("bbox"):
+        bx0, by0, bx1, by1 = d["bbox"]
+        width_px_vals.append(bx1 - bx0)
+        height_px_vals.append(by1 - by0)
+
+if not width_px_vals:
+    raise RuntimeError(
+        f"[ABORT] No valid bboxes for reference label '{ref_label}'. "
+        "Cannot compute pixel diameter."
+    )
+
+width_px_median  = float(np.median(width_px_vals))
+height_px_median = float(np.median(height_px_vals))
+diameter_px      = (width_px_median + height_px_median) / 2.0
+
+if abs(width_px_median - height_px_median) / diameter_px > 0.15:
+    set_validation_flag("bbox_aspect_suspicious")
+    log(f"[WARN] width_px_median={width_px_median:.1f}  height_px_median={height_px_median:.1f}  differ > 15%")
+
+if physical_size_sidecar is not None:
+    physical_size_m      = float(physical_size_sidecar)
+    physical_size_source = "sidecar"
+    physical_size_reasoning = "Provided directly in sidecar JSON."
+else:
+    # Fill in world-knowledge estimate for ref_label here
+    physical_size_m         = 0.3000   # e.g., 30cm for lazy susan turntable
+    physical_size_source    = "world_knowledge"
+    physical_size_reasoning = "Estimated from world knowledge based on object label."
+    set_validation_flag("physical_size_estimated")
+
+px_per_m = diameter_px / physical_size_m
+log(f"[Step 6] diameter_px={diameter_px:.1f}  physical_size_m={physical_size_m:.4f}  px_per_m={px_per_m:.2f}")
+
+with open("analysis_output/debug/calibration_log.txt", "a") as cl:
+    cl.write(
+        f"[Step 6 — Calibration]\n"
+        f"coordinate_space     : cropped-video\n"
+        f"cx_px, cy_px         : {cx_px:.3f}, {cy_px:.3f}  (source: Step 4 bootstrap, N={n_reference_frames})\n"
+        f"width_px_median      : {width_px_median:.3f}\n"
+        f"height_px_median     : {height_px_median:.3f}\n"
+        f"diameter_px          : {diameter_px:.3f}\n"
+        f"physical_size_m      : {physical_size_m:.4f}  (source: {physical_size_source})\n"
+        f"physical_size_reasoning: '{physical_size_reasoning}'\n"
+        f"px_per_m             : {px_per_m:.4f}\n\n"
+    )
+
+step_end("step6")
+```
+
+---
+
+### Step 7 — Active Interval Detection
+
+```python
+import scipy.ndimage
+step_start("step7")
+
+dx_full = x_full - cx_px
+dy_full = y_full - cy_px
+r_coarse = np.sqrt(dx_full**2 + dy_full**2)
+t_s      = np.arange(n_raw_frames) / FPS
+
+theta_coarse = np.arctan2(dy_full, dx_full)
+
+def nan_safe_unwrap(arr):
+    result = np.full_like(arr, np.nan)
+    valid  = ~np.isnan(arr)
+    labeled, n_segs = scipy.ndimage.label(valid)
+    for i in range(1, n_segs + 1):
+        mask = labeled == i
+        result[mask] = np.unwrap(arr[mask])
+    return result
+
+theta_unwrapped_coarse = nan_safe_unwrap(theta_coarse)
+
+def nan_aware_gradient(arr, t):
+    result = np.full_like(arr, np.nan)
+    valid  = ~np.isnan(arr)
+    labeled, n_segs = scipy.ndimage.label(valid)
+    for i in range(1, n_segs + 1):
+        mask = labeled == i
+        result[mask] = np.gradient(arr[mask], t[mask])
+    return result
+
+omega_raw   = nan_aware_gradient(theta_unwrapped_coarse, t_s)
+filter_size = max(5, int(FPS // 10))
+omega_smooth = scipy.ndimage.median_filter(omega_raw, size=filter_size, mode='nearest')
+
+omega_threshold_pct = 0.10 if duration_s >= 10 else 0.20
+omega_max           = np.nanmax(np.abs(omega_smooth))
+omega_threshold     = omega_threshold_pct * omega_max
+
+MIN_ACTIVE_DURATION_S = max(0.5, 1.0 / omega_threshold_pct / 10)
+MIN_ACTIVE_FRAMES     = max(1, int(MIN_ACTIVE_DURATION_S * FPS))
+
+active_raw = np.abs(omega_smooth) > omega_threshold
+
+labeled_active, n_bursts = scipy.ndimage.label(active_raw)
+active_mask = np.zeros(n_raw_frames, dtype=bool)
+for i in range(1, n_bursts + 1):
+    burst = labeled_active == i
+    if burst.sum() >= MIN_ACTIVE_FRAMES:
+        active_mask |= burst
+
+np.save("analysis_output/data/active_mask.npy", active_mask)
+active_duration_s = float(active_mask.sum()) / FPS
+log(f"[Step 7] active_duration={active_duration_s:.2f}s  omega_threshold={omega_threshold:.4f} rad/s")
+
+step_end("step7")
+```
+
+---
+
+### Step 8 — Kinematics & Summary
+
+This step computes kinematics, writes `kinematics.csv`, detects phases, and outputs `stats.json`.
+
+```python
+import scipy.stats
+from scipy.signal import savgol_filter
+step_start("step8")
+
+dx = x_full - cx_px
+dy = y_full - cy_px
+r_px = np.sqrt(dx**2 + dy**2)
+r_m  = r_px / px_per_m
+
+theta_raw       = np.arctan2(dy, dx)
+theta_unwrapped = nan_safe_unwrap(theta_raw)
+
+savgol_window    = max(11, 2 * (int(FPS) // 6) + 1)
+if savgol_window % 2 == 0:
+    savgol_window += 1
+savgol_polyorder = 3
+
+def savgol_nan_safe(signal: np.ndarray, window: int, polyorder: int) -> np.ndarray:
+    result  = np.full_like(signal, np.nan, dtype=float)
+    valid   = ~np.isnan(signal)
+    labeled, n_segs = scipy.ndimage.label(valid)
+    for i in range(1, n_segs + 1):
+        seg_mask = labeled == i
+        seg      = signal[seg_mask]
+        n        = len(seg)
+        if n >= window:
+            result[seg_mask] = savgol_filter(seg, window, polyorder)
+        elif n >= polyorder + 1:
+            w = n if n % 2 == 1 else n - 1
+            w = max(w, polyorder + 1)
+            if w % 2 == 0: w -= 1
+            if w > polyorder:
+                result[seg_mask] = savgol_filter(seg, w, polyorder)
+    return result
+
+r_m_smooth = savgol_nan_safe(r_m, savgol_window, savgol_polyorder)
+theta_smooth = savgol_nan_safe(theta_unwrapped, savgol_window, savgol_polyorder)
+
+omega_raw_kin = nan_aware_gradient(theta_smooth, t_s)
+omega = scipy.ndimage.median_filter(omega_raw_kin, size=max(5, int(FPS // 10)), mode='nearest')
+rotation_direction = "CCW" if float(np.nanmedian(omega[active_mask])) > 0 else "CW"
+
+r_fit_m   = r_fit_px / px_per_m
+v_m_s     = np.abs(omega) * r_fit_m
+
+omega_active_vals    = omega[active_mask & ~np.isnan(omega)]
+omega_spike_threshold = 5.0 * float(np.nanmedian(np.abs(omega_active_vals)))
+omega_for_ac         = np.where(np.abs(omega) > omega_spike_threshold, np.nan, omega)
+ac_m_s2              = omega_for_ac**2 * r_fit_m
+
+if np.any(np.abs(omega) > omega_spike_threshold):
+    set_validation_flag("omega_spike")
+
+omega_active    = omega[active_mask & ~np.isnan(omega)]
+T_primary       = float(2 * np.pi / np.nanmedian(np.abs(omega_active)))
+f_primary       = 1.0 / T_primary
+
+**5.6 — Period and Frequency**
+
+```python
+ω_active  = ω[active_mask & ~isnan(ω)]
+T_primary = 2π / nanmedian(abs(ω_active))
+f_primary = 1 / T_primary
+
+active_contiguous_max_s = max length of any single contiguous active segment (seconds)
+
+if active_contiguous_max_s < 3 * T_primary:
+    set_validation_flag("fft_skipped_insufficient_data")
+    T_fft = T_primary
+else:
+    # FFT on θ_unwrapped during active intervals
+    # Detrend each segment, concatenate, run FFT, find dominant peak
+    T_fft = 1 / fft_peak_frequency
+
+    period_discrepancy = abs(T_primary - T_fft) / T_primary
+    if period_discrepancy > 0.05:
+        set_validation_flag("period_mismatch")
+        log(f"[FFT] period_discrepancy={period_discrepancy:.3f}: "
+            f"T_primary={T_primary:.3f}s T_fft={T_fft:.3f}s")
+
+period_s     = T_primary
+frequency_hz = f_primary
+```
+
+---
+
+**5.7 — Summary Statistics (active intervals only)**
+
+```python
+mean_r_m   = nanmean(r_m[active_mask])
+std_r_m    = nanstd(r_m[active_mask])
+mean_omega = nanmean(ω[active_mask])
+std_omega  = nanstd(ω[active_mask])
+mean_v     = nanmean(v_m_s[active_mask])
+mean_ac    = nanmean(ac_m_s2[active_mask])
+max_ac     = nanmax(ac_m_s2[active_mask])
+```
+
+---
+
+**5.8 — Phase Detection**
+
+Compute on `ω[active_mask]` only.
+Smooth ω for phase detection with additional `median_filter(size=int(fps * 0.5))`
+before differencing — do not modify `ω` used for kinematics.
+
+```python
+dω_dt              = NaN-aware gradient of smoothed ω w.r.t. t_s
+increase_threshold =  0.10 * nanmax(abs(dω_dt))
+decrease_threshold = -0.10 * nanmax(abs(dω_dt))
+```
+
+Phases:
+- `INCREASE` : `dω_dt > increase_threshold`  sustained ≥ 0.5 s
+- `DECREASE` : `dω_dt < decrease_threshold`  sustained ≥ 0.5 s
+- `STABLE`   : otherwise within active mask
+
+**stable_mean_omega — linear regression on θ(t):**
+
+```python
+stable_segments = [intervals where phase == STABLE]
+
+if len(stable_segments) == 0 or sum(stable_mask) < fps * 0.5:
+    set_validation_flag("no_stable_phase_detected")
+    stable_mean_omega    = float(np.nanmedian(np.abs(ω_active)))
+    stable_mean_ac       = mean_ac
+    stable_omega_r2      = float("nan")
+    stable_omega_std_err = float("nan")
+    log("[PHASE] No stable phase detected — using median ω as fallback")
+else:
+    slopes, weights, r2_values, std_errs = [], [], [], []
+    for interval in stable_segments:
+        t_seg = t_s[interval & ~isnan(θ_unwrapped)]
+        θ_seg = θ_unwrapped[interval & ~isnan(θ_unwrapped)]
+        if len(t_seg) < 2:
+            continue
+        slope, _, r2, _, std_err = scipy.stats.linregress(t_seg, θ_seg)
+        if r2 < 0.99:
+            set_validation_flag("unstable_phase_linearity")
+        slopes.append(slope)
+        weights.append(len(t_seg))
+        r2_values.append(r2)
+        std_errs.append(std_err)
+
+    if len(slopes) == 0:
+        set_validation_flag("no_stable_phase_detected")
+        stable_mean_omega    = float(np.nanmedian(np.abs(ω_active)))
+        stable_mean_ac       = mean_ac
+        stable_omega_r2      = float("nan")
+        stable_omega_std_err = float("nan")
+    else:
+        weights              = np.array(weights)
+        stable_mean_omega    = float(np.average(slopes, weights=weights))
+        stable_mean_ac       = nanmean(ac_m_s2 during STABLE phases)
+        stable_omega_r2      = float(np.average(r2_values, weights=weights))
+        stable_omega_std_err = float(np.average(std_errs,  weights=weights))
+
+increase_start_omega = ω at start of first INCREASE phase  (NaN if none)
+increase_end_omega   = ω at end   of last  INCREASE phase  (NaN if none)
+decrease_end_omega   = ω at end   of last  DECREASE phase  (NaN if none)
+```
+
+Save → `analysis_output/data/phases.json`
+
+---
+
+**5.9 — Validation Flags**
+
+| Flag | Condition |
+|---|---|
+| `"radius_unstable"` | `std(r_m[active]) / mean(r_m[active]) > 0.30` |
+| `"omega_spike"` | any `\|ω\| > 5 * nanmedian(\|ω_active\|)` |
+| `"low_coverage"` | `tracking_coverage_pct < 80` |
+| `"period_mismatch"` | `period_discrepancy > 0.05` |
+| `"fft_skipped_insufficient_data"` | active data too short for FFT |
+| `"center_mismatch"` | `center_drift_px > 10` |
+| `"physical_size_estimated"` | physical size not in sidecar |
+| `"ransac_insufficient_inliers"` | RANSAC fallback triggered |
+| `"bbox_aspect_suspicious"` | width/height differ > 15% |
+| `"no_stable_phase_detected"` | no STABLE phase found |
+| `"unstable_phase_linearity"` | any stable segment r² < 0.99 |
+| `"roi_crop_failed_fallback"` | all 3 ROI iterations failed; full frame used |
+
+Flags do not stop the pipeline. All flagged runs produce complete output.
+
+---
+
+**5.10 — Save kinematics.csv**
+
+Columns (one row per frame, NaN where detection missing):
+```
+time_s, r_px, r_m, theta_rad, omega_rad_s, v_m_s, ac_m_s2, active
+```
+
+Note: `r_px` values are in cropped-video space.
+
+Path: `analysis_output/data/kinematics.csv`
+
+---
+
+
+
+# Final stats.json writing (using the new step outputs)
+# ...
+step_end("step8")
+```

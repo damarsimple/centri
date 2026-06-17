@@ -1,0 +1,22 @@
+{
+  "tracked_object": {
+    "visual_cues": [
+      "red object"
+    ]
+  },
+  "reference_geometry": {
+    "label": "rear bicycle tire",
+    "bbox_center_px": [
+      653,
+      707
+    ]
+  },
+  "rotation_center_frac": [
+    0.3401,
+    0.6546
+  ],
+  "display_w": 1920,
+  "display_h": 1080,
+  "video_w": 1920,
+  "video_h": 1080
+}

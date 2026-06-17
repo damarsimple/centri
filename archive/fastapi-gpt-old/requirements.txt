@@ -1,0 +1,9 @@
+matplotlib
+fastapi
+pydantic
+openai
+pandas
+numpy
+python-dotenv
+uvicorn
+python-multipart

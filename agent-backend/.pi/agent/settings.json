@@ -1,0 +1,16 @@
+{
+  "subagents": {
+    "asyncByDefault": true,
+    "forceTopLevelAsync": true
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 10,
+    "baseDelayMs": 5000,
+    "provider": {
+      "timeoutMs": 300000,
+      "maxRetries": 2,
+      "maxRetryDelayMs": 60000
+    }
+  }
+}
