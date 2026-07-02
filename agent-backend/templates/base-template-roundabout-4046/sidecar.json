@@ -1,0 +1,7 @@
+{
+  "tracked_object": { "visual_cues": ["black ball"] },
+  "reference_geometry": { "label": "black ball", "physical_size": 0.06 },
+  "rotation_center_frac": [0.4903, 0.4738],
+  "tracking_mode": "object",
+  "display_w": 1080, "display_h": 1920, "video_w": 1080, "video_h": 1920
+}

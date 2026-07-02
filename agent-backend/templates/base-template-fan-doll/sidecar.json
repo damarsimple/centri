@@ -1,0 +1,23 @@
+{
+  "tracked_object": {
+    "visual_cues": [
+      "yellow toy"
+    ]
+  },
+  "reference_geometry": {
+    "label": "fan blade",
+    "bbox_center_px": [
+      625,
+      965
+    ],
+    "physical_size": 0.32
+  },
+  "rotation_center_frac": [
+    0.579,
+    0.503
+  ],
+  "display_w": 1080,
+  "display_h": 1920,
+  "video_w": 1080,
+  "video_h": 1920
+}

@@ -1,0 +1,8 @@
+{
+  "tracked_object": { "visual_cues": ["black knob"] },
+  "reference_geometry": { "label": "black knob", "physical_size": 0.06 },
+  "rotation_center_frac": [0.4996, 0.4036],
+  "tracking_mode": "color",
+  "tracking_config": { "hsv_lo": [0,0,0], "hsv_hi": [179,120,75], "roi_radius": 560, "max_step": 250, "min_area": 150 },
+  "display_w": 1080, "display_h": 1920, "video_w": 1080, "video_h": 1920
+}

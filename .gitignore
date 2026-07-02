@@ -17,3 +17,47 @@ centri_improvements.pdf
 *.swo
 *.db
 .idea/
+
+# Model weights
+locateanything-3b/
+
+# Raw video data
+New cases/
+
+# Test workspace
+test/
+
+# Agent runtime data
+agent-backend/.pi/
+
+# Generated material & exports
+agent-backend/material_work/
+agent-backend/vinsa_export/
+agent-backend/vinsa_export_questions_backup_200909/
+
+# LaTeX skill (separate tool)
+agent-backend/latex-skill/
+
+# Presentation assets
+presentation/
+
+# Video files (should not be in git)
+*.MOV
+*.mov
+*.mp4
+*.MP4
+
+# Per-template run outputs
+agent-backend/templates/*/analysis_output/
+agent-backend/templates/*/api_cache.json
+agent-backend/templates/*/frequency_meta.json
+
+# Session logs
+*.jsonl
+
+# Export backups
+agent-backend/vinsa_export_single_backup_*/
+
+# Scratch notes & scripts
+note-*
+print-props/
