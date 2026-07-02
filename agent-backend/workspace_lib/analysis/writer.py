@@ -138,6 +138,14 @@ def build_stats(inp: Inputs, cal: Calibration, k: Kinematics) -> dict:
             "increase_end_omega": _num(k.increase_end_omega),
             "decrease_end_omega": _num(k.decrease_end_omega),
         },
+        "angular_acceleration": {
+            "motion_type": k.motion_type,
+            "alpha_rad_s2": _num(k.alpha_rad_s2),
+            "alpha_r2": _num(k.alpha_r2),
+            "omega_initial": _num(k.omega_initial),
+            "omega_final": _num(k.omega_final),
+            "a_t_mean_m_s2": _num(k.a_t_mean_m_s2),
+        },
         "roi_crop": inp.roi_crop,
         "validation_flags": common.validation_flags(),
         "phases": {

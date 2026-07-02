@@ -64,6 +64,14 @@ class Kinematics:
     decrease_end_omega: float | None = None
     phase_labels: list = field(default_factory=list)
     stable_segments: list = field(default_factory=list)
+    # angular-acceleration model (fit over the longest active run). motion_type is
+    # "uniform" (constant omega), "accelerating" (spin-up) or "decelerating".
+    motion_type: str = "uniform"
+    alpha_rad_s2: float = 0.0          # signed angular acceleration
+    alpha_r2: float = float("nan")     # R^2 of the constant-alpha (quadratic theta) fit
+    omega_initial: float = 0.0
+    omega_final: float = 0.0
+    a_t_mean_m_s2: float = 0.0         # tangential accel magnitude = |alpha| * r_fit_m
 
 
 def _segmented(signal, fn):
@@ -214,10 +222,71 @@ def compute(inp: Inputs, cal: Calibration, x_full, y_full) -> Kinematics:
     if k.mean_r_m and k.std_r_m / max(k.mean_r_m, 1e-9) > 0.30:
         common.set_validation_flag("radius_unstable")
 
+    _motion_model(k, cal, FPS)
     _period(k, inp, FPS)
     _phases(k, inp, FPS, theta_smooth)
+    # Surface the spin-up/down endpoints from the (robust) motion model when the
+    # flicker-prone per-frame phase labeller left them empty.
+    if k.motion_type == "accelerating" and k.increase_start_omega is None:
+        k.increase_start_omega = k.omega_initial
+        k.increase_end_omega = k.omega_final
+    elif k.motion_type == "decelerating" and k.decrease_end_omega is None:
+        k.decrease_end_omega = k.omega_final
     common.step_end("step8")
     return k
+
+
+def _motion_model(k: Kinematics, cal: Calibration, FPS: float) -> None:
+    """Classify the rotation as uniform vs (de)accelerating from a constant-alpha
+    fit. We fit theta(t) over the longest active run to a quadratic — theta is the
+    *integral* of omega, so the fit is smooth and noise-insensitive, unlike
+    thresholding omega's derivative (which flickers and was why an obvious fan
+    spin-up was mislabelled STABLE). A non-uniform classification gates the
+    period_mismatch / unstable_phase_linearity flags, which a single-omega model
+    raises spuriously on motion that is genuinely changing speed."""
+    n = len(k.t_s)
+    runs, s = [], None
+    for i in range(n):
+        if k.active_mask[i] and s is None:
+            s = i
+        elif not k.active_mask[i] and s is not None:
+            runs.append((s, i)); s = None
+    if s is not None:
+        runs.append((s, n))
+    if not runs:
+        return
+    a, b = max(runs, key=lambda r: r[1] - r[0])
+    m = np.zeros(n, dtype=bool); m[a:b] = True
+    m &= ~np.isnan(k.theta_unwrapped)
+    t, th = k.t_s[m], k.theta_unwrapped[m]
+    dur = float(t[-1] - t[0]) if t.size else 0.0
+    if t.size < 10 or dur < 1.0:
+        return  # too little to fit a curvature
+
+    c_lin = np.polyfit(t, th, 1)
+    c_quad = np.polyfit(t, th, 2)
+    var_lin = float(((th - np.polyval(c_lin, t)) ** 2).mean())
+    var_quad = float(((th - np.polyval(c_quad, t)) ** 2).mean())
+    var_th = float(th.var())
+    resid_drop = 1.0 - var_quad / max(var_lin, 1e-12)
+    alpha = float(2.0 * c_quad[0])
+    omega_t = np.polyval(np.polyder(c_quad), t)
+    mean_w = float(np.abs(omega_t).mean())
+    dw_ratio = abs(alpha) * dur / max(mean_w, 1e-6)
+
+    k.alpha_rad_s2 = alpha
+    k.alpha_r2 = 1.0 - var_quad / max(var_th, 1e-12)
+    k.omega_initial = float(omega_t[0])
+    k.omega_final = float(omega_t[-1])
+
+    # Non-uniform only when the quadratic clearly beats the line AND omega actually
+    # changes appreciably across the window. Both guards must hold so noise on a
+    # genuinely steady spin does not get read as acceleration.
+    if resid_drop > 0.7 and dw_ratio > 0.3:
+        k.motion_type = "accelerating" if alpha > 0 else "decelerating"
+        k.a_t_mean_m_s2 = abs(alpha) * cal.r_fit_m
+    else:
+        k.motion_type = "uniform"
 
 
 def _period(k: Kinematics, inp: Inputs, FPS: float) -> None:
@@ -244,7 +313,9 @@ def _period(k: Kinematics, inp: Inputs, FPS: float) -> None:
         k.T_fft = _fft_period(k, FPS) or k.T_primary
 
     k.period_discrepancy = (abs(k.T_primary - k.T_fft) / k.T_primary) if k.T_primary > 0 else 0.0
-    if k.period_discrepancy > 0.05:
+    # A (de)accelerating spin has no single period, so T_primary (instantaneous,
+    # from the median omega) and T_fft legitimately disagree — don't flag it.
+    if k.period_discrepancy > 0.05 and k.motion_type == "uniform":
         common.set_validation_flag("period_mismatch")
 
 
@@ -313,7 +384,10 @@ def _phases(k: Kinematics, inp: Inputs, FPS: float, theta_smooth) -> None:
         if sel.sum() < 2:
             continue
         slope, _i, r2, _p, err = scipy.stats.linregress(k.t_s[sel], k.theta_unwrapped[sel])
-        if r2 < 0.99:
+        # A linear theta fit is only expected to hold for uniform rotation; under a
+        # constant-alpha spin theta is quadratic, so a sub-0.99 linear R^2 is the
+        # modelled behaviour, not an instability.
+        if r2 < 0.99 and k.motion_type == "uniform":
             common.set_validation_flag("unstable_phase_linearity")
         slopes.append(float(slope)); weights.append(float(sel.sum()))
         r2s.append(float(r2)); errs.append(float(err))

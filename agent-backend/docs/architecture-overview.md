@@ -37,8 +37,8 @@ From `REPORT.md §2, §5`:
    lab2 (10.0.0.2) — Docker Compose:
      ├── api     (FastAPI :8000)          ← endpoints
      ├── worker  (Celery, concurrency=1)  ← runs `pi` orchestrator, 1 job at a time
-     ├── beat    (Celery beat)            ← hourly workspace cleanup (TTL 24h)
-     ├── redis   (job state/result + broker; result TTL 48h)
+     ├── beat    (Celery beat)            ← hourly workspace cleanup (TTL 720h / 30 days)
+     ├── redis   (job state/result + broker; result TTL 48h; AOF persistent, named volume)
      └── caddy   (prod-only HTTPS)
                          │
         ┌────────────────┴───────────────────┐

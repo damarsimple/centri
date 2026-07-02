@@ -19,7 +19,7 @@ The worker (`worker/tasks.py`) runs the analysis by shelling out to the **`pi`
 agent CLI**:
 
 ```
-pi -p <orchestrator.txt> --mode json --model llama.cpp-lab2/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+pi -p <orchestrator.txt> --mode json --model llama.cpp-lab1/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 ```
 
 The agent reads the orchestrator prompt as instructions, **writes and executes its
@@ -46,8 +46,13 @@ This was introduced because agent-authored kinematics produced 28 distinct
 
 From `orchestrator.txt` "HARD RULES":
 
-- **Tracking is remote-only.** Never run SAM2/SAM3/segment-anything locally. The
-  only tracking interface is `POST {TRACKING_API_URL}/track` via `requests`.
+- **Tracking is remote-only for `object` mode.** Never run SAM2/SAM3/segment-anything
+  locally. The only remote interface is `POST {TRACKING_API_URL}/track` via `requests`.
+  Two LOCAL alternatives (CPU, OpenCV) are selected by sidecar `tracking_mode`: `color`
+  (`analysis.color_track`, HSV marker) and `frequency` (`analysis.freq_track`,
+  blade-pass FFT → synthesized orbit). All three emit the same `api_cache.json` — see
+  [data-contract.md §1a](data-contract.md). The "no local model" rule still bars
+  SAM2/SAM3/YOLO; color/frequency are classical CV, not learned detectors.
 - **Exactly ONE tracking API call** for the whole pipeline, made in Step 2 on the
   original video, cached to `analysis_output/data/api_cache.json`. If the cache
   exists, the API is not called at all. Crop-space trajectories are derived by
@@ -78,7 +83,7 @@ From `orchestrator.txt` "HARD RULES":
 
 ```jsonc
 {
-  "tracked_object":   { "visual_cues": ["red ball"] },   // label(s) of the moving object
+  "tracked_object":   { "visual_cues": ["toy"] },        // moving object — use a SIMPLE noun (see object-detection-prompts.md)
   "reference_geometry": {
     "label":          "lazy susan",                       // calibration object
     "physical_size":  0.30                                // real size in metres (optional)
@@ -114,8 +119,11 @@ deterministic. See [`analysis/README.md`](../workspace_lib/analysis/README.md).
 
 - **Cleaning (`geometry.py`):** RANSAC circle fit drawing from a **seeded** RNG
   (`common.RANDOM_SEED`) → identical fit every run; radius-based outlier rejection
-  (>2.5σ or >15 px → NaN); center kept at the mark unless absent and the fit is
-  confident (`center_drift_px` flagged, never silently trusted).
+  (>2.5σ or >15 px → NaN); center kept at the mark **unless the fit is unambiguously
+  better** — tight inlier residual (<10%) **and** radius CV cut to <0.6× the mark's
+  (then `center_source="ransac_override"`, flag `center_overridden_from_mark`). This
+  is self-guarding: a good mark already has low CV, so it is never overruled. (Off-axis
+  marks observed in practice: the fan doll's tap was 158 px off the true axis.)
 - **Calibration:** `px_per_m = diameter_px / physical_size_m`; `r_fit_m = r_fit_px / px_per_m`.
 - **Kinematics (`kinematics.py`):** θ unwrapped per segment; `r`,`θ` Savitzky-Golay
   smoothed (window ≈ fps/6); **ω computed once** (gradient + median filter) and reused
@@ -126,6 +134,14 @@ deterministic. See [`analysis/README.md`](../workspace_lib/analysis/README.md).
   active run ≥ 3·T_primary, else `fft_skipped_insufficient_data`.
 - **Phases:** dω/dt thresholds sustained ≥0.5 s → `INCREASE/DECREASE/STABLE`;
   `stable_mean_omega` = length-weighted θ(t) regression over STABLE segments.
+- **Motion model (`_motion_model`):** fits θ(t) over the longest active run to a line
+  vs a parabola. Constant α ⇒ θ is quadratic, so a large residual-variance drop (>70%)
+  *and* an appreciable ω change (|α|·Δt/⟨ω⟩ > 0.3) ⇒ `motion_type` ∈ {accelerating,
+  decelerating}, reporting `alpha_rad_s2`, `omega_initial/final`, `a_t_mean = |α|·r`.
+  For non-uniform motion `period_mismatch` and `unstable_phase_linearity` are suppressed
+  (no single period/linear θ is expected). Fitting θ — an integral — is robust where
+  thresholding dω/dt is not (the latter flickers; it once mislabelled a clean spin-up
+  STABLE). Cases seen: fan spins up (α≈+1.18), turntables coast down (α≈−4).
 - **Output:** `writer.py` writes the locked schema with `allow_nan=False` (missing
   values → JSON `null`) plus a sanity gate (low coverage, high drift, invalid period
   → validation flags).

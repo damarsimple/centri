@@ -34,6 +34,13 @@ class Calibration:
     tracking_coverage_pct: float
 
 
+def _radius_cv(x, y, cx, cy) -> float:
+    """Coefficient of variation of the per-point radius about (cx, cy). Low for a
+    true center, high when the center is off the orbit axis."""
+    r = np.sqrt((x - cx)**2 + (y - cy)**2)
+    return float(r.std() / max(r.mean(), 1e-9))
+
+
 def _ransac_circle_fit(x, y, n_iters=1000, threshold=8.0, min_inliers=20):
     """Circumcircle RANSAC. Deterministic: draws from common.RNG."""
     n = len(x)
@@ -101,15 +108,32 @@ def calibrate(inp: Inputs) -> tuple[Calibration, np.ndarray, np.ndarray]:
     if not ransac_ok:
         common.set_validation_flag("ransac_fit_rejected")
 
-    # Center selection: trust the user/bootstrap mark; only adopt the RANSAC fit
-    # when there is no mark AND the fit is plausible and far from a (bad) bootstrap.
+    # Center selection: trust the user/bootstrap mark by default, but a human can
+    # place the mark off the true *projected* rotation axis (observed on the fan:
+    # mark 158 px from the real orbit center -> spurious radius_unstable / period
+    # _mismatch). Adopt the RANSAC fit over the mark only when it is unambiguously
+    # better: a tight inlier residual AND a materially lower radius coefficient of
+    # variation. A degenerate giant-circle fit fails both, so this is self-guarding.
     if inp.center_source in ("user_mark", "bootstrap"):
         cx_active, cy_active = cx_cal, cy_cal
         center_source = inp.center_source
         if ransac_ok:
             center_drift_px = float(np.sqrt((cx_fit - cx_cal)**2 + (cy_fit - cy_cal)**2))
             if center_drift_px > 25:
-                common.set_validation_flag("center_mismatch")
+                r_in = np.sqrt((x_valid[inlier_mask_raw] - cx_fit)**2
+                               + (y_valid[inlier_mask_raw] - cy_fit)**2)
+                fit_resid_ratio = float(r_in.std() / max(r_in.mean(), 1e-9))
+                cv_mark = _radius_cv(x_valid, y_valid, cx_cal, cy_cal)
+                cv_fit = _radius_cv(x_valid, y_valid, cx_fit, cy_fit)
+                if fit_resid_ratio < 0.10 and cv_fit < 0.6 * cv_mark:
+                    cx_active, cy_active = cx_fit, cy_fit
+                    center_source = "ransac_override"
+                    center_drift_px = 0.0  # drift is now measured vs the adopted center
+                    common.set_validation_flag("center_overridden_from_mark")
+                    common.log(f"[calibrate] mark off-axis; adopted RANSAC center "
+                               f"(resid={fit_resid_ratio:.3f} cv {cv_mark:.3f}->{cv_fit:.3f})")
+                else:
+                    common.set_validation_flag("center_mismatch")
         else:
             center_drift_px = 0.0  # no trustworthy fit to compare against
     elif ransac_ok:

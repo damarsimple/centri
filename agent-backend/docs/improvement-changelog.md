@@ -325,3 +325,41 @@ subagent def loads. Report is immune to this because it always ran inline.
 > Open follow-up (not done): `.pi/agents/` still holds stale variant files
 > (`*_updated.md`, `*.orchestrator-injected.md`); harmless now that STEP 0 doesn't depend
 > on them, but worth cleaning up to avoid future confusion.
+
+---
+
+## Update — 2026-06-21: off-axis centre recovery + non-uniform motion
+
+A second pass triggered by the ceiling-fan clip, whose kinematics first looked
+"noise-dominated." Two distinct causes, neither was noise:
+
+1. **Off-axis rotation centre.** The user-tapped axis sat **158 px** off the true
+   orbit centre, so r/θ/ω were computed about the wrong point — faking an unstable
+   radius (CV **0.39**) and scrambling ω (flags `radius_unstable`, `center_mismatch`,
+   `high_center_drift`). The RANSAC fit was already good (1.6% residual) but policy was
+   "always trust the mark." **Fix (`geometry.py`):** adopt the fit over a user/bootstrap
+   mark only when unambiguously better — tight inlier residual **and** radius CV cut to
+   <0.6× the mark's. New `center_source="ransac_override"` + flag
+   `center_overridden_from_mark`. Self-guarding: a good mark (low CV) is never overruled.
+   Fan radius CV **0.39 → 0.10**.
+
+2. **Real non-uniform motion (not noise).** The fan is *spinning up* at constant
+   α≈**1.18 rad/s²** (θ(t) quadratic fit R²=**0.9999**, ω 3.2→10.2). The pipeline only
+   modelled uniform rotation, so `period_mismatch` / `unstable_phase_linearity` fired
+   correctly. **Added** a motion-model classifier (`_motion_model` in `kinematics.py`):
+   line-vs-parabola fit on θ(t) → `motion_type` ∈ {uniform, accelerating, decelerating},
+   new `angular_acceleration` stats block (`alpha_rad_s2`, `alpha_r2`,
+   `omega_initial/final`, `a_t_mean_m_s2 = |α|·r`). Those two flags are now gated on
+   `motion_type`. Fitting θ (an integral) is robust where thresholding dω/dt flickered
+   and had mislabelled the spin-up STABLE.
+
+**Regression check:** deterministic re-run of all 10 workspaces — no crashes, no new
+flags; turntables correctly reclassify as **decelerating** (α≈−4, hand-spun coast-down),
+bicycle stays **uniform** (behaviour identical), fans **accelerating**. The exported fan
+(`a2627aa2`) now carries only the informational `center_overridden_from_mark`.
+
+Schema/docs updated: [data-contract.md](data-contract.md) §3.2 (new block + `center_source`
+value), [pipeline-internals.md](pipeline-internals.md) §Step 6.
+
+> Caveat unchanged: absolute metric results (r, v, a_c) still depend on the reference
+> size (the fan's 1.3 m is provisional); angular results (ω, α, T) are exact regardless.

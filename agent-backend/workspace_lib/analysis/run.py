@@ -13,6 +13,7 @@ from . import common, writer
 from .contract import ContractError, load_inputs
 from .geometry import calibrate
 from .kinematics import compute
+from .material_seed import write_material_seed
 
 
 def main() -> int:
@@ -30,6 +31,9 @@ def main() -> int:
     k = compute(inp, cal, x_full, y_full)
     stats = writer.write_stats(inp, cal, k)
     writer.write_csv(inp, cal, k)
+    # Deterministic seed for Module D (learning material). Reads the stats dict +
+    # the kinematics.csv just written; Subagent D turns it into grounded prose.
+    write_material_seed(stats)
 
     common.progress("kinematics", "Kinematics complete", 72)
     common.log("[run] pipeline complete")

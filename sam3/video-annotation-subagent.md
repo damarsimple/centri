@@ -1,7 +1,7 @@
 ---
 name: video-annotation-subagent
 description: Video annotation agent for circular motion physics analysis with reference-style visual output
-model: llama.cpp-lab2/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+model: llama.cpp-lab1/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true

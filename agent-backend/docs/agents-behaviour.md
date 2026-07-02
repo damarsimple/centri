@@ -15,7 +15,7 @@ and execute Python inside the per-job workspace, call tools, and spawn subagents
 The worker (`worker/tasks.py`) shells out to it:
 
 ```
-pi -p <prompts/orchestrator.txt> --mode json --model llama.cpp-lab2/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+pi -p <prompts/orchestrator.txt> --mode json --model llama.cpp-lab1/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 ```
 
 **Sampling note:** determinism is governed server-side (temperature/seed on the
@@ -29,7 +29,7 @@ temperature ⇒ less run-to-run drift in the agentic steps.
 | 1 | **Orchestrator** | `prompts/orchestrator.txt` | `pi --mode json` | Runs Steps 1–6, spawns subagents, compiles the LaTeX report |
 | 2 | **Subagent A — Video Annotation** | `.pi/agent/agents/video-annotation-subagent.md` | `pi-subagent` | **Verifies** the seeded `render/annotate.py` overlay (orbit/ω/aᶜ/r, symbol-only, banner) |
 | 3 | **Subagent B — Figure Generation** | `.pi/agent/agents/figures-gen-subagent.md` | `pi-subagent` | **Verifies** the seeded `render/figures.py` plots (9 + summary panel) |
-| 4 | **Subagent C — Question Generation** | `.pi/agent/agents/question-gen-subagent.md` | `pi-subagent` | 8 exam questions → `questions.json` |
+| 4 | **Subagent C — Question Generation** | `.pi/agents/circular-motion.subagent-c-questions.md` | `pi-subagent` | 9–12 difficulty-tiered, multimodal questions → `questions.json` |
 | 4b | **Subagent D — Figure Visual QA** | `.pi/agent/agents/figure-qa-subagent.md` | `pi-subagent` (multimodal) | **Retry-only**: looks at the plots, checks the circle sits on the points / labels OK |
 | 5 | **Extractor** | `prompts/job-output-extractor.txt` | `pi --mode text` | Reports which output files exist (post-run) |
 

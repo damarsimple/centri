@@ -20,9 +20,14 @@ Multipart form (`app/routes.py`):
 Header `X-API-Key` required. Returns `{ "job_id": "<uuid>" }` and enqueues a Celery
 task. **Sidecar schema** (matches the app's `SidecarJson` and Step 1 of the orchestrator):
 
+> **Prompt wording is the #1 tracking-reliability lever.** `visual_cues` and `label` become
+> the detector's text query — use the **simplest common category noun** (e.g. `"toy"`, not
+> `"cream colored doll"`; 6%→100% on the same clip). See
+> [object-detection-prompts.md](object-detection-prompts.md).
+
 ```jsonc
 {
-  "tracked_object":     { "visual_cues": ["red ball"] },
+  "tracked_object":     { "visual_cues": ["toy"] },
   "reference_geometry": {
     "label":          "lazy susan",
     "physical_size":  0.30          // metres; optional → estimated if absent
@@ -41,6 +46,52 @@ task. **Sidecar schema** (matches the app's `SidecarJson` and Step 1 of the orch
 > text). The **orchestrator only reads the `tracked_object` / `reference_geometry`
 > shape above**; the report-text fields are not consumed by the pipeline. Treat the
 > shape above as authoritative.
+
+### 1a. Tracking mode (optional) — `object` | `color` | `frequency`
+
+The trajectory in Step 2 can be produced three ways. **All three write the same
+`api_cache.json` schema**, so Steps 3–6 (calibration, kinematics, figures, material)
+are identical regardless. Selected by `tracking_mode` (sidecar flag); if absent the
+agent defaults to `object` and may override only with clear scene evidence.
+
+| mode | producer | use when | needs |
+|---|---|---|---|
+| `object` (default) | remote SAM3 `/track` | one distinct moving object | `visual_cues`, `physical_size` |
+| `color` | local `analysis.color_track` (CPU) | the mover is one of several **identical** shapes a shape-tracker aliases (5 fan blades); a uniquely-coloured marker you placed. Needs the marker visible per frame (it can go sparse if often occluded). | HSV range, ROI; marker doubles as the size reference (`physical_size` = marker size m) |
+| `frequency` | local `analysis.freq_track` (CPU) | a fast, identical-blade rotor that **under-samples even at 60 fps** (blade-pass nears `fps/2`), or you need ω(t) without a per-frame point. Measures blade-pass freq → ω, then synthesizes a clean orbit (flagged). | `n_blades`, ring radius, rotation centre; `physical_size` = **orbit radius (m)** |
+
+> **Try `object` at 60 fps first for a fast multi-blade fan.** The `IMG_3750.MOV` failure at
+> 30 fps was **under-sampling (wagon-wheel), not motion blur** — at 60 fps SAM3 `"fan blade"`
+> tracked the peak window cleanly (the marker stays sharp). Reach for `color`/`frequency` only
+> when fps alone can't recover a clean per-frame point.
+
+```jsonc
+// colour-marker example (e.g. orange paper on a fan blade)
+{
+  "tracked_object":     { "visual_cues": ["orange marker"] },
+  "reference_geometry": { "label": "orange marker", "physical_size": 0.08 },  // marker real size, m
+  "rotation_center_frac": [0.40, 0.48],
+  "tracking_mode": "color",
+  "tracking_config": { "hsv_lo": [165,60,70], "hsv_hi": [12,255,255],  // H wraps 165→12 = red
+                       "roi_radius": 360, "max_step": 100, "min_area": 60 }
+}
+// frequency example (fast multi-blade fan at peak speed)
+{
+  "tracked_object":     { "visual_cues": ["fan rotor"] },
+  "reference_geometry": { "label": "fan rotor", "physical_size": 0.30 },      // ORBIT radius, m
+  "rotation_center_frac": [0.40, 0.48],
+  "tracking_mode": "frequency",
+  "tracking_config": { "n_blades": 5, "ring_radius": 200, "orbit_radius_px": 250, "n_probes": 12 }
+}
+```
+
+> `color`/`frequency` run locally (OpenCV, no GPU) and **assume rotation is baked into
+> the pixels** (no rotation metadata) — our portrait clips are exported that way.
+> `frequency` mode also writes `data/frequency_meta.json` (per-probe blade-pass
+> agreement = confidence) and flags `kinematics_from_frequency_synth`; the synth orbit
+> is a perfect circle, so the trajectory-consistency flags (`period_mismatch`,
+> `unstable_phase_linearity`) are not meaningful there — trust `frequency_meta.json`.
+> Nyquist: `blade_pass_hz < fps/2` (use 60 fps for a fast fan).
 
 ## 2. Tracking API contract (the one external call)
 
@@ -138,6 +189,10 @@ old agent-authored output (28 distinct schemas / 17 with invalid NaN).
                    "center_drift_px": 8.9, "px_per_m": 3593.3, "diameter_px": 1078.0,
                    "physical_size_m": 0.30, "physical_size_source": "sidecar",
                    "r_fit_px": 406.5, "r_fit_m": 0.1131 },
+                   // center_source ∈ {user_mark, bootstrap, ransac_fit, ransac_override}.
+                   // "ransac_override" = a user/bootstrap mark was off-axis and the
+                   // RANSAC fit replaced it (tight residual AND much lower radius CV);
+                   // see geometry.py and the "center_overridden_from_mark" flag.
   "summary":     { "mean_r_m": 0.110, "std_r_m": 0.0006, "mean_omega": 5.83, "std_omega": 2.20,
                    "mean_v": 0.66, "mean_ac": 4.39, "max_ac": 10.82, "rotation_direction": "CCW" },
   "period_and_frequency": { "period_s": 1.10, "frequency_hz": 0.91, "T_primary": 1.10,
@@ -145,8 +200,15 @@ old agent-authored output (28 distinct schemas / 17 with invalid NaN).
   "stable_phase":    { "stable_mean_omega": 5.74, "stable_mean_ac": 4.30,
                        "stable_omega_r2": 0.999, "stable_omega_std_err": 0.058, "n_stable_segments": 9 },
   "phase_boundaries":{ "increase_start_omega": null, "increase_end_omega": null, "decrease_end_omega": null },
+  "angular_acceleration": { "motion_type": "uniform", "alpha_rad_s2": -0.10, "alpha_r2": 0.998,
+                            "omega_initial": 5.1, "omega_final": 5.0, "a_t_mean_m_s2": 0.0 },
+                   // motion_type ∈ {uniform, accelerating, decelerating}, from a
+                   // parabola-vs-line fit on theta(t) (constant alpha => theta is quadratic).
+                   // When non-uniform, period_mismatch / unstable_phase_linearity are
+                   // suppressed (they only apply to steady rotation) and a_t = |alpha|*r.
   "roi_crop":   { "x_off": 0, "y_off": 161, "crop_w": 1080, "crop_h": 1438, "fallback": false },
   "validation_flags": [ "fft_skipped_insufficient_data", ... ],
+                   // newer flags: "center_overridden_from_mark" (off-axis mark replaced by fit)
   "phases":     { "phase_labels": ["STABLE", ...], "stable_segments": [[0, 350]] }
 }
 ```
@@ -159,7 +221,12 @@ old agent-authored output (28 distinct schemas / 17 with invalid NaN).
 ### 3.3 Other
 
 - `data/active_mask.npy` — boolean per frame.
-- `data/questions.json` — the static 8-question worksheet (see [subagents.md](subagents.md)).
+- `data/questions.json` — difficulty-tiered (easy/intermediate/advanced), multimodal 9–12 question bank; dict shape `{object_name, scenario, questions:[…]}` (see [subagents.md](subagents.md)).
+- `data/material_seed.json` — **deterministic** seed for Module D, written by Step 6
+  (`analysis/material_seed.py`): `{variables, relations, angular_acceleration, timeline (time-anchored ω(t)), figures, calibration_note}`. Same inputs → identical seed.
+- `data/material.json` — the generated **learning material** (Subagent D); dict shape
+  `{object_name, scene_title, sections:{<5 fixed headers>: <prose>}}`. Rendered as the
+  leading **Learning Material** PDF section; the BERTScore candidate for material eval.
 - Phase segments are embedded in `stats.json["phases"]` (no separate `phases.json`).
 - **Rendered artifacts** (`plots/*.png` + `figure_qa.json`, `report/*.tex`+`*.pdf`,
   `video_annotation/annotated_video.mp4`) are produced by the **seeded, deterministic**

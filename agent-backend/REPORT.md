@@ -30,7 +30,7 @@ The pipeline is orchestrated by **Pi** (`@earendil-works/pi-coding-agent`), an L
 |-----------|-----------|
 | API Server | FastAPI (Python 3.12) |
 | Task Queue | Celery 5.x with Redis broker |
-| Cache/Database | Redis 7 (ephemeral, TTL-based) |
+| Cache/Database | Redis 7 (persistent — AOF + named volume) |
 | Containerization | Docker Compose (4 services) |
 | LLM Agent | Pi coding agent (Node.js, npm global) |
 | Inference | llama.cpp server (OpenAI-compatible) |
@@ -74,7 +74,7 @@ docker-compose.yml defines 4 services + 1 optional:
 
 **`worker`** — Celery worker with `--concurrency=1` (single job at a time). Runs the Pi analysis subprocess. Same volume mounts as API.
 
-**`beat`** — Celery beat scheduler. Periodically runs `cleanup_expired_workspaces` (every hour) to delete workspaces older than `WORKSPACE_TTL_HOURS` (default 24h).
+**`beat`** — Celery beat scheduler. Periodically runs `cleanup_expired_workspaces` (every hour) to delete workspaces older than `WORKSPACE_TTL_HOURS` (default 720h / 30 days).
 
 **`caddy`** (profile: production only) — Caddy 2 reverse proxy for HTTPS. Requires `DOMAIN` env var. Profiles prevent it from starting in dev mode.
 
@@ -280,15 +280,15 @@ The Docker Compose stack runs on lab2, a machine on the internal 10.0.0.0/24 net
 - `./prompts:/app/prompts` — Orchestrator and extractor prompts
 - `./templates:/app/templates` — Template directories with sample videos
 - `./.pi:/root/.pi` — Pi config, subagent definitions, and session files
-- `./workspaces:/app/workspaces` — Per-job workspaces (ephemeral, TTL 24h)
+- `workspaces:/app/workspaces` — Per-job workspaces (named Docker volume, TTL 720h / 30 days)
 - `./latex-skill:/latex-skill:ro` — LaTeX skill scripts and templates
 
 ### 5.2. Inference Server (llama.cpp, 192.168.1.205:8083)
 
 - **Model**: Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf (quantized, 4-bit)
 - **API**: OpenAI-compatible `/v1/chat/completions`
-- **Auth**: `Authorization: Bearer lazailai`
-- **Pi model config**: Stored in `config/pi-models.json`, baked into Docker image at `/root/.pi/agent/models.json`
+- **Auth**: `Authorization: Bearer hwanglabyoungdumbandbreak`
+- **Pi model config**: `.pi/agent/models.json` (bind-mounted, overrides the baked image copy from `config/pi-models.json`); provider: `llama.cpp-lab1`
 
 The model uses a "thinking" mode (`reasoning_content` field). The progress analyzer requires `PI_ANALYZER_MAX_TOKENS=10000` to ensure JSON output appears in the `content` field rather than being consumed by the reasoning tokens.
 
@@ -336,7 +336,7 @@ templates/
     └── sidecar.json
 ```
 
-The API accepts a `template` form parameter. If omitted, it falls back to the `TEMPLATE_DIR` env var default (`base-template-turntable`). Each template is a pre-packaged video + sidecar pair.
+The API accepts a `template` form parameter. If omitted, it falls back to the `TEMPLATE_DIR` env var default (`basetemplate-turntable-1`). Each template is a pre-packaged video + sidecar pair.
 
 ### 6.2. Default Template (`basetemplate-turntable`)
 
@@ -461,14 +461,14 @@ Defined in `.pi/agents/latex-compile-subagent.md` with YAML front matter. This s
 |----------|---------|-------------|
 | `API_KEY` | `changeme-random-secret-key-12345` | API authentication key |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `PI_MODEL` | `llama.cpp-lab2/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | Pi model identifier |
-| `TRACKING_API_URL` | `http://192.168.1.13:8086` | SAM tracking API |
+| `PI_MODEL` | `llama.cpp-lab1/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | Pi model identifier (provider/model) |
+| `TRACKING_API_URL` | `http://10.0.0.1:8086` | SAM tracking API |
 | `PI_INFERENCE_URL` | `http://192.168.1.205:8083` | llama.cpp inference server |
-| `PI_INFERENCE_API_KEY` | `lazailai` | API key for inference server |
-| `TEMPLATE_DIR` | `./templates/base-template-turntable` | Default template path |
+| `PI_INFERENCE_API_KEY` | `hwanglabyoungdumbandbreak` | API key for inference server |
+| `TEMPLATE_DIR` | `/app/templates/basetemplate-turntable-1` | Default template (container-absolute; change in .env to switch templates) |
 | `PROMPT_FILE` | `./prompts/orchestrator.txt` | Pi orchestrator prompt |
 | `WORKSPACE_DIR` | `./workspaces` | Workspace storage root |
-| `WORKSPACE_TTL_HOURS` | `24` | Workspace cleanup TTL |
+| `WORKSPACE_TTL_HOURS` | `720` | Workspace cleanup TTL (30 days) |
 | `PI_TIMEOUT_SECONDS` | `5400` | Pi subprocess timeout (90 min) |
 | `PI_ANALYZER_TEMPERATURE` | `1.0` | LLM temperature for progress analyzer |
 | `PI_ANALYZER_MAX_TOKENS` | `10000` | Max tokens for progress analyzer (needs room after reasoning) |
@@ -484,22 +484,28 @@ Defined in `.pi/agents/latex-compile-subagent.md` with YAML front matter. This s
 ```json
 {
   "providers": {
-    "llama.cpp-lab2": {
-      "baseUrl": "http://192.168.1.205:8083",
+    "llama.cpp-lab1": {
+      "baseUrl": "http://192.168.1.205:8083/v1",
       "api": "openai-completions",
-      "apiKey": "lazailai",
-      "authHeader": true,
+      "apiKey": "hwanglabyoungdumbandbreak",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
       "models": [
         {
           "id": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
-          "name": "Qwen 3.6 35B",
-          "input": ["text", "image"]
+          "name": "Qwen3.6-35B-A3B-UD-Q4_K_XL",
+          "input": ["text", "image"],
+          "contextWindow": 184320,
+          "reasoning": true
         }
       ]
     }
   }
 }
 ```
+> Active config is `.pi/agent/models.json` (bind-mounted at runtime); `config/pi-models.json` is baked into the image as a fallback.
 
 ---
 
@@ -528,7 +534,7 @@ docker compose logs -f       # Follow logs
 
 Celery beat runs `worker/cleanup.py` every hour, which:
 - Scans `workspaces/` directory
-- Checks each job directory's mtime against `WORKSPACE_TTL_HOURS`
+- Checks each job directory's mtime against `WORKSPACE_TTL_HOURS` (720h / 30 days)
 - Deletes expired workspaces
 
 ---
@@ -606,10 +612,14 @@ The pipeline outputs validation flags to indicate data quality issues:
 |------|---------|
 | `center_mismatch` | Calibration center differs from fitted center |
 | `center_switched_to_fit` | System overrode calibration center with RANSAC fit |
+| `center_overridden_from_mark` | An off-axis user/bootstrap mark was replaced by the RANSAC fit (tight residual AND much lower radius CV); `center_source` becomes `ransac_override` |
 | `fft_skipped_insufficient_data` | Not enough frames for FFT period detection |
 | `omega_spike` | Detected anomalous angular velocity values |
 | `physical_size_estimated` | Physical size was estimated from world knowledge, not measured |
 | `no_stable_phase_detected` | No period of steady rotation found |
+| `radius_unstable` / `period_mismatch` / `unstable_phase_linearity` | Steady-rotation quality checks; the latter two are **suppressed when the motion is non-uniform** (see `angular_acceleration.motion_type`) |
+
+**Angular acceleration (non-uniform motion).** `stats.json` carries an `angular_acceleration` block — `motion_type` ∈ {`uniform`, `accelerating`, `decelerating`}, plus `alpha_rad_s2`, `alpha_r2`, `omega_initial`, `omega_final`, `a_t_mean_m_s2` — from a line-vs-parabola fit on θ(t) (constant α ⇒ θ is quadratic). E.g. the fan spins up at α≈+1.18 rad/s², hand-spun turntables coast down at α≈−4.
 
 ---
 
@@ -791,6 +801,9 @@ The latex-document-skill provides these utilities in `latex-skill/scripts/`:
   "period_s": 0.83,
   "frequency_hz": 1.21,
   "rotation_direction": "CCW",
+  "motion_type": "uniform",
+  "alpha_rad_s2": 0.0,
+  "a_t_mean_m_s2": 0.0,
   "px_per_m": 3498.3,
   "center_source": "ransac_fit",
   "tracking_coverage_pct": 100.0,

@@ -34,9 +34,9 @@
 - The pipeline runs on the **`pi` agent CLI** (`worker/tasks.py` calls
   `pi -p <prompt> --mode json|text --model <model>`).
 - All agents — orchestrator + 4 subagents — use one model:
-  **`llama.cpp-lab2/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`** (4-bit), served OpenAI-style
-  at `192.168.1.205:8083`. Model routing is in `config/pi-models.json` (baked into the
-  image as `/root/.pi/agent/models.json`).
+  **`llama.cpp-lab1/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`** (4-bit), served OpenAI-style
+  at `192.168.1.205:8083`. Model routing is in `.pi/agent/models.json` (bind-mounted at
+  runtime; `config/pi-models.json` is the baked-image fallback).
 - Subagents are spawned via the orchestrator's `subagent` tool and run **inline in
   the orchestrator's LLM context** — their intermediate reasoning is embedded in the
   main session JSONL, not stored separately (a known debugging limitation).
@@ -49,16 +49,17 @@
 Once `data/stats.json` exists, the orchestrator first runs the seeded renderers **inline
 (STEP 0)** — `analysis.render.figures` → `verify_figures` → `analysis.render.annotate` —
 then spawns the subagents to verify/polish that output (A, B) and to author the questions
-(C). All three subagents run in parallel:
+(C) and the learning material (D). All four subagents run in parallel:
 
 | Subagent | Output | Blocks LaTeX? |
 |---|---|---|
 | A — Video Annotation | `video_annotation/annotated_video.mp4` | No (separate deliverable) |
 | B — Figure Generation | 9 PNGs in `plots/` | **Yes** |
 | C — Question Generation | `data/questions.json` | **Yes** |
+| D — Learning Material | `data/material.json` | **Yes** |
 
-LaTeX compilation (subagent D, or inline) starts only after `plots/summary_panel.png`
-**and** `data/questions.json` both exist.
+LaTeX compilation (the gated render step, or inline) starts only after
+`plots/summary_panel.png`, `data/questions.json` **and** `data/material.json` exist.
 
 ## A — `video-annotation-subagent.md`
 
@@ -96,25 +97,60 @@ SI-unit axis labels, scene title, 150 dpi. It plots trajectory geometry from the
 `verify_figures` gate passes by construction. The subagent runs it and inspects the
 panels, adapting `render/figures.py` only if one looks wrong.
 
-## C — `question-gen-subagent.md` (280 lines) — the *only* pedagogy here
+## C — `question-gen-subagent.md` — the *only* pedagogy here
 
-Generates a **static 8-question worksheet** grounded in `stats.json` → `data/questions.json`
-(+ `question_quality_log.json`, `bloom_distribution.json`). This is the full extent of
-"teaching" in `agent-backend`.
+> **2026-06-21 — reworked to the P-MAGIC difficulty-tier method** (Hwang et al.,
+> `document-3.pdf`). Replaced the old Bloom's-6-level scheme with **three difficulty
+> levels** and per-question **modality tags**, so the output matches Vinsa's paper and
+> feeds her multimodal evaluation. Active def: `.pi/agents/circular-motion.subagent-c-questions.md`
+> (legacy copies `.pi/agents/question-gen-subagent.md`, `.pi/agent/agents/question-gen-subagent.md`
+> kept in sync). See [PAPER_GAP_ASSESSMENT.md](../../PAPER_GAP_ASSESSMENT.md) and the
+> session checkpoint.
 
-- Fixed specification: exactly 8 questions, fixed Bloom levels (Remember→Evaluate),
-  fixed formats (numeric/MCQ/short-answer), fixed difficulty mix.
-- Each question is self-contained (all values in the stem), MCQ distractors map to named
-  misconceptions, short-answers include a teacher model answer + marking notes, numerics
-  carry `answer_exact` + ±2% tolerance.
-- Runs a `self-verification` block (asserts aᶜ=ω²r etc.) before writing.
+Generates a **difficulty-tiered, multimodal question bank** grounded in `stats.json` →
+`data/questions.json` (+ `question_quality_log.json`, `difficulty_distribution.json`).
+This is the full extent of "teaching" in `agent-backend`.
+
+- **9–12 questions** across three tiers (Bloom-mapped, but the output axis is difficulty):
+  - **easy** = remember/understand (recall/read one quantity; *no formula in the stem*; round to 2 dp),
+  - **intermediate** = apply (one relationship computed, e.g. `v=ωr`, `a_c=ω²r`; working in `solution`),
+  - **advanced** = analyse/compare (multi-step / two-scenario reasoning).
+- Each question is tagged with a content **`format`** (`text|image|graph|table`) and the
+  set spans all four, so the multimodal ablation (text-image/-graph/-table) has material.
+- **Schema** = a JSON **object** `{object_name, scenario, questions:[…]}`. Each question
+  carries both `stem` (the app reads this) **and** `question` (the LaTeX report reads this)
+  with identical text, plus `difficulty`, `format`, `answer`, `unit`, `solution`, `hints`,
+  `given`. (The old bare-array + `bloom_level` shape was silently rejected by
+  `app/result_data.load_worksheet`, which needs a dict — the rework fixed that.)
 
 **Contrast with `fastapi-gpt`:** this is *one-shot, identical every run, no learner
 model*. Her inquiry tutor is *interactive, staged, ability-adaptive, misconception-
 tracking*. The worksheet is a fine artifact but is **not** a substitute for the tutor —
 see [architecture-overview.md](architecture-overview.md).
 
-## D — LaTeX report (seeded `render/report.py` + `compile_latex.sh`)
+## D — `material-gen-subagent.md` — the grounded learning material
+
+> **2026-06-21 (refresh 5)** — added so the pipeline emits **learning material**, the
+> artifact Vinsa actually evaluates (not questions). Def: `.pi/agents/material-gen-subagent.md`.
+
+Writes an **authentic, phenomenon-grounded learning passage** → `data/material.json`. Unlike
+Subagent C, its numbers are pre-computed deterministically: **Step 6** (`analysis/run.py`)
+calls `analysis/material_seed.py` to write `data/material_seed.json` — the variables, the
+formula relations, the angular-acceleration block, and a **time-anchored ω(t)** sampled from
+`kinematics.csv`. Subagent D turns that seed into fluent prose and **never invents a number**.
+
+- **Five sections** (fixed headers): Scenario · The variables we measured · How the variables
+  are related · What the video shows over time · Reading the figures.
+- **Schema** = `{object_name, scene_title, sections:{<header>: <prose>}}`.
+- Rendered into the PDF by `render/report.py` (`_material_block`) as the leading
+  **Learning Material** section.
+- Evaluated by `tools/run_material_eval.py`: raw BERTScore F1 vs an authentic textbook
+  reference (OpenStax §6.2) → **0.840 ± 0.002** (5 objects).
+- **Quick path** (validation / recovery, same prompt+model): `tools/{build_material_seed,
+  generate_material}.py`. Qwen needs thinking-budget headroom (`max_tokens≈24000`) or
+  `content` returns empty.
+
+## Report compile — LaTeX (seeded `render/report.py` + `compile_latex.sh`)
 
 **Now (2026-06-12): the `.tex` is seeded, not hand-authored.** The orchestrator runs
 `python -m analysis.render.report` to generate `student_edition.tex` + `teacher_key.tex`

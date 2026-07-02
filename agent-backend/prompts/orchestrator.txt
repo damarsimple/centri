@@ -1,7 +1,7 @@
 # Circular Motion Analysis — Master Orchestrator
 
 You are the master orchestrator for a circular motion video analysis pipeline.
-Run Steps 1 through 6 sequentially, spawn three subagents in parallel, then compile the final LaTeX report and summary. Steps 1–5 are agentic perception (scene, tracking, validation, center bootstrap, reference sizing); Step 6 runs the FROZEN, deterministic `analysis/` pipeline that owns all kinematics and writes `stats.json`.
+Run Steps 1 through 6 sequentially, spawn four subagents in parallel, then compile the final LaTeX report and summary. Steps 1–5 are agentic perception (scene, tracking, validation, center bootstrap, reference sizing); Step 6 runs the FROZEN, deterministic `analysis/` pipeline that owns all kinematics and writes `stats.json`.
 
 Tools available: Python, ffmpeg/ffprobe, HTTP tracking API (remote), pdflatex.
 
@@ -201,6 +201,31 @@ physical_size_sidecar = sidecar["reference_geometry"].get("physical_size", None)
 # not the centre. Mapped to cropped-video pixels in Step 4 (needs FRAME_W/x_off).
 rotation_center_frac = sidecar.get("rotation_center_frac")
 
+# ── 1.2b  Tracking mode (sidecar flag + agent fallback) ────────────────────
+# Three ways to produce the per-frame trajectory in Step 2. They all write the
+# SAME api_cache.json schema, so Steps 3-6 are identical regardless of mode.
+#   "object"    — remote SAM3 /track (DEFAULT). Best for a distinct single object.
+#   "color"     — local analysis.color_track: follow a uniquely-coloured marker by
+#                 HSV. Use when the moving thing is one of several IDENTICAL shapes
+#                 an appearance tracker can't tell apart (e.g. 5 identical fan
+#                 blades — SAM3 aliases/hops between them). Needs a sharp, visible
+#                 marker; FAILS under heavy motion blur.
+#   "frequency" — local analysis.freq_track: measure the blade-pass frequency on a
+#                 ring of probes (FFT) → omega, then synthesize a clean orbit. Use
+#                 for a FAST multi-blade rotor where the blades are identical AND
+#                 motion-blurred so neither object nor colour tracking can follow a
+#                 point. Needs n_blades and a rotation centre; requires the video at
+#                 a high enough fps that blade_pass_hz < fps/2 (use 60 fps).
+# AGENT FALLBACK: if sidecar has no `tracking_mode`, default to "object". You MAY
+# override to "color"/"frequency" ONLY with clear scene evidence (e.g. you SEE
+# identical blades, or a track attempt aliases to ~zero net rotation while the
+# blades are visibly spinning) — say why in the log. When unsure, stay "object".
+# color/frequency modes assume the rotation is BAKED into the pixels (no rotation
+# metadata); our portrait clips are exported that way.
+TRACKING_MODE = (sidecar.get("tracking_mode") or "object").lower()
+track_cfg = sidecar.get("tracking_config", {})  # mode-specific params (see below)
+log(f"[Step 1] tracking_mode = {TRACKING_MODE}")
+
 # ── 1.3  Extract 1fps preview frames ──────────────────────────────────────
 r1 = subprocess.run([
     "ffmpeg", "-y", "-i", VIDEO_PATH,
@@ -259,6 +284,72 @@ if os.path.exists(CACHE_PATH):
         cache = json.load(f)
     trajectories_full = cache["trajectories"]
     video_info        = cache["video_info"]
+elif TRACKING_MODE == "color":
+    # LOCAL colour-marker tracking (no remote call). Follows a uniquely-coloured
+    # marker by HSV — robust where identical shapes alias an appearance tracker.
+    # The marker doubles as the size reference, so ref_label := tracked_label and
+    # reference_geometry.physical_size = the marker's real size (metres).
+    cfg = track_cfg
+    ref_label = tracked_label
+    roi = []
+    if rotation_center_frac and cfg.get("roi_radius"):
+        roi = ["--roi-center",
+               f"{rotation_center_frac[0]*FRAME_W_orig:.1f},{rotation_center_frac[1]*FRAME_H_orig:.1f}",
+               "--roi-radius", str(cfg["roi_radius"])]
+    step = ["--max-step", str(cfg["max_step"])] if cfg.get("max_step") else []
+    cmd = ["python", "-m", "analysis.color_track", "--video", VIDEO_PATH,
+           "--label", tracked_label,
+           "--hsv-lo", ",".join(map(str, cfg["hsv_lo"])),
+           "--hsv-hi", ",".join(map(str, cfg["hsv_hi"])),
+           "--min-area", str(cfg.get("min_area", 60)),
+           "--out", CACHE_PATH] + roi + step
+    log(f"[track] colour mode — {' '.join(cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"[ABORT] color_track failed:\n{r.stderr[:600]}")
+    log(r.stdout.strip())
+    with open(CACHE_PATH) as f:
+        cache = json.load(f)
+    trajectories_full = cache["trajectories"]
+    video_info        = cache["video_info"]
+    if cache.get("track_coverage", 0.0) < 0.85:
+        set_validation_flag("tracking_coverage_below_target")
+        log(f"[track] colour coverage {cache.get('track_coverage'):.2f} < 0.85 (flagged).")
+elif TRACKING_MODE == "frequency":
+    # LOCAL blade-pass frequency analysis → omega, then a SYNTHESIZED orbit at that
+    # omega + a calibrated radius. For a fast, identical-blade, motion-blurred rotor
+    # where no per-frame point survives. The RATE is measured; the point is
+    # reconstructed (flagged). ref_label := tracked_label; the synth bbox encodes the
+    # orbit radius so generic reference-sizing recovers diameter_px = orbit_radius_px,
+    # paired with reference_geometry.physical_size = orbit radius in METRES.
+    cfg = track_cfg
+    ref_label = tracked_label
+    META_PATH = "analysis_output/data/frequency_meta.json"
+    orbit_r = cfg.get("orbit_radius_px", cfg["ring_radius"])
+    probes = ["--n-probes", str(cfg["n_probes"])] if cfg.get("n_probes") else []
+    # window_s in tracking_config → TIME-RESOLVED ω(t) (full clips whose speed varies,
+    # e.g. a fan that spins up then coasts down). Omit for a single-regime window.
+    windowed = (["--window-s", str(cfg["window_s"]), "--hop-s", str(cfg.get("hop_s", 0.5))]
+                if cfg.get("window_s") else [])
+    cmd = ["python", "-m", "analysis.freq_track", "--video", VIDEO_PATH,
+           "--hub", f"{rotation_center_frac[0]*FRAME_W_orig:.1f},{rotation_center_frac[1]*FRAME_H_orig:.1f}",
+           "--ring-radius", str(cfg["ring_radius"]),
+           "--n-blades", str(cfg["n_blades"]),
+           "--label", tracked_label,
+           "--orbit-radius", str(orbit_r),
+           "--out", CACHE_PATH, "--meta-out", META_PATH] + probes + windowed
+    log(f"[track] frequency mode — {' '.join(cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"[ABORT] freq_track failed:\n{r.stderr[:600]}")
+    log(r.stdout.strip())
+    with open(CACHE_PATH) as f:
+        cache = json.load(f)
+    trajectories_full = cache["trajectories"]
+    video_info        = cache["video_info"]
+    set_validation_flag("kinematics_from_frequency_synth")
+    with open(META_PATH) as f:
+        log(f"[track] frequency measurement: {f.read()[:400]}")
 else:
     # SAM3 tracking is NON-DETERMINISTIC: the same video can return a clean full-coverage
     # track on one call and a degraded partial one (e.g. 60% coverage, wrong radius) on the
@@ -894,6 +985,8 @@ python -m analysis.render.annotate     # annotated_video.mp4 (banner + symbols-o
 These produce the plots and the annotated video correctly (right cropped coordinate
 space, scene title, overlays scaled to the frame, NO numeric values on the video). The
 question generator (Subagent C) has no seeded module — it stays a real LLM subagent.
+The material generator (Subagent D) has a seeded *seed* (`material_seed.json`, written by
+Step 6) but the prose itself is a real LLM subagent.
 
 After STEP 0, spawn the subagents — but with STEP 0 done their role is **verification
 and optional light polish only**, NOT re-authoring. Subagent A (video) and B (figures)
@@ -941,6 +1034,32 @@ offset to the original frame if needed.
 - **LaTeX compilation waits for this subagent.**
 - Needs only `stats.json` — no dependency on figures.
 
+### Subagent D — Learning Material Generation (SEEDED, difficulty-tiered)
+- **This is now a seeded deterministic STEP, not an LLM subagent spawn.** Run:
+  ```bash
+  python -m analysis.material_tiers
+  ```
+- It reads `analysis_output/data/material_seed.json` (variables, formula relations, the
+  angular-acceleration block, a time-anchored omega(t) timeline, written by Step 6) and
+  writes THREE difficulty tiers of grounded learning material — one Qwen call per tier:
+  - `analysis_output/data/material.basic.json`
+  - `analysis_output/data/material.intermediate.json`
+  - `analysis_output/data/material.advanced.json`
+  Each follows `docs/difficulty-tiered-material-spec.md` (Bloom + Cognitive-Load Theory):
+  basic = the idea + radius, no equations; intermediate = the core relations on this
+  object's numbers; advanced = angular acceleration + the timeline + the squared-sensitivity
+  and scale caveat. The numbers come ONLY from the seed — the model never invents quantities.
+- **GROUNDING GATE (built in):** every tier is run through deterministic checks (arithmetic
+  closure, tier compliance, motion-type faithfulness); a failing tier is regenerated once,
+  then kept-but-flagged in `analysis_output/data/material_tiers_gate.json` (proceed-but-flag,
+  like the figure-verify phase — never silently ship a wrong number). Surface the gate verdict
+  in `report.md`.
+- Needs only `material_seed.json` — no dependency on figures. Runs in the worker (the
+  inference server `192.168.1.205:8083` is reachable there).
+- The legacy single-material LLM subagent (`.pi/agents/material-gen-subagent.md`) is retained
+  only as a fallback; the seeded tiered step above is the default path.
+- **LaTeX compilation waits for the three tier files.**
+
 ---
 
 ## FIGURE VERIFICATION PHASE — runs after Subagent B, before LaTeX
@@ -980,6 +1099,8 @@ re-run the subagent.
 Begins only after **all** of these exist / hold:
 - `analysis_output/plots/summary_panel.png` (Subagent B complete)
 - `analysis_output/data/questions.json` (Subagent C complete)
+- `analysis_output/data/material.{basic,intermediate,advanced}.json` (Subagent D — the
+  three difficulty tiers; legacy `material.json` accepted as fallback)
 - figure verification passed (deterministic + visual), or retries exhausted
 
 **The `.tex` is now SEEDED, deterministic code — do NOT hand-write LaTeX.** Authoring
@@ -992,16 +1113,23 @@ and invalid macros (`\SI{N/A}{rad/s}` from unguarded null stats). Both are gone:
 ```bash
 python -m analysis.render.report
 ```
-This writes `analysis_output/report/student_edition.tex` and `teacher_key.tex` from
-`stats.json` + `questions.json` (Subagent C must have finished). It sets
-`\graphicspath` so every figure resolves regardless of compile CWD, null-guards every
-value, LaTeX-escapes all text, embeds the scene title, and puts answers + hints in the
-teacher key. Do NOT edit the graphics paths or re-author the document.
+This writes the report `.tex` from `stats.json` + `questions.json` (Subagent C) +
+the material from Subagent D. **When the three tier files exist it emits one PDF pair
+PER TIER** — `student_edition.{basic,intermediate,advanced}.tex` and
+`teacher_key.{basic,intermediate,advanced}.tex` — each with a difficulty-matched figure
+set (basic 2 figs / intermediate 3 + core table / advanced 5 + full table) and a per-tier
+accent + LEVEL badge. (Legacy untiered jobs still emit a single `student_edition.tex` /
+`teacher_key.tex`.) It sets `\graphicspath` so every figure resolves regardless of compile
+CWD, null-guards every value, LaTeX-escapes all text, embeds the scene title, and puts
+answers + hints in the teacher key. Do NOT edit the graphics paths or re-author the document.
 
-**9.2 — Compile both PDFs in parallel using the latex-document-skill** (not raw pdflatex):
+**9.2 — Compile every emitted `.tex` in parallel using the latex-document-skill** (not raw
+pdflatex). Compile each `.tex` that `analysis.render.report` produced — for the tiered path
+that is six files (student + teacher × 3 tiers):
 ```bash
-bash /latex-skill/scripts/compile_latex.sh analysis_output/report/student_edition.tex --preview --preview-dir analysis_output/report &
-bash /latex-skill/scripts/compile_latex.sh analysis_output/report/teacher_key.tex --preview --preview-dir analysis_output/report &
+for f in analysis_output/report/student_edition*.tex analysis_output/report/teacher_key*.tex; do
+  bash /latex-skill/scripts/compile_latex.sh "$f" --preview --preview-dir analysis_output/report &
+done
 wait
 ```
 
@@ -1032,8 +1160,9 @@ Include:
 5. Summary statistics table
 6. Phase boundaries from `phases.json`
 7. Validation flags raised (if any)
-8. Question bank summary (count, Bloom's distribution, regenerations)
-9. Subagent status: completed / failed / skipped (A, B, C)
+8. Question bank summary (count, difficulty distribution [easy/intermediate/advanced], format coverage [text/image/graph/table], regenerations)
+8b. Learning-material tiers: which tiers were written (basic/intermediate/advanced) and the grounding-gate verdict from `material_tiers_gate.json` (passed, or the flagged issues per tier)
+9. Subagent status: completed / failed / skipped (A, B, C, D)
 10. Full output file manifest — all PDFs, videos, plots, CSVs, JSONs
 
 ---
@@ -1071,7 +1200,7 @@ analysis_output/
     phases.json
     questions.json
     question_quality_log.json
-    bloom_distribution.json
+    difficulty_distribution.json
   video_annotation/
     annotated_video.mp4                 ← annotated cropped video
     contact_sheets/

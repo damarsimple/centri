@@ -1,15 +1,20 @@
 {
   "providers": {
-    "llama.cpp-lab2": {
-      "baseUrl": "http://192.168.1.205:8083",
+    "llama.cpp-lab1": {
+      "baseUrl": "http://192.168.1.205:8083/v1",
       "api": "openai-completions",
-      "apiKey": "lazailai",
-      "authHeader": true,
+      "apiKey": "hwanglabyoungdumbandbreak",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
       "models": [
         {
           "id": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
-          "name": "Qwen 3.6 35B",
-          "input": ["text", "image"]
+          "name": "Qwen3.6-35B-A3B-UD-Q4_K_XL",
+          "input": ["text", "image"],
+          "contextWindow": 184320,
+          "reasoning": true
         }
       ]
     }

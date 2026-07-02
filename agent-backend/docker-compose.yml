@@ -15,11 +15,14 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: redis-server --save 60 1 --appendonly yes --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    volumes:
+      - redis_data:/data
 
   api:
     build: .
@@ -35,9 +38,9 @@ services:
       - PI_MODEL=${PI_MODEL}
       - TRACKING_API_URL=${TRACKING_API_URL}
       - PI_INFERENCE_URL=${PI_INFERENCE_URL}
-      - TEMPLATE_DIR=/app/templates/basetemplate-turntable-1
+      - TEMPLATE_DIR=${TEMPLATE_DIR}
       - PROMPT_FILE=/app/prompts/orchestrator.txt
-      - WORKSPACE_DIR=/app/workspaces
+      - WORKSPACE_DIR=${WORKSPACE_DIR}
       - WORKSPACE_TTL_HOURS=${WORKSPACE_TTL_HOURS}
       - PI_INFERENCE_API_KEY=${PI_INFERENCE_API_KEY}
       - PI_ANALYZER_TIMEOUT=${PI_ANALYZER_TIMEOUT}
@@ -54,7 +57,7 @@ services:
       - ./templates:/app/templates
       - ./workspace_lib:/app/workspace_lib
       - ./.pi:/root/.pi
-      - ./workspaces:/app/workspaces
+      - ${WORKSPACE_DIR}:${WORKSPACE_DIR}
       - ./latex-skill:/latex-skill:ro
 
   worker:
@@ -64,9 +67,9 @@ services:
       - API_KEY=${API_KEY}
       - PI_MODEL=${PI_MODEL}
       - TRACKING_API_URL=${TRACKING_API_URL}
-      - TEMPLATE_DIR=/app/templates/basetemplate-turntable-1
+      - TEMPLATE_DIR=${TEMPLATE_DIR}
       - PROMPT_FILE=/app/prompts/orchestrator.txt
-      - WORKSPACE_DIR=/app/workspaces
+      - WORKSPACE_DIR=${WORKSPACE_DIR}
       - WORKSPACE_TTL_HOURS=${WORKSPACE_TTL_HOURS}
       - PI_TIMEOUT_SECONDS=${PI_TIMEOUT_SECONDS}
       - PI_INFERENCE_URL=${PI_INFERENCE_URL}
@@ -85,14 +88,14 @@ services:
       - ./templates:/app/templates
       - ./workspace_lib:/app/workspace_lib
       - ./.pi:/root/.pi
-      - ./workspaces:/app/workspaces
+      - ${WORKSPACE_DIR}:${WORKSPACE_DIR}
       - ./latex-skill:/latex-skill:ro
 
   beat:
     build: .
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - WORKSPACE_DIR=/app/workspaces
+      - WORKSPACE_DIR=${WORKSPACE_DIR}
       - WORKSPACE_TTL_HOURS=${WORKSPACE_TTL_HOURS}
       - PYTHONPATH=/app
     command: celery -A worker.celery_app beat --loglevel=info
@@ -105,8 +108,9 @@ services:
       - ./prompts:/app/prompts
       - ./templates:/app/templates
       - ./.pi:/root/.pi
-      - ./workspaces:/app/workspaces
+      - ${WORKSPACE_DIR}:${WORKSPACE_DIR}
       - ./latex-skill:/latex-skill:ro
 
 volumes:
   caddy_data:
+  redis_data:

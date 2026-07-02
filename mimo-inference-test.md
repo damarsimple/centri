@@ -1,6 +1,6 @@
 # MiMo Inference Test Report
 
-_Date: 2026-06-12_
+_Date: 2026-06-12 — **Reverted 2026-06-21**: switched back to local Qwen (`llama.cpp-lab1`, `192.168.1.205:8083`, key `hwanglabyoungdumbandbreak`). See `.env` and `.pi/agent/models.json`._
 
 Tested Xiaomi MiMo platform as a replacement for the local Qwen inference server (`192.168.1.205:8083`) for the `pi` agent in the measurement backend.
 
@@ -57,4 +57,4 @@ Tested Xiaomi MiMo platform as a replacement for the local Qwen inference server
 
 MiMo Flash via the built-in `xiaomi` provider is a viable alternative to the local Qwen server. It's slower (~11 min vs ~4 min) but more reliable (no shared-GPU crashes, no model unloading). Worth considering if the Qwen instability continues to be a problem.
 
-**To revert:** change `PI_MODEL` back to `llama.cpp-lab2/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`, `PI_INFERENCE_URL` to `http://10.0.0.2:8083`, and restore the `Authorization: Bearer` header in `app/llm.py`.
+**Reverted 2026-06-21:** `PI_MODEL=llama.cpp-lab1/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`, `PI_INFERENCE_URL=http://192.168.1.205:8083`, key `hwanglabyoungdumbandbreak` in `.pi/agent/models.json`.

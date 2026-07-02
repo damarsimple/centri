@@ -128,22 +128,29 @@ def _cropped_video() -> Path | None:
     return hits[-1] if hits else None
 
 
+def _first_frame():
+    """RGB array of the first cropped frame, or None. Extracts to first_frame.jpg
+    once (the basic variant reuses the file rather than re-running ffmpeg)."""
+    tmp = PLOTS / "first_frame.jpg"
+    if not tmp.exists():
+        vid = _cropped_video()
+        if vid is not None:
+            subprocess.run(["ffmpeg", "-y", "-i", str(vid), "-vframes", "1",
+                            "-q:v", "2", str(tmp)], capture_output=True)
+    if tmp.exists():
+        import cv2
+        bgr = cv2.imread(str(tmp))
+        if bgr is not None:
+            return bgr[:, :, ::-1]  # BGR→RGB for matplotlib
+    return None
+
+
 def fig_annotated_image(stats, scene):
     """First cropped frame with the fitted orbit + centre overlaid (cropped space)."""
     cal = stats["calibration"]
     cx, cy = cal.get("cx_px"), cal.get("cy_px")
     r_fit_px = cal.get("r_fit_px")
-    vid = _cropped_video()
-    frame = None
-    if vid is not None:
-        tmp = PLOTS / "first_frame.jpg"
-        subprocess.run(["ffmpeg", "-y", "-i", str(vid), "-vframes", "1", "-q:v", "2", str(tmp)],
-                       capture_output=True)
-        if tmp.exists():
-            import cv2
-            bgr = cv2.imread(str(tmp))
-            if bgr is not None:
-                frame = bgr[:, :, ::-1]  # BGR→RGB for matplotlib
+    frame = _first_frame()
     fig, ax = plt.subplots(figsize=(6, 6))
     if frame is not None:
         ax.imshow(frame)
@@ -203,6 +210,61 @@ def fig_trajectory(stats, cols, scene):
     fig.savefig(PLOTS / "trajectory.png")
     plt.close(fig)
     return xp, yp
+
+
+def fig_annotated_image_basic(stats, scene):
+    """Basic-tier annotated frame: just the circular path + the radius, in plain
+    language. No axis/pixel jargon, no vectors — one idea (it goes in a circle, this
+    far out). Reuses first_frame.jpg written by fig_annotated_image."""
+    cal = stats["calibration"]
+    cx, cy = cal.get("cx_px"), cal.get("cy_px")
+    r_fit_px = cal.get("r_fit_px")
+    obj = stats.get("object_name") or scene or "object"
+    frame = _first_frame()
+    fig, ax = plt.subplots(figsize=(6, 6))
+    if frame is not None:
+        ax.imshow(frame)
+    if None not in (cx, cy) and r_fit_px:
+        ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color="#00E676", lw=2.5))
+        ax.plot([cx], [cy], "+", color="#00E676", ms=14, mew=2)
+        # radius as a labelled arrow from the centre outward (plain words, no symbol)
+        ax.annotate("", xy=(cx + r_fit_px, cy), xytext=(cx, cy),
+                    arrowprops=dict(arrowstyle="->", color="#00E676", lw=2.2))
+        ax.text(cx + r_fit_px / 2, cy, f"radius {_fmt(cal.get('r_fit_m'), 2, 'm')}",
+                color="white", fontsize=12, va="bottom", ha="center",
+                bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
+    ax.set_title(_title(scene, f"The {obj} moves in a circle"))
+    ax.axis("off")  # a novice doesn't need pixel coordinates
+    fig.tight_layout()
+    fig.savefig(PLOTS / "annotated_image_basic.png")
+    plt.close(fig)
+
+
+def fig_trajectory_basic(stats, cols, scene):
+    """Basic-tier path: the traced points as one circle, single colour, no phase
+    legend or per-frame colouring — shows 'it keeps coming back around', nothing more."""
+    cal = stats["calibration"]
+    cx, cy = cal.get("cx_px"), cal.get("cy_px")
+    ppm = cal.get("px_per_m") or 1.0
+    r_fit_m = cal.get("r_fit_m")
+    x_px, y_px = cols.get("x_px"), cols.get("y_px")
+    m = np.isfinite(x_px) & np.isfinite(y_px)
+    x_m = (x_px[m] - cx) / ppm
+    y_m = (y_px[m] - cy) / ppm
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(x_m, y_m, s=10, color="#1E88E5")
+    if r_fit_m:
+        ax.add_patch(plt.Circle((0, 0), r_fit_m, fill=False, ls="--",
+                                 color="#37474F", lw=1.8))
+    ax.plot([0], [0], "+", color="black", ms=12, mew=2)
+    ax.set_aspect("equal", "box")
+    ax.set_xlabel("distance across (m)")
+    ax.set_ylabel("distance up/down (m)")
+    ax.set_title(_title(scene, "The circular path it traced"))
+    ax.invert_yaxis()
+    fig.tight_layout()
+    fig.savefig(PLOTS / "trajectory_basic.png")
+    plt.close(fig)
 
 
 def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
@@ -302,7 +364,9 @@ def main() -> int:
     stable_ac = st.get("stable_mean_ac")
 
     fig_annotated_image(stats, scene)
+    fig_annotated_image_basic(stats, scene)  # simplified frame for the basic tier
     traj_x, traj_y = fig_trajectory(stats, cols, scene)
+    fig_trajectory_basic(stats, cols, scene)  # single-colour path for the basic tier
     # ω(t) with phase bands == the "annotated graph"
     _series_plot("annotated_graph.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity & phases",
@@ -333,7 +397,8 @@ def main() -> int:
         "source": "kinematics.csv:x_px,y_px",
     }}
     (PLOTS / "figure_qa.json").write_text(json.dumps(qa, indent=2))
-    print(f"FIGURES OK — wrote 9 plots + summary_panel.png to {PLOTS}/ (scene='{scene}')")
+    print(f"FIGURES OK — wrote 9 plots + summary_panel.png + 2 basic-tier variants "
+          f"to {PLOTS}/ (scene='{scene}')")
     return 0
 
 

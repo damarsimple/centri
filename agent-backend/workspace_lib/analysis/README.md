@@ -86,12 +86,17 @@ video_info:            { fps, duration_s, n_raw_frames }
 tracking:              { coverage_pct, n_valid_frames, n_inliers, n_outliers_rejected, active_duration_s, n_interpolated_frames }
 calibration:           { cx_px, cy_px, center_source, center_drift_px, px_per_m,
                          diameter_px, physical_size_m, physical_size_source, r_fit_px, r_fit_m }
+                         # center_source ∈ {user_mark, bootstrap, ransac_fit, ransac_override}
 summary:               { mean_r_m, std_r_m, mean_omega, std_omega, mean_v, mean_ac, max_ac, rotation_direction }
 period_and_frequency:  { period_s, frequency_hz, T_primary, T_fft, period_discrepancy }
 stable_phase:          { stable_mean_omega, stable_mean_ac, stable_omega_r2, stable_omega_std_err, n_stable_segments }
 phase_boundaries:      { increase_start_omega, increase_end_omega, decrease_end_omega }
+angular_acceleration:  { motion_type, alpha_rad_s2, alpha_r2, omega_initial, omega_final, a_t_mean_m_s2 }
+                         # motion_type ∈ {uniform, accelerating, decelerating}; line-vs-parabola
+                         # fit on theta(t). Non-uniform suppresses period_mismatch /
+                         # unstable_phase_linearity and reports a_t = |alpha|*r.
 roi_crop:              { ... passthrough ... }
-validation_flags:      [ ... ]
+validation_flags:      [ ... ]   # incl. center_overridden_from_mark (off-axis mark replaced by fit)
 phases:                { phase_labels, stable_segments }
 ```
 
