@@ -843,7 +843,18 @@ else:
 # screen" → "red phone", "black circular turntable" → "turntable"), join with "on".
 # It is cosmetic only — the frozen contract falls back to "<tracked> on <ref>" if
 # omitted, so never block on it.
-scene_title = f"{tracked_label} on {ref_label}"   # replace with a cleaner short form
+# Learner-facing DISPLAY label + scene title, DECOUPLED from the tracking cue.
+# visual_cues/tracked_label/ref_label stay the SAM3 detection prompts (unchanged), so a
+# reliable tracking prompt ("black ball") can differ from the correct learner label
+# ("black handle"). A sidecar may set "object_name" and/or "scene_title" to override the
+# display; otherwise fall back to the condensed "<tracked> on <ref>" short form.
+object_name = sidecar.get("object_name") or tracked_label
+if sidecar.get("scene_title"):
+    scene_title = sidecar["scene_title"]
+elif sidecar.get("object_name"):
+    scene_title = object_name
+else:
+    scene_title = f"{tracked_label} on {ref_label}"   # condense to a cleaner short form
 
 # ── Per-frame tracked-object centroid, FULL-FRAME (display) space ────────────
 # CRITICAL: emit the RAW tracker coordinates (full-frame / display space) — use
@@ -984,16 +995,17 @@ python -m analysis.render.annotate     # annotated_video.mp4 (banner + symbols-o
 ```
 These produce the plots and the annotated video correctly (right cropped coordinate
 space, scene title, overlays scaled to the frame, NO numeric values on the video). The
-question generator (Subagent C) has no seeded module — it stays a real LLM subagent.
-The material generator (Subagent D) has a seeded *seed* (`material_seed.json`, written by
-Step 6) but the prose itself is a real LLM subagent.
+question generator (Subagent C) is **gated OFF by default** (see its section below) — the
+deliverable is the learning material. The material generator (Subagent D) has a seeded
+*seed* (`material_seed.json`, written by Step 6) but the prose itself is a real LLM subagent.
 
 After STEP 0, spawn the subagents — but with STEP 0 done their role is **verification
 and optional light polish only**, NOT re-authoring. Subagent A (video) and B (figures)
 must run/inspect the seeded output above; if a result genuinely looks wrong they may
 adapt the relevant `analysis/render/*.py` and re-run it — they must NEVER write a fresh
 overlay/plot from scratch, plot from `api_cache.json`, or draw numeric values on the
-video. Subagent C generates the questions.
+video. Subagent C (questions) is gated off by default — do not spawn it unless
+`PI_RENDER_QUESTIONS=1` (see its section).
 
 Pass each subagent:
 1. Its subagent definition file (as system prompt)
@@ -1028,11 +1040,16 @@ offset to the original frame if needed.
 - Outputs: all plots in `analysis_output/plots/` + `figure_qa.json` (plot provenance)
 - **LaTeX compilation waits for this subagent AND the figure-verification phase below.**
 
-### Subagent C — Question Generation
-- Definition: `.pi/agents/question-gen-subagent.md`
-- Output: `analysis_output/data/questions.json`
-- **LaTeX compilation waits for this subagent.**
-- Needs only `stats.json` — no dependency on figures.
+### Subagent C — Question Generation  ⛔ DISABLED BY DEFAULT
+- **Do NOT spawn this subagent unless `PI_RENDER_QUESTIONS=1` is set in the environment.**
+  The deliverable is the learning MATERIAL (Subagent D), not a worksheet; questions are gated
+  off (they are not the evaluated artifact and add a failure surface). The renderer likewise
+  drops the Questions section unless `PI_RENDER_QUESTIONS=1`.
+- **LaTeX compilation does NOT wait for questions** — `questions.json` is optional; if absent
+  the report renders without a Questions section (the renderer already tolerates this).
+- To re-enable (e.g. a P-MAGIC question comparison): set `PI_RENDER_QUESTIONS=1`, then spawn
+  this subagent (Definition: `.pi/agents/question-gen-subagent.md`, output
+  `analysis_output/data/questions.json`, needs only `stats.json`). The code is intact.
 
 ### Subagent D — Learning Material Generation (SEEDED, difficulty-tiered)
 - **This is now a seeded deterministic STEP, not an LLM subagent spawn.** Run:
@@ -1098,7 +1115,6 @@ re-run the subagent.
 
 Begins only after **all** of these exist / hold:
 - `analysis_output/plots/summary_panel.png` (Subagent B complete)
-- `analysis_output/data/questions.json` (Subagent C complete)
 - `analysis_output/data/material.{basic,intermediate,advanced}.json` (Subagent D — the
   three difficulty tiers; legacy `material.json` accepted as fallback)
 - figure verification passed (deterministic + visual), or retries exhausted
@@ -1113,8 +1129,8 @@ and invalid macros (`\SI{N/A}{rad/s}` from unguarded null stats). Both are gone:
 ```bash
 python -m analysis.render.report
 ```
-This writes the report `.tex` from `stats.json` + `questions.json` (Subagent C) +
-the material from Subagent D. **When the three tier files exist it emits one PDF pair
+This writes the report `.tex` from `stats.json` + the material from Subagent D
+(questions are omitted unless `PI_RENDER_QUESTIONS=1`). **When the three tier files exist it emits one PDF pair
 PER TIER** — `student_edition.{basic,intermediate,advanced}.tex` and
 `teacher_key.{basic,intermediate,advanced}.tex` — each with a difficulty-matched figure
 set (basic 2 figs / intermediate 3 + core table / advanced 5 + full table) and a per-tier

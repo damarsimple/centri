@@ -36,12 +36,23 @@ TIERS = {
     "basic": {
         "bloom": "Remember / Understand",
         "interactivity": "low",
-        "seed_fields": "object name, rotation direction, clip duration, and the radius "
-                       "(as 'how far out it sits') plus the IDEA of an inward pull. "
-                       "You may name 'centripetal acceleration' once, in words.",
-        "forbidden": "NO symbols (omega/alpha/v/a_c), NO equations or formula derivations, "
-                     "NO numeric substitution beyond the radius and the duration, NO "
-                     "time-evolution analysis with numbers.",
+        "seed_fields": "object name, rotation direction, clip duration, the radius "
+                       "(as 'how far out it sits'), the PERIOD as a plain number of seconds "
+                       "('one full turn takes about T seconds'), and angular velocity taught "
+                       "as a LIVED IDEA (NOT a symbol): the object sweeps around by a growing "
+                       "angle as time passes — describe it in degrees or fractions of a turn "
+                       "per second (e.g. 'about a quarter-turn, roughly 90 degrees, each "
+                       "second'; 'after two seconds it has swept about halfway around'). "
+                       "Plus the IDEA of an inward pull; you may name 'centripetal "
+                       "acceleration' once, in words.",
+        "forbidden": "NO symbols (omega/alpha/v/a_c) and NO rad/s, NO equations or formula "
+                     "derivations, NO numeric substitution beyond the radius, the duration, "
+                     "the period in seconds and the qualitative degrees-per-second sweep, and "
+                     "NO rate-of-change VALUE for the turn rate (speeding up / slowing down is "
+                     "described in plain words only, never as alpha or a computed rate). The "
+                     "'How the variables are related' section MUST stay QUALITATIVE — explain "
+                     "in words that a bigger circle or a faster sweep needs a stronger inward "
+                     "pull; do NOT state a centripetal-acceleration or speed NUMBER there.",
         "figures": "Only two pictures: (1) a frame from the video showing the object on its "
                    "circular path with the radius marked from the centre, and (2) a plot of "
                    "the traced path showing every point falls on one circle. There is NO "
@@ -53,16 +64,24 @@ TIERS = {
     "intermediate": {
         "bloom": "Apply / Analyze",
         "interactivity": "moderate",
-        "seed_fields": "the radius, angular velocity (omega), tangential speed (v), "
-                       "centripetal acceleration (a_c), period (T), frequency (f) WITH their "
-                       "measured values and units, and the relations v=omega*r, "
-                       "a_c=v^2/r=omega^2*r, T=2*pi/omega=1/f shown to hold for THIS object.",
+        "seed_fields": "the radius, angular velocity (omega), centripetal acceleration (a_c), "
+                       "period (T), frequency (f) WITH their measured values and units, and the "
+                       "relations a_c=omega^2*r and T=2*pi/omega=1/f. Present the relations in "
+                       "an EXPLICIT, STRUCTURED way — name each quantity, state the relation, "
+                       "then substitute this object's number (e.g. 'omega --(x r, then "
+                       "squared)--> a_c') — so the reader sees HOW the variables are wired "
+                       "together, shown to hold for THIS object. Tangential speed (v) is NOT a "
+                       "headline variable at this tier: do NOT build on v=omega*r or a_c=v^2/r, "
+                       "and do NOT list v as a measured variable; v may appear at most as a "
+                       "one-clause aside if it truly aids intuition.",
         "forbidden": "Do NOT make the motion's change over time the main point (one sentence "
                      "of context is fine), NO angular-acceleration value or timeline, NO "
-                     "scale/calibration-caveat discussion.",
+                     "scale/calibration-caveat discussion, NO tangential-speed derivation as a "
+                     "core relation.",
         "figures": "An annotated frame with the radius, a short data table of the core "
-                   "measurements (radius, omega, v, a_c, period, frequency), one graph of "
-                   "tangential speed over time, and the traced circular path. Do not mention "
+                   "measurements (radius, angular velocity, centripetal acceleration, period, "
+                   "frequency), one graph of the turn-rate (angular velocity) over time, and "
+                   "the traced circular path. Do not mention tangential-speed graphs, "
                    "angular-acceleration graphs or a summary panel.",
         "test": "Does the passage coordinate a handful of interacting quantities through the "
                 "standard relations, applied to this object's numbers?",
@@ -79,8 +98,8 @@ TIERS = {
                      "higher-order integration over time and at limits.",
         "figures": "An annotated frame, the full measurements table (including angular "
                    "acceleration and the calibration), graphs of angular velocity and "
-                   "centripetal acceleration over time, and a summary panel that combines the "
-                   "views, plus the traced path.",
+                   "centripetal acceleration over time, and the traced circular path. (There "
+                   "is no combined summary panel — do not mention one.)",
         "test": "Does the passage integrate several quantities AND their change over time, and "
                 "reason about proportionality, limits, or what the measurement does/doesn't pin down?",
     },
@@ -148,7 +167,18 @@ SYSTEM_TMPL = (
     "not mention any plot or table that is not in that list.\n"
     "6. The element interactivity AND the Bloom objective must both point to {tier} — if they "
     "disagree, rewrite.\n"
-    "7. WRITER'S TEST for this tier: {test}\n\n"
+    "7. WRITER'S TEST for this tier: {test}\n"
+    "8. Teach the PHYSICS, not the measurement pipeline. This is a physics lesson about the "
+    "object's motion, never a tracking/analysis report. Do NOT use the words track/tracked/"
+    "tracking, pipeline, detected/detection, coverage, fps/frame rate, validation flag, ROI, "
+    "pixel, bounding box, 'the tool/the model', and never write a figure filename "
+    "(e.g. omega_t.png). Refer to figures by what they SHOW ('the graph of how the angle "
+    "grows', 'the annotated frame') and speak about the object's motion, not how it was captured.\n"
+    "9. Plain Unicode ONLY — never LaTeX or backslashes. PREFER the actual Unicode characters "
+    "ω, α, π, ², · (not the spelled-out words 'omega'/'alpha'); write subscripts as plain "
+    "ASCII a_c, a_t. NEVER emit $...$, \\omega, \\times, or any backslash: a stray backslash "
+    "makes the JSON invalid and unparseable.\n"
+    "{quality_policy}\n"
     "Return ONLY a JSON object (no markdown fences, no prose outside JSON) with keys: "
     "object_name, scene_title, tier, bloom_objective, element_interactivity, "
     "concepts_introduced (list of the seed symbols/relations this tier actually used), "
@@ -241,14 +271,16 @@ def _arith_fails(text, rel_tol=0.02):
     return fails
 
 
-def _tier_issues(tier, text):
+def _tier_issues(tier, text, unreliable=False):
     issues, t = [], text
     if tier == "basic":
         hits = [s for s in [r"=", r"\^2", r"²", r"ω", r"\bomega\b", r"α", r"\balpha\b",
                             r"v\s*=", r"a_c", r"rad/s"] if re.search(s, t)]
         if hits:
             issues.append(f"basic tier contains equation/symbol markers: {hits}")
-    if tier == "advanced":
+    if tier == "advanced" and not unreliable:
+        # On an oblique clip the advanced tier CANNOT cite alpha or a timeline instant
+        # (both are per-instant/unreliable) — only require them when the measurement is good.
         if not re.search(r"alpha|α", t):
             issues.append("advanced tier: no angular acceleration (alpha) mentioned")
         if not re.search(rf"t\s*[=≈~]\s*{NUM}\s*s", _norm(t)):
@@ -282,17 +314,57 @@ def _gate(obj, seed):
     """Return a list of issue strings (empty = passes)."""
     text = " ".join(v for v in obj.get("sections", {}).values() if isinstance(v, str))
     tier = obj.get("tier")
-    issues = [f"arithmetic: {f['claim']} -> computes {f['computed']}, stated {f['stated']}"
-              for f in _arith_fails(text)]
-    issues += _tier_issues(tier, text)
+    # When per-instant omega is unreliable (oblique capture), the material is REQUIRED to
+    # avoid per-instant/timeline claims (see _quality_policy). So skip the checks that
+    # assume them: the a_c=omega^2*r-at-an-instant arithmetic and the advanced-tier
+    # timeline-instant/alpha requirement — enforcing them would penalise correct hedging.
+    unreliable = not (seed.get("measurement_quality") or {}).get("reliable", True)
+    issues = []
+    if not unreliable:
+        issues += [f"arithmetic: {f['claim']} -> computes {f['computed']}, stated {f['stated']}"
+                   for f in _arith_fails(text)]
+    issues += _tier_issues(tier, text, unreliable=unreliable)
     issues += _motion_issues(seed, text)
     return issues
 
 
 # ----------------------------------------------------------------------------- main
+def _quality_policy(seed) -> str:
+    """Hedging clause when per-instant omega is unreliable (oblique-capture artifact).
+    Empty string when the measurement is reliable — normal narration."""
+    mq = seed.get("measurement_quality") or {}
+    if not mq or mq.get("reliable", True):
+        return ""
+    return (
+        "10. MEASUREMENT-QUALITY OVERRIDE (this clip, overrides any 'narrate the timeline / "
+        "turn-rate over time' instruction above): " + (mq.get("guidance") or "") +
+        " You MUST NOT narrate the timeline, quote any per-instant angular-velocity value, "
+        "describe the detailed shape of the omega(t) curve, or claim the object speeds up/slows "
+        "down WITHIN a revolution. You MAY still state the OVERALL qualitative trend across the "
+        "WHOLE clip — if the motion type is accelerating/decelerating, say plainly that it "
+        "gradually speeds up / slows down over the clip (that whole-clip trend is robust; only "
+        "the per-instant and per-revolution detail is unreliable). Any numbers you cite (ONLY "
+        "quantities your tier already permits — introduce no new ones) must be time-AVERAGE "
+        "values; do NOT numerically verify a_c = omega^2*r or v = omega*r for this clip (that "
+        "needs a reliable per-instant value) — present those relations structurally and label "
+        "the values as clip averages, without asserting the identity closes to an exact number. "
+        "In 'What the video shows over time' and 'Reading the figures', include ONE plain "
+        "sentence that the "
+        "per-instant angular velocity is not reliably recoverable because the orbit was filmed "
+        "at an oblique angle, and describe any time graph only at that level — never reading its "
+        "wiggles as real physics."
+    )
+
+
 def _generate(tier, facts, seed):
     spec = TIERS[tier]
-    system = SYSTEM_TMPL.format(tier=tier, tier_upper=tier.upper(), **spec)
+    quality_policy = _quality_policy(seed)
+    if quality_policy:
+        # Don't hand the model a per-instant timeline it must not use — remove the
+        # temptation entirely when the measurement is flagged unreliable.
+        facts = re.sub(r"time-anchored samples.*", "", facts, flags=re.S)
+    system = SYSTEM_TMPL.format(tier=tier, tier_upper=tier.upper(),
+                                quality_policy=quality_policy, **spec)
     user = ("Ground-truth measurements for this clip:\n\n" + facts +
             f"\n\nWrite the {tier.upper()} passage now, following every rule and using "
             "the exact five section headers as JSON keys.")

@@ -13,6 +13,8 @@ import csv
 import json
 from pathlib import Path
 
+from . import quality_signals
+
 DATA = Path("analysis_output/data")
 N_TIMELINE = 4  # time-anchored samples across the active window
 
@@ -120,8 +122,17 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
         }
 
     timeline = []
+    measurement_quality = None
     if csv_path and Path(csv_path).exists():
         timeline = _timeline_from_csv(Path(csv_path))
+        # Trust channel for the LLM: is per-instant omega reliable, or is the omega(t)
+        # ripple a viewing-angle (oblique-capture) projection artifact? Drives the
+        # hedging policy in material_tiers.py so the prose can't launder an artifact.
+        try:
+            sig = quality_signals.compute(Path(csv_path), stats)
+            measurement_quality = quality_signals.build_quality_block(sig, stats)
+        except Exception:
+            measurement_quality = None
 
     return {
         "object_name": stats.get("object_name"),
@@ -154,6 +165,7 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
                 "timeline instant, where every identity closes exactly."),
         },
         "validation_flags": stats.get("validation_flags", []),
+        "measurement_quality": measurement_quality,
     }
 
 

@@ -267,20 +267,45 @@ def fig_trajectory_basic(stats, cols, scene):
     plt.close(fig)
 
 
+def _smooth_1rev(t, y, stats):
+    """Moving average over ~one revolution. Averaging over exactly one period
+    cancels a 1x/rev (and 2x/rev) sinusoid — so it removes the viewing-angle
+    projection ripple while preserving the real slow trend. NaN-aware."""
+    y = np.asarray(y, float)
+    fps = (stats.get("video_info") or {}).get("fps") or 30.0
+    T = (stats.get("period_and_frequency") or {}).get("period_s") or 0.0
+    w = int(round(T * fps)) or max(5, len(y) // 20)
+    w = max(5, w | 1)  # odd, >=5
+    valid = np.isfinite(y)
+    yy = np.where(valid, y, 0.0)
+    k = np.ones(w)
+    num = np.convolve(yy, k, mode="same")
+    den = np.convolve(valid.astype(float), k, mode="same")
+    return np.where(den > 0, num / den, np.nan)
+
+
 def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
-                 hline=None, hline_lbl=None, star_peak=False):
+                 hline=None, hline_lbl=None, star_peak=False, smooth_trend=False):
     t = cols.get("time_s")
     y = cols.get(col)
     labels = stats.get("phases", {}).get("phase_labels") or []
     fig, ax = plt.subplots(figsize=(8, 5))
     _shade_phases(ax, t, labels)
-    ax.plot(t, y, color=colour, lw=1.6)
+    if smooth_trend:
+        # Oblique-capture clip: the per-instant curve is a projection artifact. Show the
+        # raw values faintly and the 1-revolution trend boldly (the real physics).
+        ax.plot(t, y, color=colour, lw=0.8, alpha=0.22)
+        ax.plot(t, _smooth_1rev(t, y, stats), color=colour, lw=2.6,
+                label="1-revolution trend")
+        ax.legend(fontsize=8, loc="best")
+    else:
+        ax.plot(t, y, color=colour, lw=1.6)
     if hline is not None and np.isfinite(hline):
         ax.axhline(hline, ls="--", color="#455A64", lw=1.2,
                    label=hline_lbl or None)
         if hline_lbl:
             ax.legend(fontsize=8, loc="best")
-    if star_peak:
+    if star_peak and not smooth_trend:  # the raw peak is the ripple artifact — don't mark it
         yy = np.where(np.isfinite(y), y, -np.inf)
         if np.isfinite(yy).any():
             i = int(np.nanargmax(yy))
@@ -358,6 +383,18 @@ def main() -> int:
     cols = _load_csv()
     scene = stats.get("scene_title") or stats.get("object_name") or ""
 
+    # Oblique-capture clips have a per-instant omega ripple that is a viewing-angle
+    # projection artifact, not real motion. When flagged, the omega(t)/a_c(t) plots show
+    # the 1-revolution trend (bold) over a faint raw trace, so the artifact ripple is not
+    # presented as physics. Data/stats are unchanged — only the plotted curve is smoothed.
+    unreliable = False
+    try:
+        from .. import quality_signals
+        sig = quality_signals.compute(DATA / "kinematics.csv", stats)
+        unreliable = "per_instant_omega_unreliable" in sig.get("flags", [])
+    except Exception:
+        unreliable = False
+
     s, st, pf = stats["summary"], stats["stable_phase"], stats["period_and_frequency"]
     stable_omega = st.get("stable_mean_omega")
     mean_r = s.get("mean_r_m")
@@ -370,21 +407,23 @@ def main() -> int:
     # ω(t) with phase bands == the "annotated graph"
     _series_plot("annotated_graph.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity & phases",
-                 TRACE["omega"], hline=stable_omega, hline_lbl="stable mean")
+                 TRACE["omega"], hline=stable_omega, hline_lbl="stable mean",
+                 smooth_trend=unreliable)
     _series_plot("omega_t.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity", TRACE["omega"],
-                 hline=stable_omega, hline_lbl="stable mean")
+                 hline=stable_omega, hline_lbl="stable mean", smooth_trend=unreliable)
     _series_plot("ac_t.png", cols, stats, scene, "ac_m_s2",
                  "centripetal acceleration (m/s^2)", "Centripetal acceleration",
-                 TRACE["ac"], hline=stable_ac, hline_lbl="stable mean", star_peak=True)
+                 TRACE["ac"], hline=stable_ac, hline_lbl="stable mean", star_peak=True,
+                 smooth_trend=unreliable)
     _series_plot("radius_t.png", cols, stats, scene, "r_m",
                  "radius (m)", "Orbit radius", TRACE["r"], hline=mean_r,
-                 hline_lbl="mean")
+                 hline_lbl="mean", smooth_trend=unreliable)
     _series_plot("theta_t.png", cols, stats, scene, "theta_rad",
                  "angle (rad)", "Unwrapped angle", TRACE["theta"])
     _series_plot("v_t.png", cols, stats, scene, "v_m_s",
                  "tangential speed (m/s)", "Tangential speed", TRACE["v"],
-                 hline=s.get("mean_v"), hline_lbl="mean")
+                 hline=s.get("mean_v"), hline_lbl="mean", smooth_trend=unreliable)
     fig_annotated_table(stats, scene)
     fig_summary_panel(scene)
 

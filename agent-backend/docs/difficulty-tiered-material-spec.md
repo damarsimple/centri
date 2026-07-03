@@ -44,8 +44,8 @@ allowed to draw on** — this is what makes the tiers reproducible instead of vi
 
 | Tier | Seed fields used | Math | CLT interactivity | Bloom objective built |
 |---|---|---|---|---|
-| **Basic** | `object_name`, `rotation_direction`, `active_duration_s`, `variables[r]` + the *idea* of an inward pull | none — words only; may *name* a_c but not manipulate it | **low** — one idea at a time | Remember / Understand |
-| **Intermediate** | + `variables[ω, v, a_c, T, f]` with values, + `relations` (v=ωr, a_c=v²/r=ω²r, T=2π/ω=1/f) | the core equations, shown to hold for *this object's* numbers | **moderate** — a handful of interacting variables in routine formula relationships | Apply / Analyze |
+| **Basic** | `object_name`, `rotation_direction`, `active_duration_s`, `variables[r]`, `period_s` (as plain seconds), the *qualitative* angle-sweep (degrees/turn per second) + the *idea* of an inward pull | none — words only; angle-over-time and one-turn-time in plain language; may *name* a_c but not manipulate it | **low** — one idea at a time | Remember / Understand |
+| **Intermediate** | + `variables[ω, a_c, T, f]` with values, + `relations` (a_c=ω²r, T=2π/ω=1/f); tangential speed v de-emphasised (aside only) | the core angular equations, shown structured to hold for *this object's* numbers | **moderate** — a handful of interacting variables in routine formula relationships | Apply / Analyze |
 | **Advanced** | + `angular_acceleration` (α, a_t=αr, spin-up/coast-down), + full `timeline` (time evolution), + the squared-sensitivity a_c ∝ ω², + `calibration_note` (scale-free vs absolute) | all of the above plus rates of change and proportional reasoning | **high** — many quantities integrated *simultaneously and over time*, with caveats/limits | Analyze / Evaluate |
 
 Each tier is **cumulative in rigor but self-contained**: the advanced passage may restate the
@@ -91,26 +91,51 @@ This lives in two places that **must agree**:
 
 ### TIER 1 — BASIC
 - **Bloom objective:** after reading, the learner can *recall and explain* that the object
-  moves in a circle and needs a constant pull toward the center to stay on it.
-- **Element interactivity: LOW.** One concept at a time. No equation is manipulated; relate
-  everything to everyday experience (a ball on a string, a car turning).
-- **Introduces:** the object and its circular path, the rotation direction, the clip length,
-  the radius as "how far out it sits," and qualitatively that *faster spin or a bigger
-  circle means a stronger inward pull*. May name "centripetal acceleration" once, in words.
-- **Forbidden:** ω/α symbols, formula derivations, numeric substitution beyond r and the
-  duration, time-evolution analysis.
+  moves in a circle, sweeps around by a growing angle over time, takes a fixed time to
+  complete one turn, and needs a constant pull toward the center to stay on it.
+- **Element interactivity: LOW.** One concept at a time, introduced in this order: circle →
+  radius → angle sweeps around over time → one full turn takes a fixed time → inward pull.
+  No equation is manipulated; relate everything to everyday experience (a ball on a string,
+  a clock hand, a car turning).
+- **Introduces:**
+  - the object and its circular path, the rotation direction, the clip length;
+  - the radius as "how far out it sits";
+  - **angular velocity as a lived idea, NOT a symbol** — the object sweeps around by an
+    angle as time passes; describe it in **degrees or fractions of a turn per second**
+    (e.g. "about a quarter-turn, roughly 90°, each second"; "after 2 seconds it has swept
+    about halfway around"). This is ω taught at the Understand level with no rad/s and no
+    formula.
+  - **the period** — "one full turn takes about T seconds" — as a concrete, graspable number;
+  - qualitatively that *faster spin or a bigger circle means a stronger inward pull*, and the
+    name "centripetal acceleration" for that inward pull (named once, in words, not computed).
+- **Forbidden:** ω/α **symbols** and rad/s, any formula or numeric substitution (beyond r,
+  the duration, the period in seconds, and the qualitative degrees-per-second sweep), and any
+  *rate-of-change* discussion of ω itself (speeding up/slowing is conveyed in plain words per
+  Constraint 4, but never as an α or a computed rate).
 - **WRITER'S TEST:** "Could a learner who has never seen the equations follow every sentence,
-  and would they end up holding one idea at a time?" If YES → Tier 1.
+  end up holding one idea at a time, and picture the angle sweeping around and one turn
+  taking T seconds?" If YES → Tier 1.
 
 ### TIER 2 — INTERMEDIATE
-- **Bloom objective:** after reading, the learner can *apply* v=ωr and a_c=v²/r=ω²r to this
-  object and *analyze* how the quantities depend on each other.
+- **Bloom objective:** after reading, the learner can *apply* a_c = ω²r and T = 2π/ω = 1/f to
+  this object and *analyze* how angular velocity, period, frequency and inward acceleration
+  depend on each other.
 - **Element interactivity: MODERATE.** Several variables interact, but inside the routine
   formula patterns the learner has seen.
-- **Introduces:** ω, v, a_c, T, f with their measured values and units; the relations, shown
-  numerically to hold for THIS object; reading the graph and table.
+- **Introduces:** **ω, a_c, T, f** with their measured values and units; the relations
+  a_c = ω²r and T = 2π/ω = 1/f, shown numerically to hold for THIS object; reading the graph
+  and table. **Present the relations in an explicit, structured way** — name each quantity,
+  state the relation, then substitute this object's number — so the learner sees *how the
+  variables are wired together* (e.g. "ω → (×r, squared) → a_c"), not a wall of prose.
+- **Tangential speed v is NOT a headline variable here.** Circular motion at this tier is
+  built on the angular quantities (ω, T, f) and the inward acceleration a_c = ω²r. Do **not**
+  introduce v = ωr or a_c = v²/r as the main relation; v may appear at most as a one-clause
+  aside if it genuinely aids intuition, never as a required step or a listed measured variable.
+  (Rationale: v²/r duplicates ω²r and adds an interacting element without new insight at this
+  tier — it belongs to the fuller treatment, not the moderate one.)
 - **Forbidden:** treating the motion as changing over time as the *main point* (a sentence of
-  context is fine), angular-acceleration dynamics, scale-caveat discussion.
+  context is fine), angular-acceleration dynamics, scale-caveat discussion, tangential-speed
+  derivations as a core relation.
 - **WRITER'S TEST:** "Does the passage coordinate a handful of interacting quantities through
   the standard relations, applied to this object's numbers, within a familiar pattern?"
   If YES → Tier 2.
@@ -202,6 +227,21 @@ This lives in two places that **must agree**:
     must not mention angular-acceleration graphs or the summary panel. The allowlist is passed
     into the prompt by `generate_tier_material.py` and mirrored by `TIER_ARTIFACTS` in the
     renderer — keep the two in lockstep.
+11. **Teach the physics, not the measurement pipeline (learning-focused language).** The
+    passage reads as a physics lesson about the phenomenon, never as a tracking/analysis
+    report. **Forbidden vocabulary:** "track/tracked/tracking", "pipeline", "detected/
+    detection", "coverage", "fps"/"frame rate", "validation flag", "ROI", "pixel", "bounding
+    box", "the tool/the model", and any raw figure **filename** (`omega_t.png`, `ac_t.png`, …).
+    Refer to figures by what they *show* ("the graph of how the angle grows", "the annotated
+    frame"), and speak about the object's motion ("the ball sweeps around…"), not about how it
+    was captured. This is intrinsic-vs-extraneous load (Constraint 7): measurement scaffolding
+    is pure extraneous load and must be stripped, especially at Basic.
+12. **Plain Unicode only — never LaTeX or backslashes in the JSON.** Write symbols as Unicode
+    (ω, α, ², ·, →) and subscripts as `a_c`, `a_t`, `v_t` (plain ASCII underscore — the
+    renderer turns these into proper subscripts). **Never** emit `$…$`, `\omega`, `\times`, or
+    any backslash: a stray `\o`/`\t` is an invalid JSON string escape and makes the whole
+    `material.{tier}.json` unparseable (a validated failure mode). If you would write math,
+    write it in words or plain Unicode instead.
 
 ---
 

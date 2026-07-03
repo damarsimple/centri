@@ -1,4 +1,82 @@
-# Session Checkpoint — 2026-06-22 (refresh 7)
+# Session Checkpoint — 2026-07-04 (refresh 13)
+
+## 0. MOST RECENT — refresh 13 (playground oblique-capture + learning-material rework)
+Driven by `note-1` (playground "black ball" job weird values) + a long live thread. **Nothing
+committed.** All changes in `workspace_lib/` (source; new jobs inherit, existing workspaces need
+the `analysis/` sync), `docs/`, `prompts/orchestrator.txt`, `templates/`. Scratch render +
+prototypes in session scratchpad (`.../scratchpad/{qtest,render_pg}`).
+
+1. **DEBUGGED playground job `c11267e1`** ("black ball" = a black **handle** on a playground
+   arm-wheel). The ω(t) "weird oscillation" (±25%, CV 0.20) is a **viewing-angle projection
+   artifact**, NOT physics and NOT a center bug: the circular orbit is filmed obliquely →
+   image path is a tilted **ellipse** → apparent ω ripples **1×/rev, phase-locked** (radius
+   2×/rev, ratio 1.13). Center is the correct fit; grid-search/ortho-deproject can't remove it
+   (it's perspective). Real = mean ω 7.8, T 0.84 s, slow decel (α≈−0.2, the trend is real).
+   Also: `T_fft`=14.998 s (whole clip) is garbage; `ransac_fit_rejected` is the pipeline
+   correctly saying "not a circle".
+2. **BUILT + wired a measurement-quality gate** (the non-hardcoded fix): NEW
+   `workspace_lib/analysis/quality_signals.py` — general detector, **no clip-tuned constants**.
+   Discriminator = is the ω residual (after removing the smooth time-trend) **phase-locked to
+   orbital phase** (projection artifact) vs a real time-trend (accel/decel). Flags
+   `per_instant_omega_unreliable` only on the **conjunction**: elliptical orbit (axis>1.08) AND
+   phase-lock≥0.6 AND ripple-CV≥0.08. Validated across all 18 workspaces → **only c11267e1**
+   flags (real-decel turntables with CV up to 0.42 correctly NOT flagged). `build_quality_block`
+   → `measurement_quality` in the seed (`material_seed.py`).
+3. **Agent policy + deterministic backstop.** `material_tiers.py`: `_quality_policy(seed)` injects
+   a hedging rule when unreliable — forbid per-instant/timeline/ω(t)-shape/within-rev claims,
+   **but PERMIT the whole-clip trend** (avoids over-hedge), strip the timeline from `_facts`,
+   no per-instant a_c=ω²r verification. `_gate` is now **quality-aware** (skips the arithmetic-
+   instant + advanced timeline/α checks when unreliable). Validated 4×/regression (earlier
+   prototype: flagged→hedged 4/4, reliable→narrated, no over-hedge). Live result on the
+   playground: all 3 tiers gate CLEAN, intermediate reads *"94% of that variation is locked to
+   orbital phase … projection artifact … underlying physics is a smooth whole-clip deceleration."*
+4. **Learning-material rework** (note-1 + "does it fit as learning material?"):
+   - **Basic** now teaches angle-over-time (degrees/turn per second) + period, one idea at a
+     time, qualitative "how related" (no numbers). **Intermediate** drops tangential speed
+     (spec + core table + swapped v(t)→ω(t) graph), structured "arrow" relations.
+     `docs/difficulty-tiered-material-spec.md` updated (Basic/Intermediate defs + §1 table +
+     HARD CONSTRAINTS 11 learn-not-track / 12 plain-Unicode).
+   - **`report.py`**: student edition = **clean learning material** (title "Circular Motion —
+     Learning Material", minimal header, NO coverage/fps/Data-Quality/Questions); teacher key =
+     material + Data-Quality (no questions). `a_c`/`a_t` render as real subscripts (filename-
+     guarded); added `∝ ∞ ≡ ∴`; scene "X on X" de-duped.
+   - **Plain-Unicode rule fixed the JSON parse failures** (LaTeX `$\omega$` → invalid escapes).
+5. **Questions GATED OFF** (reversible, code kept): `report.py` `RENDER_QUESTIONS`
+   (env `PI_RENDER_QUESTIONS`, default off); orchestrator Subagent C disabled by default, LaTeX
+   gate no longer waits on `questions.json`. Re-enable for a P-MAGIC question comparison.
+6. **Object relabel decoupled from tracking**: sidecar now carries `object_name`/`scene_title`
+   (display) SEPARATE from `visual_cues` (SAM3 cue stays "black ball" — 100% coverage).
+   Orchestrator Step 5 wires it; `templates/base-template-roundabout-4046/sidecar.json` set to
+   "black handle" / "a black handle on a playground wheel". `figures.py` re-run picks up titles.
+7. **GRAPH oscillation actually removed (not just described).** User pushed back — the ω(t)
+   plot still showed the raw ripple. `figures.py` `_series_plot(smooth_trend=)` + `_smooth_1rev`
+   (moving average over exactly one revolution → cancels the 1x/2x-per-rev ripple, keeps the
+   real slow trend): on flagged clips ω(t)/a_c(t)/radius(t)/v(t) plot a **bold 1-rev trend over a
+   faint raw trace**; peak-star suppressed on smoothed plots. **Gated on the same `unreliable`
+   flag** (`report.py _is_unreliable`, `figures.py`), so only the playground smooths — fan/
+   turntable/bike/etc. plot raw exactly as before (regression re-confirmed).
+8. **Advanced-tier quality fixes** (it was contradicting itself): under `unreliable` the FULL
+   measurements table **drops `max_ac`** (the ripple-peak artifact) — threaded `unreliable`
+   through `_build→_material_block→_section_artifacts→_inline_table→_measurements_table`;
+   advanced figure set **drops the `summary_panel` dump** (re-showed the rippled radius +
+   duplicated the trajectory) → `TIER_ARTIFACTS` + the advanced tier's `figures` prompt updated
+   in lockstep. Advanced 6 pp → **4 pp**.
+9. **VERIFIED both regimes** (scratch renders, all compile + gate CLEAN):
+   - Playground `c11267e1` (UNRELIABLE): basic 2 / int 3 / adv 4 pp — smoothed graphs, hedged
+     prose that KEEPS the real coast-down trend, no per-instant peak/artifact. `.../scratchpad/render_pg/`.
+   - Turntable `711fffe8` (RELIABLE decel): adv **fully narrates** — timeline instant t=2.72 s
+     (v=ωr, a_c=ω²r verified exactly, Jensen-correct), α=−4.07, ω 9.93→2.13, limits analysis,
+     keeps max_ac + peak-star, NO oblique caveat, NO smoothing. Confirms the gate only fires when
+     it should. `.../scratchpad/render_turntable/`.
+   Open trivia (cosmetic only): model writes "v_avg"/"ω_avg" → literal underscore; a_c table cell
+   wraps "m/s²".
+> **TO WIRE INTO A LIVE JOB**: sync edited `workspace_lib/analysis/*` (quality_signals.py NEW,
+> material_seed.py, material_tiers.py, render/{report,figures}.py) + `prompts/orchestrator.txt`
+> into a workspace's `analysis/` copy (root-owned, inside worker container), then re-enqueue.
+> **COMMITTED** (refresh 13, branch `learning-material-oblique-gate`): the 9 files above +
+> quality_signals.py + this checkpoint. Not merged to main; not yet run through a live job.
+
+---
 
 Single source of truth to resume after a context reset. Companions:
 [PAPER_GAP_ASSESSMENT.md](PAPER_GAP_ASSESSMENT.md) (gap + to-do),
