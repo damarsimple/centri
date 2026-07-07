@@ -95,6 +95,8 @@ def build_stats(inp: Inputs, cal: Calibration, k: Kinematics) -> dict:
             "n_inliers": int(cal.n_inliers),
             "n_outliers_rejected": int(cal.n_outliers_rejected),
             "active_duration_s": _num(k.active_duration_s),
+            "active_start_s": _num(k.active_start_s),
+            "active_end_s": _num(k.active_end_s),
             "n_interpolated_frames": int(k.n_interpolated),
         },
         "calibration": {
@@ -145,6 +147,8 @@ def build_stats(inp: Inputs, cal: Calibration, k: Kinematics) -> dict:
             "omega_initial": _num(k.omega_initial),
             "omega_final": _num(k.omega_final),
             "a_t_mean_m_s2": _num(k.a_t_mean_m_s2),
+            "fit_window_s": _num(k.fit_window_s),
+            "impulsive_start": bool(k.impulsive_start),
         },
         "roi_crop": inp.roi_crop,
         "validation_flags": common.validation_flags(),

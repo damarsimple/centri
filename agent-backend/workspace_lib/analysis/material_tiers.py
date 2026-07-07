@@ -64,18 +64,23 @@ TIERS = {
         "interactivity": "low",
         "seed_fields": "object name, rotation direction, clip duration, the radius "
                        "(as 'how far out it sits'), the PERIOD as a plain number of seconds "
-                       "('one full turn takes about T seconds'), and angular velocity taught "
+                       "('one full turn takes about T seconds'), the turn rate as a plain "
+                       "TURNS-PER-SECOND count derived from the frequency ('it makes about "
+                       "F full turns each second') — NEVER a bare 'per second' number with no "
+                       "unit, and NEVER radians or rad/s, and angular velocity taught "
                        "as a LIVED IDEA (NOT a symbol): the object sweeps around by a growing "
-                       "angle as time passes. Use the ANGLE-AT-TIME MILESTONES from the data "
-                       "to make this concrete and time-anchored — e.g. 'about one second in it "
-                       "has swept roughly a quarter turn, around 90 degrees; by two seconds "
-                       "about halfway around'. In 'What the video shows over time', narrate "
-                       "these milestones as the growing angle (this is what the coloured-dot "
-                       "picture shows). Plus the IDEA of an inward pull; you may name "
-                       "'centripetal acceleration' once, in words.",
+                       "angle as time passes. Use ONLY the ANGLE-AT-TIME MILESTONES actually "
+                       "supplied in the data to make this concrete and time-anchored (narrate "
+                       "the exact milestone times you are given — do not invent your own '1 s "
+                       "= a quarter turn' example, which may be wrong for a fast spin). In "
+                       "'What the video shows over time', narrate those milestones as the "
+                       "growing angle (this is what the coloured-dot picture shows). Plus the "
+                       "IDEA of an inward pull; you may name 'centripetal acceleration' once, "
+                       "in words.",
         "forbidden": "NO symbols (omega/alpha/v/a_c) and NO rad/s, NO equations or formula "
                      "derivations, NO numeric substitution beyond the radius, the duration, "
-                     "the period in seconds and the qualitative degrees-per-second sweep, and "
+                     "the period in seconds, the turns-per-second count, and the qualitative "
+                     "degrees-per-second sweep, and "
                      "NO rate-of-change VALUE for the turn rate (speeding up / slowing down is "
                      "described in plain words only, never as alpha or a computed rate). The "
                      "'How the variables are related' section MUST stay QUALITATIVE — explain "
@@ -214,11 +219,7 @@ SYSTEM_TMPL = (
     "ONLY: retell that situation faithfully, never extend it, and never attach a number to it "
     "that is not in the data.\n"
     "2. This is exposition ONLY — no questions, quizzes, 'try this', or exercises.\n"
-    "3. Motion-type faithfulness: if motion type is accelerating/decelerating you MUST convey "
-    "the speed change qualitatively at THIS tier (e.g. 'whirls faster and faster', or for a "
-    "slowing motion 'it loses spin and gradually slows to rest'). Never call the motion steady, "
-    "and do NOT hedge a slowing motion as 'does not speed up or slow down' — say plainly that it "
-    "slows down. The alpha value + timeline are reserved for the advanced tier.\n"
+    "3. {motion_policy}\n"
     "4. If you show a relation numerically, verify it at a SINGLE timeline instant (where "
     "v=omega*r and a_c=omega^2*r close exactly), never with the summary means.\n"
     "5. 'Reading the figures' must describe ONLY the figures listed above for this tier — do "
@@ -274,13 +275,33 @@ def _call_qwen(system, user, temperature=0.4, max_tokens=24000):
     return content
 
 
+# A backslash that does NOT begin a valid JSON escape (" \ / b f n r t u...). RULE 9/12
+# forbids LaTeX, but the 35B still occasionally slips one (\omega, \alpha, \cdot, \sqrt,
+# \Delta, \le), and a single lone backslash makes json.loads raise and forces a full regen.
+# Doubling those stray backslashes turns the escape into a literal backslash+char (which
+# tex_escape then renders harmlessly), so a LaTeX slip degrades to a cosmetic blemish
+# instead of losing the whole draft. Valid escapes (\n newlines, \" quotes, \uXXXX) are
+# left untouched. First line of defence stays the prompt prohibition.
+_BAD_JSON_ESCAPE = re.compile(r'\\(?![\"\\/bfnrtu])')
+
+
+def _sanitize_json_escapes(s: str) -> str:
+    return _BAD_JSON_ESCAPE.sub(r'\\\\', s)
+
+
 def _parse_json(text):
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.S)
     a, b = text.find("{"), text.rfind("}")
     if a == -1 or b == -1:
         raise ValueError(f"no JSON object in reply: {text[:200]!r}")
-    return json.loads(text[a:b + 1])
+    blob = text[a:b + 1]
+    try:
+        return json.loads(blob)
+    except json.JSONDecodeError:
+        # A stray LaTeX backslash slipped through — repair the invalid escapes and retry once
+        # rather than discarding an otherwise-good draft.
+        return json.loads(_sanitize_json_escapes(blob))
 
 
 # -------------------------------------------------------------- shared lesson frame
@@ -303,6 +324,11 @@ FRAME_SYSTEM = (
     "naming a force (this is a kinematics story, so the cause is never named).\n"
     "3. Tell a SHORT, warm, concrete story of 3–5 sentences: who is doing what with this "
     "object, where, and why it ends up going round in a circle. Not a lab report.\n"
+    "3b. If a 'how the motion changes' fact is given (slowing down / speeding up), let the "
+    "story gently show it — a wheel that is coasting and winding down, a fan spinning up. Do "
+    "NOT call such a motion 'steady', 'smooth and uninterrupted', 'unchanging', or say it "
+    "'holds that pace/path' — that contradicts the data. Only a genuinely constant-rate clip "
+    "may be described as steady.\n"
     "4. The ONLY numbers you may mention are: the clip length in seconds, how far out the "
     "object sits (radius, in plain words), and how long one full turn takes. Mention no other "
     "quantity, symbol, equation, or measurement.\n"
@@ -339,6 +365,24 @@ def _frame_user(seed) -> str:
                     f"this; never swap it for a generic table, board, or turntable): {mounted_on}")
     bits += [f"rotation direction: {seed.get('rotation_direction')}",
              f"clip length: {seed.get('active_duration_s')} s"]
+    # The frame must know if the spin is winding down / up, so the opening story doesn't
+    # call a decelerating motion "steady" or "smooth and uninterrupted" (A1).
+    aa = seed.get("angular_acceleration") or {}
+    mt = aa.get("motion_type", "uniform")
+    if mt == "decelerating":
+        if aa.get("impulsive_start"):
+            bits.append("how the motion goes: the object sits STILL, then a single flick sends "
+                        "it spinning; it reaches its fastest right after the flick and then "
+                        "coasts down"
+                        + (", winding to a stop before the clip ends"
+                           if seed.get("comes_to_rest") else ", still turning when the clip ends"))
+        else:
+            bits.append("how the motion changes: it is gradually SLOWING DOWN over the clip"
+                        + ("" if seed.get("comes_to_rest") else
+                           " (and is still turning, just slower, when the clip ends — it does "
+                           "not fully stop)"))
+    elif mt == "accelerating":
+        bits.append("how the motion changes: it is gradually SPEEDING UP over the clip")
     if isinstance(radius, (int, float)):
         # Round to match the value the tier bodies quote from the seed's `r` variable
         # (3 decimals), so the story and the physics never disagree (0.08 vs 0.075).
@@ -360,9 +404,18 @@ def _frame_fallback(seed) -> dict:
     invented proper nouns, no numbers beyond the ones already in the seed's prose fields."""
     obj = seed.get("object_name") or "the object"
     title = (seed.get("scene_title") or obj or "Circular Motion").strip()
-    story = (f"You set {obj} spinning and watch it settle into a steady loop, coming back "
-             f"around to the same spot again and again. Each point it passes traces out one "
-             f"smooth circle, and it holds that path for the whole clip — a clear, everyday "
+    mt = (seed.get("angular_acceleration") or {}).get("motion_type", "uniform")
+    # Motion-aware so the fallback never calls a slowing/speeding clip "steady" (A1).
+    if mt == "decelerating":
+        change = ("Little by little it loses speed, coasting slower and slower but still going "
+                  "round" + (" until it winds to a stop." if seed.get("comes_to_rest")
+                             else ", and it is still turning when the clip ends."))
+    elif mt == "accelerating":
+        change = "Turn by turn it picks up speed, sweeping round faster and faster."
+    else:
+        change = "It settles into a steady loop, coming back around to the same spot again and again."
+    story = (f"You set {obj} spinning and watch it trace the same circle over and over. "
+             f"{change} Each point it passes marks out one smooth circle — a clear, everyday "
              f"example of something moving in a circle.")
     return {"scene_title": title, "scenario_story": story, "who": "", "where": ""}
 
@@ -441,6 +494,39 @@ def _quality_policy(seed) -> str:
     )
 
 
+def _motion_policy(seed) -> str:
+    """RULE 3 body, tuned to the real motion type AND whether the object actually comes to
+    rest within the clip (seed.comes_to_rest). Fixes A1 ('steady' on a slowing clip) and A7
+    ('slows to rest' when it never stops in the clip)."""
+    aa = seed.get("angular_acceleration") or {}
+    mt = aa.get("motion_type", "uniform")
+    impulsive = aa.get("impulsive_start")
+    if mt == "accelerating":
+        return ("Motion-type faithfulness: this motion is SPEEDING UP — convey it "
+                "qualitatively at THIS tier ('whirls faster and faster', 'gains speed as it "
+                "goes'). NEVER call the motion steady, uniform, smooth-and-unchanging, or "
+                "constant-speed. The alpha value + timeline are reserved for the advanced tier.")
+    if mt == "decelerating":
+        # A flick: object starts at rest, is nudged up to its fastest, then coasts down. The
+        # generator must NOT narrate it as already spinning fast from the first frame.
+        lead = ("The object begins AT REST; it is given a single flick, briefly reaches its "
+                "fastest spin, and then coasts down — do NOT describe it as already spinning "
+                "quickly from the first moment, and note it is motionless before the flick. "
+                if impulsive else "")
+        end = ("it loses spin and gradually slows to a stop within the clip"
+               if seed.get("comes_to_rest") else
+               "it loses spin and keeps slowing — still turning, only more slowly, when the "
+               "clip ends. Do NOT say it stops, halts, or comes to rest: it has not stopped "
+               "by the end of the clip")
+        return ("Motion-type faithfulness: " + lead + "this motion is SLOWING DOWN — say so "
+                f"plainly at THIS tier: {end}. NEVER call the motion steady, uniform, smooth-"
+                "and-unchanging, or constant-speed, and do NOT hedge it as 'does not speed up "
+                "or slow down'. The alpha value + timeline are reserved for the advanced tier.")
+    return ("Motion-type faithfulness: this clip turns at an approximately CONSTANT rate — it "
+            "is fine to describe the motion as steady/uniform. Do not invent a speed-up or "
+            "slow-down that the data does not show.")
+
+
 def _frame_block(frame) -> str:
     """The SHARED LESSON FRAME appended to every tier's user message."""
     return (
@@ -462,7 +548,8 @@ def _generate(tier, facts, seed, frame, prior_issues=None):
         facts = re.sub(r"time-anchored samples.*", "", facts, flags=re.S)
     system = SYSTEM_TMPL.format(tier=tier, tier_upper=tier.upper(),
                                 quality_policy=quality_policy,
-                                anchor_policy=anchor_policy, hints=HINTS, **spec)
+                                anchor_policy=anchor_policy, hints=HINTS,
+                                motion_policy=_motion_policy(seed), **spec)
     # Failure-informed regeneration: a blind re-roll at temperature 0.4 rarely clears the
     # same fault, so on a retry we hand the model the EXACT gate failures to fix. Each issue
     # already names the offending phrase/number, which is enough for a targeted rewrite.
@@ -565,16 +652,27 @@ def main():
               + (f", MISSING {miss}" if miss else "")
               + ("" if passed else f"  << gate: {gate_report[tier]['issues']}"))
 
-    all_ok = all(g["passed"] for g in gate_report.values()) and not cross
+    # Seed self-consistency: the DETERMINISTIC blocks (worked examples/CYU) and the summary
+    # table, verified independently of the LLM prose. This is the check that would have caught
+    # the red-phone alpha example (-4.07 from an expression equal to -1.34) and the mixed-omega
+    # table (v != omega*r, T != 2pi/omega). Proceed-but-flag like the per-tier gate.
+    seed_consistency = G.seed_consistency_issues(seed)
+    if seed_consistency:
+        print(f"   seed consistency issues: {seed_consistency}", flush=True)
+
+    all_ok = (all(g["passed"] for g in gate_report.values())
+              and not cross and not seed_consistency)
     (DATA / "material_tiers_gate.json").write_text(json.dumps({
         "all_passed": all_ok,
         "frame": frame,
         "tiers": gate_report,
         "cross_tier": {"passed": not cross, "issues": cross},
+        "seed_consistency": {"passed": not seed_consistency, "issues": seed_consistency},
     }, indent=2, ensure_ascii=False))
     print(f"\nMATERIAL TIERS {'OK' if all_ok else 'COMPLETED WITH FLAGS'} — "
           f"3 tiers written; gate -> material_tiers_gate.json"
-          + ("" if not cross else f"  << cross-tier: {cross}"))
+          + ("" if not cross else f"  << cross-tier: {cross}")
+          + ("" if not seed_consistency else f"  << seed-consistency: {seed_consistency}"))
     return 0  # proceed-but-flag: never hard-block the pipeline on prose
 
 

@@ -33,6 +33,36 @@ def dedup_display_name(name: str | None) -> str:
     m = _DUP_ON.fullmatch(s)
     return m.group(1).strip() if m else s
 
+
+# ── Canonical angular velocity ───────────────────────────────────────────────
+def canonical_omega(stats: dict) -> tuple[float | None, bool]:
+    """The ONE angular velocity every material surface (seed prose, report table,
+    figures) must quote, plus whether it is a clip-average.
+
+    Returns ``(value, is_clip_average)``.
+
+    For a (de)accelerating clip there is no genuine stable phase, so
+    ``stable_phase.stable_mean_omega`` is a fluke of the per-frame phase labeller — on
+    the red-phone flick it read 2.89 rad/s for a spin that time-averaged 5.79, and it
+    does NOT close with the period / mean speed / mean a_c (all built from the true
+    time-average). So for non-uniform motion we report ``summary.mean_omega`` (the honest
+    time-average, magnitude): that makes v = omega*r close exactly
+    (``mean_v == mean|omega| * r_fit``) and the label reads "clip average". Only a
+    genuinely uniform spin quotes ``stable_mean_omega`` as "the" angular velocity.
+    """
+    summ = stats.get("summary") or {}
+    sp = stats.get("stable_phase") or {}
+    mt = ((stats.get("angular_acceleration") or {}).get("motion_type")) or "uniform"
+    if mt in ("accelerating", "decelerating"):
+        v = summ.get("mean_omega")
+        is_clip_average = True
+    else:
+        v = sp.get("stable_mean_omega")
+        if v is None:
+            v = summ.get("mean_omega")
+        is_clip_average = False
+    return (abs(v) if isinstance(v, (int, float)) else None), is_clip_average
+
 # ── Determinism ─────────────────────────────────────────────────────────────
 # RANSAC and any other sampling MUST draw from this generator. An unseeded
 # np.random.choice in the old agent code was the root cause of center_drift_px

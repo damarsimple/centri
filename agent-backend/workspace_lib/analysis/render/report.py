@@ -21,6 +21,7 @@ reads wrong. It must NOT re-author the document or move the graphics paths.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 
@@ -29,7 +30,7 @@ import re
 RENDER_QUESTIONS = os.environ.get("PI_RENDER_QUESTIONS", "0") == "1"
 from pathlib import Path
 
-from ..common import dedup_display_name
+from ..common import canonical_omega, dedup_display_name
 
 DATA = Path("analysis_output/data")
 REPORT = Path("analysis_output/report")
@@ -120,6 +121,7 @@ _UNICODE = {
     "≈": r"$\approx$", "≤": r"$\leq$", "≥": r"$\geq$", "≠": r"$\neq$",
     "→": r"$\rightarrow$", "°": r"$^\circ$", "√": r"$\sqrt{\,}$",
     "∝": r"$\propto$", "∞": r"$\infty$", "≡": r"$\equiv$", "∴": r"$\therefore$",
+    "⟨": r"$\langle$", "⟩": r"$\rangle$", "…": r"\ldots{}",
     "²": r"\textsuperscript{2}", "³": r"\textsuperscript{3}",
     "⁻": r"\textsuperscript{-}", "¹": r"\textsuperscript{1}",
     "₀": r"\textsubscript{0}", "₁": r"\textsubscript{1}", "₂": r"\textsubscript{2}",
@@ -202,12 +204,18 @@ def _measurements_table(stats, level="full", unreliable=False) -> str:
     s, pf = stats["summary"], stats["period_and_frequency"]
     cal, st = stats["calibration"], stats["stable_phase"]
     aa = stats.get("angular_acceleration", {})
+    # ONE angular velocity, shared with the seed prose + figures. For a (de)accelerating
+    # clip this is the clip-average (mean_omega), labelled so — never the misleading
+    # "Stable" label on a spin that is not stable.
+    omega_val, omega_is_clip_avg = canonical_omega(stats)
     if level == "core":
         # Intermediate is built on the ANGULAR quantities + a_c = omega^2 r; tangential
         # speed v is de-emphasised at this tier (spec TIER 2), so it is not tabled here.
+        omega_lbl = "Angular velocity (clip average)" if omega_is_clip_avg else "Angular velocity"
         rows = [
-            ("Orbit radius", si(s.get("mean_r_m"), 3, "m")),
-            ("Angular velocity", si(st.get("stable_mean_omega"), 2, r"rad/s")),
+            # Fitted radius (what v and a_c are built from) so it matches the prose exactly.
+            ("Orbit radius", si(cal.get("r_fit_m") or s.get("mean_r_m"), 3, "m")),
+            (omega_lbl, si(omega_val, 2, r"rad/s")),
             ("Centripetal acceleration", si(s.get("mean_ac"), 2, r"m/s^2")),
             ("Period", si(pf.get("period_s"), 2, "s")),
             ("Frequency", si(pf.get("frequency_hz"), 2, "Hz")),
@@ -217,8 +225,13 @@ def _measurements_table(stats, level="full", unreliable=False) -> str:
                 "\\rowcolor{accent!12}\\textbf{Quantity} & \\textbf{Value} \\\\\n\\midrule\n"
                 + body + " \\\\\n\\bottomrule\n\\end{tabular}")
     rows = [
-        ("Mean orbit radius", si(s.get("mean_r_m"), 3, "m")),
-        ("Stable angular velocity", si(st.get("stable_mean_omega"), 2, r"rad/s")),
+        # Single radius row (A9): the fitted orbit radius v and a_c are built from, with the
+        # pixel value + calibration folded in — no separate "Mean orbit radius" row to confuse.
+        ("Orbit radius (fitted)", f"{num(cal.get('r_fit_m'), 3)} m "
+                                  f"({num(cal.get('r_fit_px'), 1)} px @ "
+                                  f"{num(cal.get('px_per_m'), 0)} px/m)"),
+        ("Angular velocity (clip average)" if omega_is_clip_avg else "Stable angular velocity",
+         si(omega_val, 2, r"rad/s")),
         ("Mean centripetal acceleration", si(s.get("mean_ac"), 2, r"m/s^2")),
         # Max a_c is the per-instant ripple peak — drop it on an oblique clip.
         *([] if unreliable else
@@ -226,17 +239,19 @@ def _measurements_table(stats, level="full", unreliable=False) -> str:
         ("Mean tangential speed", si(s.get("mean_v"), 2, r"m/s")),
         ("Period", si(pf.get("period_s"), 2, "s")),
         ("Frequency", si(pf.get("frequency_hz"), 2, "Hz")),
-        ("Calibration", f"{num(cal.get('px_per_m'), 0)} px/m"),
-        ("Fitted radius", f"{num(cal.get('r_fit_m'), 3)} m "
-                          f"({num(cal.get('r_fit_px'), 1)} px)"),
     ]
     # Non-uniform spins (fan spin-up, turntable coast-down) additionally report the
     # angular acceleration and the tangential acceleration it produces.
     if aa.get("motion_type") in ("accelerating", "decelerating"):
+        # SIGNED a_t (A3): re-sign from alpha so an older stats.json holding the magnitude
+        # still renders the physically-correct negative in a deceleration (a_t opposes motion).
+        alpha_v, a_t_v = aa.get("alpha_rad_s2"), aa.get("a_t_mean_m_s2")
+        if isinstance(a_t_v, (int, float)) and isinstance(alpha_v, (int, float)):
+            a_t_v = math.copysign(abs(a_t_v), alpha_v)
         rows[1:1] = [
             (f"Motion type", aa["motion_type"].capitalize()),
             ("Angular acceleration", si(aa.get("alpha_rad_s2"), 2, r"rad/s^2")),
-            ("Tangential acceleration", si(aa.get("a_t_mean_m_s2"), 2, r"m/s^2")),
+            ("Tangential acceleration", si(a_t_v, 2, r"m/s^2")),
             (r"$\omega$ initial $\rightarrow$ final",
              f"{num(aa.get('omega_initial'), 2)} $\\rightarrow$ "
              f"{num(aa.get('omega_final'), 2)} rad/s"),
@@ -306,7 +321,116 @@ def _section_artifacts(heading: str, stats, tier=None, unreliable=False) -> str:
     return ("\n\n" + "\n\n".join(out)) if out else ""
 
 
-def _material_block(material, stats=None, unreliable=False) -> str:
+# ── deterministic material.seed blocks (objectives / worked examples / honesty / CYU) ──
+# These render straight from material_seed.json, whose numbers are correct BY CONSTRUCTION,
+# so the arithmetic-heavy content the LLM must NOT author is typeset here instead. Math
+# comes from the seed's pre-authored LaTeX (`formula_tex`/`substitute_tex`) rendered in real
+# math mode — NOT through tex_escape (which would turn the backslashes into literal text).
+
+def _load_seed():
+    p = DATA / "material_seed.json"
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _objectives_block(objs) -> str:
+    if not objs:
+        return ""
+    items = "\n".join(f"  \\item {tex_escape(o)}" for o in objs)
+    return ("\\subsection*{Learning objectives}\n"
+            "After this material you can:\n"
+            "\\begin{itemize}[leftmargin=*]\n" + items + "\n\\end{itemize}")
+
+
+def _relations_block(relations) -> str:
+    """Numbered relation list: each formula on its own display-math line with its plain
+    meaning, so the relations read as a scannable list instead of a run-on paragraph. Seeded
+    LaTeX (`tex`) rendered in real math mode (bypasses tex_escape)."""
+    if not relations:
+        return ""
+    items = []
+    for r in relations:
+        tex = r.get("tex", "")
+        plain = tex_escape(r.get("plain", ""))
+        items.append(f"  \\item $\\displaystyle {tex}$ \\\\[2pt] {plain}")
+    return ("\\begin{enumerate}[leftmargin=*,itemsep=5pt]\n" + "\n".join(items)
+            + "\n\\end{enumerate}")
+
+
+def _worked_examples_block(examples) -> str:
+    """Worked examples in the house Given/Formula/Substitute/Result/Interpret format.
+    Intermediate/advanced carry seeded LaTeX (`*_tex`) rendered as display math; basic is
+    symbol-free (words + one arithmetic line)."""
+    if not examples:
+        return ""
+    out = ["\\subsection*{Worked examples}"]
+    for i, e in enumerate(examples, 1):
+        parts = [f"\\noindent\\textbf{{Example {i} — {tex_escape(e.get('title'))}}}\\\\"]
+        given = e.get("given")
+        if given:
+            parts.append(f"\\textit{{Given:}} {tex_escape(given)}")
+        ftex, stex = e.get("formula_tex"), e.get("substitute_tex")
+        if ftex or stex:
+            # Real math mode — the seed's LaTeX is trusted and must bypass tex_escape.
+            if ftex:
+                parts.append(f"\\[{ftex}\\]")
+            if stex:
+                parts.append(f"\\[{stex}\\]")
+        else:
+            # Basic: no symbols — show the formula-in-words and the arithmetic line as text.
+            line = tex_escape(e.get("formula") or "")
+            sub = tex_escape(e.get("substitute") or "")
+            if line or sub:
+                parts.append((f"{line}: {sub}" if line else sub) + " \\;$\\Rightarrow$\\; "
+                             + tex_escape(e.get("result")))
+        res = e.get("result")
+        interp = e.get("interpret")
+        tail = ""
+        if res and (ftex or stex):   # basic already folded result into the line above
+            tail += f"\\textbf{{Result:}} {tex_escape(res)}. "
+        if interp:
+            tail += f"\\textit{{{tex_escape(interp)}}}"
+        if tail:
+            parts.append(tail)
+        out.append("\n\n".join(parts) + "\n\n\\medskip")
+    return "\n\n".join(out)
+
+
+def _honesty_block(text) -> str:
+    """Measurement-honesty caveat as a shaded, visually distinct box (Part B section 8)."""
+    if not text:
+        return ""
+    return ("\\par\\medskip\\noindent\n"
+            "\\colorbox{accent!8}{%\n"
+            "\\begin{minipage}{\\dimexpr\\linewidth-2\\fboxsep\\relax}\n"
+            "\\textbf{\\textcolor{accent!70!black}{Measurement honesty.}} "
+            + tex_escape(text) + "\n\\end{minipage}}\\par\\medskip")
+
+
+def _cyu_block(items, bridge=None) -> str:
+    """Check-your-understanding questions with a compact answer key beneath each, plus the
+    one-line tier bridge (Part B section 9)."""
+    if not items:
+        return ""
+    rows = []
+    for q in items:
+        line = f"  \\item {tex_escape(q.get('question'))}"
+        ans = q.get("answer")
+        if ans:
+            line += ("\\\\\n  {\\small\\itshape\\color{inkgray}Answer: "
+                     + tex_escape(ans) + "}")
+        rows.append(line)
+    out = ("\\subsection*{Check your understanding}\n"
+           "\\begin{enumerate}[leftmargin=*]\n" + "\n".join(rows) + "\n\\end{enumerate}")
+    if bridge:
+        out += ("\n\n\\par\\medskip\\noindent{\\itshape\\color{accent!70!black} "
+                + tex_escape(bridge) + "}")
+    return out
+
+
+def _material_block(material, stats=None, unreliable=False, seed=None) -> str:
     """Render Subagent D's grounded learning passage (material.json sections), with
     the relevant figures and the measurements table interleaved into each section so
     the document reads like ordinary learning material rather than prose then a figure
@@ -319,18 +443,46 @@ def _material_block(material, stats=None, unreliable=False) -> str:
     # A tiered material.json carries "tier": basic|intermediate|advanced, which selects
     # the difficulty-matched figure/table set; untiered material keeps the default set.
     tier = material.get("tier") if isinstance(material, dict) else None
+    # Deterministic seed blocks keyed by this tier (fall back to a flat block for untiered).
+    def _seed_for(key):
+        blk = (seed or {}).get(key)
+        if isinstance(blk, dict):
+            return blk.get(tier) if tier else None
+        return blk
+    objectives = _objectives_block(_seed_for("objectives"))
+    relations = _relations_block(_seed_for("relations_display"))
+    worked = _worked_examples_block(_seed_for("worked_examples"))
+    honesty = _honesty_block(_seed_for("measurement_honesty"))
+    cyu = _cyu_block(_seed_for("check_understanding"), _seed_for("tier_bridge"))
+
     ordered = [h for h in _MATERIAL_ORDER if h in sections]
     ordered += [h for h in sections if h not in _MATERIAL_ORDER]  # tolerate extras
     out = []
+    if objectives:                       # canonical skeleton §2: objectives before Scenario
+        out.append(objectives)
+    worked_done = False
     for h in ordered:
         body = (sections.get(h) or "").strip()
         if not body:
             continue
         paras = [tex_escape(p.strip()) for p in re.split(r"\n\s*\n", body) if p.strip()]
-        block = f"\\subsection*{{{tex_escape(h)}}}\n" + "\n\n".join(paras)
+        block = f"\\subsection*{{{tex_escape(h)}}}\n"
+        # Lead the relations section with the scannable numbered formula list, then the prose.
+        if h == "How the variables are related" and relations:
+            block += relations + "\n\n"
+        block += "\n\n".join(paras)
         if stats is not None:
             block += _section_artifacts(h, stats, tier, unreliable)
         out.append(block)
+        # §6 worked examples sit right after the concepts/relations section.
+        if h == "How the variables are related" and worked:
+            out.append(worked); worked_done = True
+    if worked and not worked_done:       # relations section absent — don't drop the examples
+        out.append(worked)
+    if honesty:                          # §8 honesty box, then §9 CYU + tier bridge
+        out.append(honesty)
+    if cyu:
+        out.append(cyu)
     return "\n\n".join(out)
 
 
@@ -345,11 +497,17 @@ def _preamble(tier=None) -> str:
     accent = _TIER_ACCENT.get(tier, _DEFAULT_ACCENT)
     return (
         "\\documentclass[11pt]{article}\n"
-        "\\usepackage[utf8]{inputenc}\n"
         "\\usepackage[T1]{fontenc}\n"
-        # expansion=false: the worker has no scalable CM (no lmodern), and microtype font
-        # EXPANSION fatally errors on bitmap fonts under pdflatex. Protrusion is safe.
-        "\\usepackage[protrusion=true,expansion=false]{microtype}\n"
+        "\\usepackage[utf8]{inputenc}\n"
+        # Libertinus: one cohesive modern book family — Libertinus Serif body, Libertinus Sans
+        # headings/masthead (\\sffamily), and matching Libertinus math (libertinust1math) so the
+        # prose, the accent headings and every formula share one design language. Needs
+        # texlive-fonts-extra in the worker image (added to the Dockerfile).
+        "\\usepackage{libertinus}\n"
+        "\\usepackage{libertinust1math}\n"
+        # Scalable outline font, so microtype EXPANSION is safe (the old expansion=false was
+        # only needed for the bitmap Computer Modern default).
+        "\\usepackage[protrusion=true,expansion=true]{microtype}\n"
         "\\usepackage[table,dvipsnames]{xcolor}\n"
         "\\usepackage{siunitx}\n\\usepackage{graphicx}\n\\usepackage{booktabs}\n"
         "\\usepackage{amsmath}\n\\usepackage{geometry}\n\\usepackage{hyperref}\n"
@@ -360,7 +518,7 @@ def _preamble(tier=None) -> str:
         "\\definecolor{inkgray}{HTML}{555555}\n"
         f"{GRAPHICS_PATH}\n"
         "\\sisetup{per-mode=symbol}\n"
-        "\\setstretch{1.06}\n"
+        "\\setstretch{1.08}\n"
         "\\renewcommand{\\arraystretch}{1.25}\n"
         "\\hypersetup{colorlinks=true,linkcolor=accent,urlcolor=accent}\n"
         # accent sans-serif headings; a thin accent rule trails each \section
@@ -473,7 +631,8 @@ def _build(stats, questions, *, scene, with_answers: bool, material=None,
     # With material, the figures/table are interleaved into the prose (textbook-style),
     # so we drop the separate Key Measurements / Visual Analysis dumps. Without material,
     # fall back to the standalone data + figures sections so nothing is lost.
-    material_tex = _material_block(material, stats, unreliable)
+    seed = _load_seed()   # deterministic worked-examples / CYU / honesty ingredients
+    material_tex = _material_block(material, stats, unreliable, seed)
     # The student edition of a tiered job IS the learning material: a clean, student-facing
     # lesson — no report framing, no data-quality flags, no questions (those live in the
     # teacher key / a separate worksheet). The teacher key keeps the full report.

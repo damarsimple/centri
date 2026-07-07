@@ -208,6 +208,15 @@ clip the quarter-turn dots are dropped (projection-distorted); only 180°/360° 
      examined at a deeper level — but give **no** α number or timeline.
    - **Advanced:** full α + timeline.
    - If `motion_type` is `uniform`/null, then "steady" IS correct.
+   - **Does it actually stop? (A7).** Only say a slowing motion "comes to rest / stops" when
+     `seed.comes_to_rest` is true (ω reaches ~0 **inside** the clip). Otherwise it is "still
+     turning, only slower, when the clip ends" — the black-handle clip ends at 6.25 rad/s and
+     must NOT be said to stop. `material_tiers._motion_policy()` renders RULE 3 from these two
+     seed facts (`motion_type` + `comes_to_rest`), and the gate's `_STEADY` also catches
+     "smooth and uninterrupted / unchanging pace" backstops (A1).
+   - **Signed `a_t` (A3).** `a_t = α·r` is **signed**: negative for a deceleration (it points
+     against the motion). The seed and the report table re-sign it from α, so a decelerating
+     table reads `−0.05 m/s²`, matching α's sign.
    > Without this rule, basic+intermediate falsely reported the fan as steady (it spins up).
 5. **Round numbers in prose to ~3 significant figures** (e.g. 1.78 m, 6.59 rad/s, 88.5 m/s²);
    never print raw float precision from the seed.
@@ -421,3 +430,49 @@ and the deck's "Bloom-level column" call for.
   and a dynamics extension that this kinematics-only spec deliberately excludes (HARD RULE 8b).
   Recorded here as a deliberate next step, not a gap.
 - **Knowledge graph (deferred, paper 2).**
+
+---
+
+## Addendum (2026-07-08): correctness rework + canonical nine-section structure
+
+Formalizes the fixes from the learning-material critique (issues A1–A10). The theme is
+*correct by construction*: all new numeric content is computed in `material_seed.py` and
+rendered deterministically by `render/report.py`, so the 35B never authors arithmetic.
+Worked reference: [`ideal-material-example.md`](ideal-material-example.md) (the black-handle
+"what good looks like").
+
+### Data-layer fixes (numbers that check out)
+- **Signed tangential acceleration `a_t` (A3).** `kinematics.py` now stores `a_t = α·r`
+  (signed); `material_seed` and `report.py` also re-sign from α so an older `stats.json`
+  holding the magnitude still renders the physically-correct negative in a deceleration.
+- **One canonical ω (A2/A4).** The seed's `omega` variable is now `stable_phase.stable_mean_omega`
+  (what the ω(t) figure and the measurements table already draw), so prose ω == table ω. The
+  measured `period_s`/`frequency_hz` are kept (mutually consistent, `T=1/f`); the residual
+  `2π/ω ≠ T` is explained by the honesty box, not silently left contradictory.
+
+### New deterministic seed blocks (`material_seed.build_seed`)
+- `objectives`, `worked_examples` (house Given/Formula/Substitute/Result/Interpret format,
+  carrying pre-authored `formula_tex`/`substitute_tex`), `check_understanding`,
+  `measurement_honesty`, `tier_bridge`, `formula_tex` bank, and `comes_to_rest`. All numbers
+  are pre-evaluated; per-instant worked examples are suppressed on oblique (`unreliable`) clips.
+
+### Canonical nine-section document (Part B)
+`report.py` interleaves the deterministic blocks around the five LLM prose sections:
+Header → **Learning objectives** → Scenario → variables+table → relations → **Worked examples**
+→ over-time → reading-figures → **Measurement honesty box** → **Check your understanding** +
+tier bridge. Worked-example math is the seed's LaTeX rendered in real math mode (bypassing
+`tex_escape`); basic stays symbol-free. The measurements table merges the duplicate radius
+rows into one `Orbit radius (fitted) — … (px @ px/m)` row (A9).
+
+> **Design note:** these structural sections are rendered deterministically rather than asked
+> of the 35B. This keeps the arithmetic correct by construction (the critique's whole point)
+> and means the LLM's job — and HARD RULE 2 "exposition only, no questions" — is unchanged;
+> the CYU block is a separate deterministic artifact, not LLM-authored questions.
+
+### Prompt / robustness
+- `_motion_policy()` renders RULE 3 from `motion_type` + `comes_to_rest` (A1/A7); the shared
+  frame and its fallback are motion-aware; basic tier quotes turns-per-second with a unit
+  (never a bare "7.80 per second", A5) and narrates only the supplied angle milestones (A6).
+- Figure titles wrap instead of clipping to "…a playground whe" (A8, `figures._title`).
+- `material_tiers._parse_json` repairs stray LaTeX backslashes (`\omega`, `\alpha`) before
+  `json.loads`, so a slip degrades to a cosmetic blemish instead of losing the whole draft.

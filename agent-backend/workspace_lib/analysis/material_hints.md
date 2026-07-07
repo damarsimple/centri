@@ -38,9 +38,25 @@ review-and-select generation loop as in Utami's SocioMathLLM).
   the exact angle-milestone times supplied (e.g. "after 1.0 s … a quarter turn"). Do NOT invent
   in-between times like "in about 0.21 s" or "by 1.7 s" — any time not in the data is ungrounded.
 
+- **Basic turn rate: turns per second, with the unit.** Give the turn rate as a plain count of
+  full turns each second, read from the frequency (e.g. "about 1.2 full turns each second"). NEVER
+  write a bare "7.80 per second" (that is radians per second, a symbol-tier quantity with no unit at
+  this level), and never "radians" or "rad/s".
+
+- **Slowing motion, in plain words.** When you narrate a slowing spin over time, say "each second it
+  sweeps a little less angle than the second before" — do not attach a rate-of-change number (that is
+  the advanced tier's α). If it has not stopped by the clip's end, say it is "still turning, only
+  slower" — never that it "comes to rest" unless the data says it actually stopped in the clip.
+
 - **No causes.** The speeding-up / slowing-down has no named cause at any tier — never a motor,
   brake, friction, drag, or force. The inward effect is only "centripetal acceleration" (you
   may call it an "inward pull").
+
+- **Do NOT claim 2π/ω̄ equals the period on a changing spin.** When the turn rate is changing
+  (slowing / speeding up), the measured period T and the average turn rate ω̄ do NOT satisfy
+  T = 2π/ω̄ exactly — it is the same averaging subtlety as ⟨ω²⟩ ≠ ⟨ω⟩². Quote T and f as given
+  and treat T = 1/f (which is exact); never write "2π/ω̄ ≈ T" or claim the two "match", and never
+  recompute the period from the average turn rate and present your own number.
 
 - **Fit quality is qualitative — never cite a specific R².** When you note the α (angular-
   acceleration) fit is good, say "the turn-rate falls in an almost perfectly straight line" or

@@ -33,6 +33,14 @@ class Kinematics:
     active_mask: np.ndarray
     rotation_direction: str
     active_duration_s: float
+    # Time bounds of the active window (first/last active frame) and the span of the
+    # constant-alpha fit window (the longest active run _motion_model fits over). These let
+    # the material report the honest deceleration timescale (alpha = Delta-omega / fit_window,
+    # NOT / whole-clip duration) and detect an object that stops on camera before the clip
+    # ends (active_end_s << duration_s). Left 0.0 when there is no active rotation / no fit.
+    active_start_s: float = 0.0
+    active_end_s: float = 0.0
+    fit_window_s: float = 0.0
     # Tracked centroid in CROPPED space, AFTER outlier removal + short-gap fill —
     # the exact series the kinematics were computed from. Written to kinematics.csv
     # so figures plot points that sit on the fitted circle.
@@ -67,11 +75,17 @@ class Kinematics:
     # angular-acceleration model (fit over the longest active run). motion_type is
     # "uniform" (constant omega), "accelerating" (spin-up) or "decelerating".
     motion_type: str = "uniform"
+    # True when omega RISES then FALLS inside the active window — an impulsive "flick"
+    # (object at rest, given a spin, then coasting down), NOT a spin that decelerates from
+    # the first frame. The constant-alpha fit is then taken over the coherent coast-down
+    # segment only, so omega_initial is the real peak (~9.8 rad/s), not the parabola's
+    # extrapolated intercept over the rise+fall (a fictitious 9.93 that contradicts the data).
+    impulsive_start: bool = False
     alpha_rad_s2: float = 0.0          # signed angular acceleration
     alpha_r2: float = float("nan")     # R^2 of the constant-alpha (quadratic theta) fit
     omega_initial: float = 0.0
     omega_final: float = 0.0
-    a_t_mean_m_s2: float = 0.0         # tangential accel magnitude = |alpha| * r_fit_m
+    a_t_mean_m_s2: float = 0.0         # SIGNED tangential accel = alpha * r_fit_m (negative when decelerating)
 
 
 def _segmented(signal, fn):
@@ -211,6 +225,11 @@ def compute(inp: Inputs, cal: Calibration, x_full, y_full) -> Kinematics:
         x_px=x_full, y_px=y_full, n_interpolated=n_interpolated,
     )
 
+    active_idx = np.where(active_mask)[0]
+    if active_idx.size:
+        k.active_start_s = float(t_s[active_idx[0]])
+        k.active_end_s = float(t_s[active_idx[-1]])
+
     am = active_mask & ~np.isnan(omega)
     k.mean_r_m = float(np.nanmean(r_m[active_mask])) if active_mask.any() else 0.0
     k.std_r_m = float(np.nanstd(r_m[active_mask])) if active_mask.any() else 0.0
@@ -256,10 +275,40 @@ def _motion_model(k: Kinematics, cal: Calibration, FPS: float) -> None:
     if not runs:
         return
     a, b = max(runs, key=lambda r: r[1] - r[0])
-    m = np.zeros(n, dtype=bool); m[a:b] = True
+
+    # A constant-alpha fit assumes omega is monotonic across the window. If instead omega
+    # RISES then FALLS inside the run — a flick: the object is nudged up to a peak, then
+    # coasts down — a single quadratic over the whole run mixes the two and its intercept
+    # invents an initial omega that never occurred (red phone: fit says 9.93 rad/s at the
+    # window start where the data reads 2.69, because the parabola splits the difference over
+    # rise+fall). Detect that, and fit only the dominant monotonic side (the coast-down),
+    # so omega_initial is the true peak. Monotonic accel/decel and uniform clips keep the
+    # whole-run fit unchanged: the peak sits at an END, so no interior split is triggered.
+    seg_a, seg_b, impulsive = a, b, False
+    w_run = np.abs(k.omega[a:b])
+    if np.isfinite(w_run).any():
+        pk = a + int(np.nanargmax(w_run))
+        w_peak = float(np.nanmax(w_run))
+        edge = max(1, int(FPS * 0.1))
+        w_start = float(np.nanmedian(np.abs(k.omega[a:min(a + edge, b)])))
+        w_end = float(np.nanmedian(np.abs(k.omega[max(b - edge, a):b])))
+        climb = w_peak - (w_start if np.isfinite(w_start) else w_peak)
+        drop = w_peak - (w_end if np.isfinite(w_end) else w_peak)
+        # Interior peak with a real climb AND a real drop (both > 30% of the peak) = a flick.
+        if a < pk < b - 1 and w_peak > 0 and climb > 0.3 * w_peak and drop > 0.3 * w_peak:
+            impulsive = True
+            # Fit the longer monotonic side — almost always the coast-down [peak, end].
+            seg_a, seg_b = (a, pk + 1) if (pk - a) >= (b - pk) else (pk, b)
+    k.impulsive_start = impulsive
+
+    m = np.zeros(n, dtype=bool); m[seg_a:seg_b] = True
     m &= ~np.isnan(k.theta_unwrapped)
     t, th = k.t_s[m], k.theta_unwrapped[m]
     dur = float(t[-1] - t[0]) if t.size else 0.0
+    # The span alpha is actually fit over — the material must divide Delta-omega by THIS,
+    # not the whole-clip duration (dividing by 5.84 s instead of the ~1.6 s coast-down is
+    # what printed alpha = -4.07 from an expression that evaluates to -1.34).
+    k.fit_window_s = dur
     if t.size < 10 or dur < 1.0:
         return  # too little to fit a curvature
 
@@ -284,7 +333,9 @@ def _motion_model(k: Kinematics, cal: Calibration, FPS: float) -> None:
     # genuinely steady spin does not get read as acceleration.
     if resid_drop > 0.7 and dw_ratio > 0.3:
         k.motion_type = "accelerating" if alpha > 0 else "decelerating"
-        k.a_t_mean_m_s2 = abs(alpha) * cal.r_fit_m
+        # SIGNED: a_t = alpha * r. In a deceleration the sign IS the physics — a_t points
+        # against the motion — so keep alpha's sign rather than storing a bare magnitude.
+        k.a_t_mean_m_s2 = alpha * cal.r_fit_m
     else:
         k.motion_type = "uniform"
 

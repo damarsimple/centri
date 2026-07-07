@@ -135,6 +135,116 @@ def test_cross_tier():
     assert any("intermediate" in i for i in issues)
 
 
+def test_steady_smooth_phrasings_flagged():
+    # A1: the critique's "smooth and uninterrupted" / "unchanging pace" must be caught on a
+    # decelerating clip, not just the literal "constant speed".
+    for phrase in ("it moves in a smooth and uninterrupted circle",
+                   "it keeps an unchanging pace", "a steady rhythm the whole time",
+                   "it holds its pace throughout"):
+        assert G.motion_faithfulness(_seed("decelerating"), phrase), phrase
+    # a plain "smooth circle" (shape, not speed) must NOT trip it
+    assert not G.motion_faithfulness(_seed("decelerating"), "it traces one smooth circle")
+
+
+def test_json_sanitizer_recovers_latex_slip():
+    from analysis import material_tiers as T
+    bad = '{"sections": {"Scenario": "the \\omega spins and \\alpha grows, \\Delta t"}, "tier": "advanced"}'
+    obj = T._parse_json(bad)               # would raise without the sanitizer
+    assert "omega" in obj["sections"]["Scenario"]
+    # valid escapes survive untouched
+    assert T._parse_json('{"s": "a\\nb"}')["s"] == "a\nb"
+
+
+def _num_in(s):
+    import re as _re
+    m = _re.search(r"-?\d+(?:\.\d+)?", s)
+    return float(m.group(0)) if m else None
+
+
+def _eval_expr(expr):
+    import re as _re
+    e = (expr.replace("×", "*").replace("·", "*").replace("−", "-")
+             .replace("÷", "/").replace("²", "**2"))
+    e = e.split("=")[-1]                                  # RHS of "v = 9.28 × 0.148"
+    e = _re.sub(r"[^0-9.+\-*/() ]", "", e).strip().rstrip("*/+-. ")
+    return eval(e, {"__builtins__": {}}) if e else None   # noqa: S307 — sanitized, digits only
+
+
+def test_seed_worked_examples_arithmetic_closes():
+    """The whole point of the critique: the numbers must check out. Every seeded worked
+    example's substitute line must actually compute to its stated result."""
+    from analysis import material_seed as S
+    stats = {
+        "object_name": "red ring", "scene_title": "red ring on a wheel",
+        "summary": {"mean_r_m": 0.2, "mean_omega": 5.0, "mean_v": 1.0, "mean_ac": 5.0,
+                    "max_ac": 8.0, "rotation_direction": "CCW"},
+        "period_and_frequency": {"period_s": 1.2, "frequency_hz": 0.83},
+        # alpha is fit over a 2 s window, NOT the 15 s clip: (2-8)/2 = -3 closes, (2-8)/15
+        # = -0.4 does NOT. Pins the fit-window fix — the alpha example must divide by 2, not 15.
+        "angular_acceleration": {"motion_type": "decelerating", "alpha_rad_s2": -3.0,
+                                 "alpha_r2": 0.99, "omega_initial": 8.0, "omega_final": 2.0,
+                                 "a_t_mean_m_s2": 0.6, "fit_window_s": 2.0},
+        "stable_phase": {"stable_mean_omega": 5.0},
+        "calibration": {"r_fit_m": 0.2, "px_per_m": 1500.0, "r_fit_px": 300.0},
+        "video_info": {"duration_s": 15.0},
+        "tracking": {"active_duration_s": 2.0, "active_start_s": 1.0, "active_end_s": 3.0},
+    }
+    seed = S.build_seed(stats, None)
+    # A3: tangential acceleration is re-signed negative for a deceleration.
+    assert seed["angular_acceleration"]["a_t_mean_m_s2"] < 0
+    # S1.3: stopped ON CAMERA — active window (ends 3.0 s) closes well before the 15 s clip,
+    # so a decelerating clip comes to rest even though omega_final (2.0) is not near zero.
+    assert seed["comes_to_rest"] is True
+    # the alpha example must state the 2 s fit window, never the 15 s clip length.
+    alpha_ex = next(e for exs in seed["worked_examples"].values() for e in exs
+                    if "angular accel" in e["title"].lower())
+    assert "/ 2" in alpha_ex["substitute"] and "15" not in alpha_ex["substitute"]
+    for tier, exs in seed["worked_examples"].items():
+        for e in exs:
+            if "vs" in (e.get("substitute") or ""):        # Jensen: two expressions, checked below
+                continue
+            got = _eval_expr(e.get("substitute", ""))
+            want = _num_in(e.get("result", ""))
+            if got is None or want is None:
+                continue
+            # 3% relative, or 0.5 absolute (some results round to a whole count, e.g. "18 laps").
+            assert abs(got - want) <= max(0.5, 0.03 * abs(want)), (tier, e["title"], got, want)
+
+
+def test_seed_consistency_catches_broken_closure():
+    # A self-consistent seed passes: v = omega*r, T = 2pi/omega, and Jensen <omega^2> >= <omega>^2.
+    good = {
+        "variables": [{"symbol": "r", "value": 0.15}, {"symbol": "omega", "value": 5.0},
+                      {"symbol": "v", "value": 0.75}, {"symbol": "a_c", "value": 4.0},
+                      {"symbol": "T", "value": 1.257}],
+        "worked_examples": {}, "check_understanding": {},
+        "measurement_honesty": {"intermediate": ""},
+    }
+    assert G.seed_consistency_issues(good) == []
+    # The red-phone failure: the table quotes omega=2.89 but keeps v/T built from omega~5.79,
+    # so v != omega*r and T != 2pi/omega. Both must be flagged.
+    bad = dict(good, variables=[{"symbol": "r", "value": 0.15}, {"symbol": "omega", "value": 2.89},
+                                {"symbol": "v", "value": 0.856}, {"symbol": "a_c", "value": 5.69},
+                                {"symbol": "T", "value": 1.1}])
+    issues = G.seed_consistency_issues(bad)
+    assert any("v = omega*r broken" in i for i in issues), issues
+    assert any("2pi/omega" in i for i in issues), issues
+    # ...but if the honesty box flags the period as an average, the T gap is allowed (Jensen).
+    noted = dict(bad, measurement_honesty={"intermediate": "the average period is not simply 2pi/omega"})
+    assert not any("2pi/omega" in i for i in G.seed_consistency_issues(noted))
+
+
+def test_period_identity_checked_when_unreliable():
+    # On an oblique clip the arithmetic gate used to be skipped WHOLESALE, so a false
+    # "2pi/omega = period" closure slipped through. The scale-free period identity must
+    # still be checked (only per-instant v=omega*r / a_c=omega^2*r are exempt).
+    seed = {"measurement_quality": {"reliable": False}, "variables": []}
+    obj = {"tier": "intermediate",
+           "sections": {"How the variables are related": "2π / 7.813 rad/s ≈ 0.837 s"}}
+    issues = G.tier_gate(obj, seed)
+    assert any("2pi / 7.813" in i and "arithmetic" in i for i in issues), issues
+
+
 def run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

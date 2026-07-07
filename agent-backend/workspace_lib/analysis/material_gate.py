@@ -66,13 +66,16 @@ def arithmetic_claims(text: str, rel_tol=0.02):
     t = _neutralize_units(norm(text))
     claims = []
 
-    def check(expr, lhs, rhs):
+    def check(expr, lhs, rhs, kind="generic"):
         if rhs == 0:
             ok = abs(lhs) < 1e-9
         else:
             ok = abs(lhs - rhs) / max(abs(rhs), 1e-9) <= rel_tol
+        # `kind` lets the gate keep only SCALE-FREE claims (the period identity 2pi/omega)
+        # on an oblique clip, where per-instant v=omega*r / a_c=omega^2*r cannot be verified
+        # but T = 2pi/omega still must hold.
         claims.append({"claim": expr.strip(), "computed": round(lhs, 4),
-                       "stated": rhs, "ok": ok})
+                       "stated": rhs, "ok": ok, "kind": kind})
 
     MUL = r"(?:\*|times|multiplied by)"
     DIV = r"(?:/|divided by)"
@@ -93,7 +96,7 @@ def arithmetic_claims(text: str, rel_tol=0.02):
     # 2*pi / B eq C  (period; BEFORE generic division so pi isn't dropped)
     for m in re.finditer(rf"2\s*\*?\s*pi\s*(?:/|divided by|by)\s*({NUM}){SEP}{EQ}\s*{APPROX}\s*({NUM}){NOCONT}", t):
         a, c = map(_f, m.groups())
-        if a != 0: check("2pi / "+m.group(1)+" = "+m.group(2), 6.283185307/a, c)
+        if a != 0: check("2pi / "+m.group(1)+" = "+m.group(2), 6.283185307/a, c, kind="period")
     # plain product:  A * B eq C   (skip squared/pi spans)
     for m in re.finditer(rf"{NOPRE}({NUM}){SEP}{MUL}{SEP}({NUM}){SEP}{EQ}\s*{APPROX}\s*({NUM}){NOCONT}", t):
         if "^2" in m.group(0) or "pi" in m.group(0):
@@ -111,6 +114,89 @@ def arithmetic_claims(text: str, rel_tol=0.02):
         if c["claim"] not in seen:
             seen.add(c["claim"]); out.append(c)
     return out
+
+
+# ---- (1b) seed self-consistency (the deterministic blocks, verified) ---------
+def _eval_arith(expr):
+    """Best-effort numeric value of a substitution expression — the RHS of any '=',
+    reduced to digits, + - * / ( ) and ^2/^3/pi. None when it will not parse. This is what
+    verifies the 'correct-by-construction' worked examples actually compute (arithmetic_claims
+    only matches simple binary A op B = C forms, so it misses '(A - B) / C', which is exactly
+    how the red-phone alpha example shipped -4.07 from an expression equal to -1.34)."""
+    e = norm(expr or "")
+    e = e.split("=")[-1]                                  # RHS of "v = 2.7 * 0.15"
+    e = e.replace("^3", "**3").replace("^2", "**2")
+    e = re.sub(r"\bpi\b", "3.141592653589793", e)
+    e = re.sub(r"[^0-9.+\-*/() ]", " ", e).strip().rstrip("*/+-. ")
+    if not e:
+        return None
+    try:
+        return eval(e, {"__builtins__": {}})             # noqa: S307 — sanitized to digits/ops
+    except (SyntaxError, ValueError, ZeroDivisionError, TypeError):
+        return None
+
+
+def _first_num(s):
+    m = re.search(NUM, s or "")
+    return float(m.group(0)) if m else None
+
+
+def _byk(seed):
+    return {v["symbol"]: v.get("value") for v in seed.get("variables", [])
+            if isinstance(v.get("value"), (int, float))}
+
+
+def seed_consistency_issues(seed):
+    """Verify the SEED's own numbers before render — the deterministic 'correct-by-
+    construction' blocks and the summary table, independent of any LLM prose.
+
+    Catches the red-phone/wheel classes: (a) a worked example whose printed arithmetic does
+    not evaluate to its printed result; (b) a summary that mixes ω statistics so v ≠ ω·r or
+    T ≠ 2π/ω̄ (unless the honesty box flags the period as an average); (c) a Jensen violation
+    ⟨ω²⟩ < ⟨ω⟩². Returns a list of issue strings (empty = consistent)."""
+    issues = []
+
+    # (a) every deterministic worked example must compute to its stated result.
+    for tier, exs in (seed.get("worked_examples") or {}).items():
+        for e in exs:
+            sub = e.get("substitute") or ""
+            if "vs" in sub:                              # Jensen two-expression form
+                continue
+            got, want = _eval_arith(sub), _first_num(e.get("result", ""))
+            if got is None or want is None:
+                continue
+            if abs(got - want) > max(0.5, 0.03 * abs(want)):
+                issues.append(f"worked example [{tier}] '{e.get('title')}': "
+                              f"{sub} computes {round(got, 3)}, stated {want}")
+
+    # (a') the CYU answers embed prose-style A op B = C claims — the robust parser handles those.
+    for tier, qs in (seed.get("check_understanding") or {}).items():
+        for q in qs:
+            for c in arithmetic_claims(q.get("answer", "")):
+                if not c["ok"]:
+                    issues.append(f"check-understanding [{tier}]: {c['claim']} computes "
+                                  f"{c['computed']}, stated {c['stated']}")
+
+    # (b/c) summary closure: v = ω·r, T ≈ 2π/ω̄, Jensen ⟨ω²⟩ ≥ ⟨ω⟩².
+    b = _byk(seed)
+    r, om, v, ac, T = (b.get("r"), b.get("omega"), b.get("v"), b.get("a_c"), b.get("T"))
+    if all(isinstance(x, (int, float)) for x in (om, r, v)):
+        if abs(v - abs(om) * r) > max(0.02, 0.03 * abs(v)):
+            issues.append(f"summary: v={v} but omega*r={round(abs(om) * r, 3)} "
+                          f"(v = omega*r broken — mixed omega statistics?)")
+    if isinstance(om, (int, float)) and isinstance(T, (int, float)) and abs(om) > 1e-6:
+        import math as _m
+        pred = 2 * _m.pi / abs(om)
+        note = (seed.get("measurement_honesty") or {}).get("intermediate", "") or ""
+        if abs(T - pred) > max(0.03, 0.05 * abs(T)) and "average period is not" not in note:
+            issues.append(f"summary: T={T} but 2pi/omega={round(pred, 3)} and the honesty "
+                          f"box does not flag the period as an average (Jensen)")
+    if all(isinstance(x, (int, float)) for x in (om, r, ac)) and r:
+        w2_measured = ac / r                             # ⟨ω²⟩ implied by mean a_c
+        if w2_measured + max(0.05, 0.02 * om * om) < om * om:
+            issues.append(f"summary: mean a_c/r={round(w2_measured, 3)} < omega^2="
+                          f"{round(om * om, 3)} (Jensen ⟨ω²⟩ ≥ ⟨ω⟩² violated)")
+    return issues
 
 
 # ---- (2) number grounding ----------------------------------------------------
@@ -235,9 +321,12 @@ def tier_compliance(tier, text, unreliable=False):
 # ---- (4) motion-type faithfulness -------------------------------------------
 # NB: "constant angular ACCELERATION" (constant alpha) is CORRECT for accelerating motion —
 # only flag constant speed/rate/velocity/spin, not constant acceleration.
-_STEADY = re.compile(r"\b(steady (?:pace|speed|spin)|constant (?:speed|rate|velocity|spin)|"
+_STEADY = re.compile(r"\b(steady (?:pace|speed|spin|rhythm)|constant (?:speed|rate|velocity|spin)|"
                      r"uniform (?:motion|rate|speed)|does not (?:speed up or slow down|change)|"
-                     r"no (?:speeding up|change in speed)|unchanging speed)\b", re.I)
+                     r"no (?:speeding up|change in speed)|unchanging (?:speed|pace|rate|spin)|"
+                     r"smooth[, ]+(?:and )?(?:uninterrupted|unchanging|predictable)|"
+                     r"uninterrupted (?:spin|rotation|motion|pace)|"
+                     r"holds (?:that|its) (?:pace|speed))\b", re.I)
 # Union of both historical negation look-back lists (grounding tool + live gate).
 _NEG = ("rather than", "instead of", "not ", "isn't", "is not", "no longer",
         "maintaining", "never")
@@ -435,9 +524,15 @@ def tier_gate(obj, seed, frame=None):
     tier = obj.get("tier")
     unreliable = not (seed.get("measurement_quality") or {}).get("reliable", True)
     issues = []
-    if not unreliable:
-        issues += [f"arithmetic: {c['claim']} -> computes {c['computed']}, stated {c['stated']}"
-                   for c in arithmetic_claims(text) if not c["ok"]]
+    # Arithmetic closure. On an oblique clip we cannot verify per-instant v=omega*r /
+    # a_c=omega^2*r (per-instant omega is unreliable), but the SCALE-FREE period identity
+    # T = 2pi/omega still must hold — checking only that catches the wheel's false
+    # "2pi/7.813 = 0.837" while sparing the correctly-hedged per-instant relations.
+    claims = arithmetic_claims(text)
+    if unreliable:
+        claims = [c for c in claims if c.get("kind") == "period"]
+    issues += [f"arithmetic: {c['claim']} -> computes {c['computed']}, stated {c['stated']}"
+               for c in claims if not c["ok"]]
     issues += [f"ungrounded number {u['value']} in {u['context']}"
                for u in ungrounded_numbers(text, allowed_values(seed))]
     issues += tier_compliance(tier, text, unreliable=unreliable)

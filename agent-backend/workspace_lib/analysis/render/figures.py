@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
+import textwrap
 from pathlib import Path
 
 import matplotlib
@@ -28,7 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..common import dedup_display_name
+from ..common import canonical_omega, dedup_display_name
 
 DATA = Path("analysis_output/data")
 PLOTS = Path("analysis_output/plots")
@@ -95,8 +96,12 @@ def _fmt(x, prec=2, unit=""):
     return f"{s} {unit}".strip() if unit else s
 
 
-def _title(scene: str, what: str) -> str:
-    return f"{what} — {scene}" if scene else what
+def _title(scene: str, what: str, width: int = 40) -> str:
+    """Figure title, wrapped so a long "<what> — <scene>" never runs off the axes and
+    gets clipped to "…a playground whe" (A8). textwrap inserts real newlines, which
+    tight_layout then makes room for, rather than relying on matplotlib's flaky wrap=True."""
+    full = f"{what} — {scene}" if scene else what
+    return textwrap.fill(full, width=width) if len(full) > width else full
 
 
 def _phase_spans(labels: list[str]):
@@ -397,10 +402,12 @@ def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
 def fig_annotated_table(stats, scene):
     s, pf = stats["summary"], stats["period_and_frequency"]
     cal, st = stats["calibration"], stats["stable_phase"]
+    omega_val, omega_is_clip_avg = canonical_omega(stats)
     rows = [
         ("Mean radius", _fmt(s.get("mean_r_m"), 3), "m"),
         ("Std radius", _fmt(s.get("std_r_m"), 3), "m"),
-        ("Stable angular velocity", _fmt(st.get("stable_mean_omega"), 2), "rad/s"),
+        ("Angular velocity (clip avg)" if omega_is_clip_avg else "Stable angular velocity",
+         _fmt(omega_val, 2), "rad/s"),
         ("Mean centripetal accel.", _fmt(s.get("mean_ac"), 2), "m/s^2"),
         ("Max centripetal accel.", _fmt(s.get("max_ac"), 2), "m/s^2"),
         ("Stable centripetal accel.", _fmt(st.get("stable_mean_ac"), 2), "m/s^2"),
@@ -473,7 +480,10 @@ def main() -> int:
         unreliable = False
 
     s, st, pf = stats["summary"], stats["stable_phase"], stats["period_and_frequency"]
-    stable_omega = st.get("stable_mean_omega")
+    # The ω(t) reference line matches the table/prose: clip-average on a (de)accelerating
+    # clip (labelled so), the stable-phase mean only on a genuinely uniform spin.
+    stable_omega, _omega_is_clip_avg = canonical_omega(stats)
+    omega_hline_lbl = "clip average" if _omega_is_clip_avg else "stable mean"
     mean_r = s.get("mean_r_m")
     stable_ac = st.get("stable_mean_ac")
 
@@ -485,11 +495,11 @@ def main() -> int:
     # ω(t) with phase bands == the "annotated graph"
     _series_plot("annotated_graph.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity & phases",
-                 TRACE["omega"], hline=stable_omega, hline_lbl="stable mean",
+                 TRACE["omega"], hline=stable_omega, hline_lbl=omega_hline_lbl,
                  smooth_trend=unreliable)
     _series_plot("omega_t.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity", TRACE["omega"],
-                 hline=stable_omega, hline_lbl="stable mean", smooth_trend=unreliable)
+                 hline=stable_omega, hline_lbl=omega_hline_lbl, smooth_trend=unreliable)
     _series_plot("ac_t.png", cols, stats, scene, "ac_m_s2",
                  "centripetal acceleration (m/s^2)", "Centripetal acceleration",
                  TRACE["ac"], hline=stable_ac, hline_lbl="stable mean", star_peak=True,
