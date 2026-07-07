@@ -38,8 +38,14 @@ agent-backend/vinsa_export_questions_backup_200909/
 # LaTeX skill (separate tool)
 agent-backend/latex-skill/
 
-# Presentation assets
-presentation/
+# Presentation assets — track LaTeX/Markdown source only.
+# Skip built PDFs, figures, LaTeX build artifacts, and old/backup snapshots.
+presentation/**
+!presentation/**/
+!presentation/**/*.tex
+!presentation/**/*.md
+presentation/_backup_*/
+presentation/_old/
 
 # Video files (should not be in git)
 *.MOV
@@ -61,6 +67,7 @@ agent-backend/vinsa_export_single_backup_*/
 # Scratch notes & scripts
 note-*
 print-props/
+!presentation/note-from-prof.md
 
 # Editor config
 .vscode/
