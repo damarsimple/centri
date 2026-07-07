@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from pathlib import Path
 
 from . import quality_signals
+from .common import dedup_display_name
 
 DATA = Path("analysis_output/data")
 N_TIMELINE = 4  # time-anchored samples across the active window
@@ -63,6 +65,75 @@ def _timeline_from_csv(csv_path: Path, n: int = N_TIMELINE):
     return out
 
 
+def _absval(x):
+    """abs() of a real number, else the value unchanged (None/str pass through)."""
+    return abs(x) if isinstance(x, (int, float)) else x
+
+
+_TURN_LABEL = {90: "a quarter turn", 180: "half a turn",
+               270: "three-quarters of a turn", 360: "a full turn"}
+
+
+def angle_milestones(csv_path: Path, unreliable: bool = False):
+    """Time of the first crossing of 90/180/270/360 degrees of swept angle — the
+    ground truth behind the basic tier's "one second in ≈ a quarter turn, ~90°" figure.
+
+    theta_rad in kinematics.csv is already unwrapped/cumulative; we rebase it (and time)
+    to the first ACTIVE sample and report the magnitude of the swept angle so the sign of
+    the rotation direction doesn't matter. ``unreliable`` (oblique capture): the
+    quarter-turn positions are projection-distorted, so only the 180°/360° milestones —
+    where the object is diametrically opposite / back at start, robust to viewing angle —
+    are kept. ≤5 entries. Empty if the clip never completes a quarter turn or the CSV is
+    too short.
+    """
+    rows = []
+    try:
+        with open(csv_path, newline="") as fh:
+            for r in csv.DictReader(fh):
+                if r.get("active") not in ("1", "1.0", "True", "true"):
+                    continue
+                try:
+                    rows.append((float(r["time_s"]), float(r["theta_rad"])))
+                except (ValueError, KeyError):
+                    continue
+    except OSError:
+        return []
+    if len(rows) < 5:
+        return []
+    t0, th0 = rows[0]
+    targets = [180, 360] if unreliable else [90, 180, 270, 360]
+    out = []
+    for deg in targets:
+        for t, th in rows:
+            if abs(math.degrees(th - th0)) >= deg:
+                out.append({"t_s": round(t - t0, 2), "angle_deg": deg,
+                            "turn": _TURN_LABEL[deg]})
+                break
+    return out[:5]
+
+
+def _narrative_context() -> dict:
+    """Read the optional user-typed scene context from the workspace sidecar (cwd =
+    workspace). ``scene_context`` (app free-text) is authoritative; a VLM ``notes`` hint
+    is advisory. Absent/unreadable → an empty 'none' block so the tiers fall back to a
+    generic second-person framing with no invented proper nouns. Never raises."""
+    user_text = vlm_hint = None
+    try:
+        sc = json.loads(Path("sidecar.json").read_text())
+        if isinstance(sc, dict):
+            ut = sc.get("scene_context")
+            user_text = ut.strip() if isinstance(ut, str) and ut.strip() else None
+            sug = sc.get("scene_suggestion")
+            note = sc.get("scene_notes")
+            if not note and isinstance(sug, dict):
+                note = sug.get("notes")
+            vlm_hint = note.strip() if isinstance(note, str) and note.strip() else None
+    except (OSError, ValueError):
+        pass
+    source = "user" if user_text else ("vlm" if vlm_hint else "none")
+    return {"user_text": user_text, "vlm_hint": vlm_hint, "source": source}
+
+
 def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
     calib = stats.get("calibration", {})
     summ = stats.get("summary", {})
@@ -78,10 +149,12 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
     variables = [
         {"symbol": "r", "name": "radius", "value": r_report, "unit": "m",
          "definition": "fitted radius of the orbit (the radius used to compute v and a_c)"},
-        {"symbol": "omega", "name": "angular velocity", "value": summ.get("mean_omega"),
+        # Store the UNSIGNED magnitude — direction lives in rotation_direction. The signed
+        # mean (e.g. -2.12) otherwise contradicted the table's magnitude (2.08) in the prose.
+        {"symbol": "omega", "name": "angular velocity", "value": _absval(summ.get("mean_omega")),
          "unit": "rad/s",
          "definition": "how fast the angle is swept per second (rate of change of angle)"},
-        {"symbol": "v", "name": "tangential speed", "value": summ.get("mean_v"), "unit": "m/s",
+        {"symbol": "v", "name": "tangential speed", "value": _absval(summ.get("mean_v")), "unit": "m/s",
          "definition": "linear speed along the circular path"},
         {"symbol": "a_c", "name": "centripetal acceleration", "value": summ.get("mean_ac"),
          "unit": "m/s^2",
@@ -123,6 +196,7 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
 
     timeline = []
     measurement_quality = None
+    milestones = []
     if csv_path and Path(csv_path).exists():
         timeline = _timeline_from_csv(Path(csv_path))
         # Trust channel for the LLM: is per-instant omega reliable, or is the omega(t)
@@ -133,10 +207,18 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
             measurement_quality = quality_signals.build_quality_block(sig, stats)
         except Exception:
             measurement_quality = None
+        unreliable = bool(measurement_quality) and not measurement_quality.get("reliable", True)
+        milestones = angle_milestones(Path(csv_path), unreliable=unreliable)
+
+    # Clean display names once, here, so every downstream consumer (tiers, figures,
+    # report) sees the same deduped strings. When the scene title collapses to nothing
+    # (it was the degenerate "<X> on <X>"), fall back to the plain object name.
+    object_name = dedup_display_name(stats.get("object_name"))
+    scene_title = dedup_display_name(stats.get("scene_title")) or object_name
 
     return {
-        "object_name": stats.get("object_name"),
-        "scene_title": stats.get("scene_title"),
+        "object_name": object_name,
+        "scene_title": scene_title,
         "tracked_label": stats.get("tracked_label"),
         "rotation_direction": summ.get("rotation_direction"),
         "active_duration_s": (stats.get("video_info", {}) or {}).get("duration_s"),
@@ -144,6 +226,8 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
         "relations": relations,
         "angular_acceleration": aa_out,
         "timeline": timeline,
+        "angle_milestones": milestones,
+        "narrative_context": _narrative_context(),
         "figures": FIGURES,
         "calibration_note": {
             "px_per_m": calib.get("px_per_m"),
@@ -181,7 +265,10 @@ def main() -> int:
     seed = write_material_seed()
     n = len(seed["timeline"])
     mt = (seed["angular_acceleration"] or {}).get("motion_type", "uniform")
-    print(f"OK material_seed.json ({len(seed['variables'])} vars, {n} timeline pts, motion={mt})")
+    nm = len(seed.get("angle_milestones", []))
+    src = (seed.get("narrative_context") or {}).get("source", "none")
+    print(f"OK material_seed.json ({len(seed['variables'])} vars, {n} timeline pts, "
+          f"{nm} angle milestones, motion={mt}, context={src})")
     return 0
 
 

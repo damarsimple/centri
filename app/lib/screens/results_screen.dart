@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 
 import '../config/settings.dart';
 import '../models/job.dart';
+import '../models/material.dart';
 import '../models/measurement.dart';
 import '../services/clients.dart';
 import '../services/measurement_api.dart';
@@ -30,6 +31,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
   String? _error;
   VideoPlayerController? _video;
   bool _teacherMode = false;
+  String _materialLevel = 'basic';
 
   @override
   void initState() {
@@ -125,6 +127,15 @@ class _ResultsScreenState extends State<ResultsScreen> {
           ),
           const SizedBox(height: 12),
           _TrajectoryCard(rM: series.rM, theta: series.theta),
+          const SizedBox(height: 28),
+        ],
+
+        if (r.materials != null && r.materials!.isNotEmpty) ...[
+          _MaterialSection(
+            materials: r.materials!,
+            level: _materialLevel,
+            onLevel: (l) => setState(() => _materialLevel = l),
+          ),
           const SizedBox(height: 28),
         ],
 
@@ -259,6 +270,87 @@ class _SectionTitle extends StatelessWidget {
           .textTheme
           .titleMedium
           ?.copyWith(fontWeight: FontWeight.w700));
+}
+
+/// The difficulty-tiered learning material, rendered natively: a Basic/Intermediate/
+/// Advanced selector, the scene-title headline, then one card per prose section.
+class _MaterialSection extends StatelessWidget {
+  final Map<String, MaterialLevel> materials;
+  final String level;
+  final ValueChanged<String> onLevel;
+  const _MaterialSection(
+      {required this.materials, required this.level, required this.onLevel});
+
+  static const _order = ['basic', 'intermediate', 'advanced'];
+  static const _labels = {
+    'basic': 'Basic',
+    'intermediate': 'Intermediate',
+    'advanced': 'Advanced',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final present = _order.where(materials.containsKey).toList();
+    // Fall back to the first available level if the selected one isn't present.
+    final sel = materials.containsKey(level) ? level : present.first;
+    final m = materials[sel]!;
+    final scheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(child: _SectionTitle('Learning material')),
+            if (present.length > 1)
+              SegmentedButton<String>(
+                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                segments: [
+                  for (final l in present)
+                    ButtonSegment(value: l, label: Text(_labels[l] ?? l)),
+                ],
+                selected: {sel},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) => onLevel(s.first),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if ((m.sceneTitle ?? '').isNotEmpty)
+          Text(m.sceneTitle!,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w700, color: scheme.primary)),
+        if ((m.bloomObjective ?? '').isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text('Difficulty: ${_labels[sel] ?? sel} · ${m.bloomObjective}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant, fontStyle: FontStyle.italic)),
+        ],
+        const SizedBox(height: 12),
+        for (final entry in m.sections.entries)
+          if (entry.value.trim().isNotEmpty)
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(entry.key,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700, color: scheme.primary)),
+                    const SizedBox(height: 6),
+                    Text(entry.value.trim(),
+                        style: Theme.of(context).textTheme.bodyMedium),
+                  ],
+                ),
+              ),
+            ),
+      ],
+    );
+  }
 }
 
 /// A native line chart for a value over time (replaces the baked summary panel).

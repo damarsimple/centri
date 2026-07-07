@@ -1,4 +1,5 @@
 // Models for the measurement backend (agent-backend).
+import 'material.dart';
 
 class AnalyzeResponse {
   final String jobId;
@@ -112,6 +113,8 @@ class JobFiles {
   final String? annotatedVideo;
   final String? summaryPanel;
   final String? kinematicsCsv;
+  // Per-difficulty student PDFs on a tiered job (basic/intermediate/advanced → URL).
+  final Map<String, String> tierPdfs;
 
   JobFiles({
     this.studentPdf,
@@ -119,7 +122,12 @@ class JobFiles {
     this.annotatedVideo,
     this.summaryPanel,
     this.kinematicsCsv,
+    this.tierPdfs = const {},
   });
+
+  /// The student PDF for a difficulty level, falling back to the single studentPdf.
+  String? studentPdfFor(String? level) =>
+      (level != null ? tierPdfs[level] : null) ?? studentPdf;
 
   factory JobFiles.fromJson(Map<String, dynamic> j) => JobFiles(
         studentPdf: j['student_pdf'] as String?,
@@ -127,6 +135,8 @@ class JobFiles {
         annotatedVideo: j['annotated_video'] as String?,
         summaryPanel: j['summary_panel'] as String?,
         kinematicsCsv: j['kinematics_csv'] as String?,
+        tierPdfs: ((j['tier_pdfs'] as Map?)?.cast<String, dynamic>() ?? const {})
+            .map((k, v) => MapEntry(k, v as String)),
       );
 }
 
@@ -226,6 +236,9 @@ class JobResult {
   final JobFiles files;
   final MotionSeries? series;
   final Worksheet? worksheet;
+  // Difficulty-tiered learning material (basic/intermediate/advanced), or null for
+  // legacy/untiered jobs. Rendered natively on the results screen.
+  final Map<String, MaterialLevel>? materials;
 
   JobResult({
     required this.jobId,
@@ -233,6 +246,7 @@ class JobResult {
     required this.files,
     this.series,
     this.worksheet,
+    this.materials,
   });
 
   factory JobResult.fromJson(Map<String, dynamic> j) => JobResult(
@@ -245,6 +259,10 @@ class JobResult {
             : null,
         worksheet: j['worksheet'] is Map
             ? Worksheet.fromJson((j['worksheet'] as Map).cast<String, dynamic>())
+            : null,
+        materials: j['materials'] is Map
+            ? (j['materials'] as Map).cast<String, dynamic>().map((k, v) =>
+                MapEntry(k, MaterialLevel.fromJson((v as Map).cast<String, dynamic>())))
             : null,
       );
 }

@@ -1,0 +1,374 @@
+\documentclass[11pt]{article}
+
+% ---------------------------------------------------------------------------
+% Centri — working draft. Per direction: BACKGROUND / RELATED WORK is skipped
+% (a placeholder section marks where it will go); the focus is a faithful
+% end-to-end description of the pipeline, the evaluation methodology, and the
+% honest limitations (including the local-model self-correction limitation).
+% Standard article class + common packages only, so it compiles on a base
+% TeX Live install. Retarget to the venue template (e.g. J. Educational
+% Computing Research / IEEE) later.
+% ---------------------------------------------------------------------------
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\newcommand{\todo}[1]{{\color{red}[\textbf{TODO:} #1]}}
+
+\title{\textbf{Centri: Generating Authentic, Difficulty-Tiered Physics
+Learning Material from Video-Measured Circular Motion}}
+\author{\todo{authors} \\ \small \todo{affiliation --- Hwang Lab}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present \textbf{Centri}, an end-to-end system that turns an ordinary
+smartphone video of an everyday object moving in a circle into authentic,
+difficulty-tiered physics learning material. Unlike prior authentic-problem
+generators that couple a phone inertial sensor to the object, Centri measures
+the motion \emph{from the video itself}: a vision--language model and a
+point-tracking model localise a marked point across frames, and a frozen,
+deterministic kinematics pipeline fits the orbit and recovers the angular
+kinematics (radius, angular velocity, centripetal acceleration, period,
+frequency, and---when the clip captures a spin-up---a constant angular
+acceleration). From the resulting measurement \emph{seed}, a local large
+language model writes three parallel passages at increasing cognitive
+demand---basic, intermediate, and advanced---each grounded strictly in the
+measured numbers and aligned to Bloom's taxonomy and Cognitive Load Theory. A
+deterministic \emph{grounding gate} verifies every passage (arithmetic
+closure, number grounding, tier compliance, motion faithfulness, vocabulary
+fences, and cross-tier distinctness) and flags rather than hides violations.
+Against a five-object evaluation set the generator achieves monotonic
+cognitive-load progression and title consistency on all five objects and a
+clean cross-tier verdict on four of five, with the residual issues traced to a
+documented self-correction limitation of the local model. We describe the full
+pipeline, the evaluation methodology (intrinsic gate, reference-based
+similarity, and LLM-as-judge), and the limitations that bound the current
+result.
+\end{abstract}
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+Math and physics word problems anchor abstract relations in a concrete
+situation; they are most effective when that situation is \emph{authentic}---a
+real object the learner can recognise, doing something the learner has
+seen~\cite{placeholder}. Authoring authentic problems by hand is slow, and
+automating it is hard because the generated text must be simultaneously
+correct, solvable, contextually grounded, and pitched at the right difficulty.
+
+Centri targets one physics domain---uniform and non-uniform circular
+motion---and makes three choices that distinguish it from prior authentic-%
+problem generators in the same lab lineage:
+\begin{enumerate}
+  \item \textbf{Measurement from video, not from a bolted-on sensor.} The
+  kinematics come from computer-vision tracking of the object in an ordinary
+  video, so nothing has to be attached to the object and the measured motion is
+  the \emph{real} object's motion.
+  \item \textbf{A frozen, deterministic measurement core.} The numbers are
+  produced by a seeded pipeline, not by the language model, so the same video
+  yields byte-identical physics on every run.
+  \item \textbf{Difficulty as a first-class output.} The system emits three
+  parallel tiers from a single measurement, each gated for grounding and for
+  distinctness from the others.
+\end{enumerate}
+
+\noindent\textbf{Contributions.} (i) An end-to-end pipeline from smartphone
+video to grounded, difficulty-tiered material; (ii) a reusable deterministic
+\emph{grounding gate} for LLM-generated physics prose; (iii) a multi-method
+evaluation (intrinsic gate, reference-based similarity, LLM-as-judge) and an
+honest account of where a small local model limits the result.
+
+\paragraph{Background and related work.} \todo{Deliberately omitted in this
+draft (per scope). Will situate Centri against authentic-MWP generation, AR/%
+sensor-based context acquisition, and LLM-based question generation and
+evaluation.}
+
+% ===========================================================================
+\section{System Overview}
+% ===========================================================================
+Centri is three cooperating systems (Figure~\ref{fig:pipeline}): a
+\emph{measurement} backend (video $\rightarrow$ physics), a
+\emph{material-generation} stage (physics $\rightarrow$ tiered prose and
+figures), and a mobile \emph{app} for capture, human-in-the-loop annotation,
+and display. A job runs one video end-to-end: perception localises the object,
+the frozen pipeline computes the kinematics and writes a measurement seed, the
+generator writes and gates three tiers, and the app renders them.
+
+The measurement and pedagogy stages meet at a single, deliberately narrow
+seam---a per-frame CSV of \texttt{time\_s, omega\_rad\_s, ac\_m\_s2}---so the
+video output is a drop-in for downstream interactive tutoring.
+
+\begin{figure}[t]
+  \centering
+  \fbox{\parbox{0.92\linewidth}{\centering\small
+  \textbf{capture} (smartphone video, face-on, scale marker) $\rightarrow$
+  \textbf{perception} (VLM detect + point tracking, coverage gate, optional
+  HITL annotate) $\rightarrow$
+  \textbf{frozen kinematics} (RANSAC circle fit, single $\omega$ source,
+  spin-up $\alpha$) $\rightarrow$
+  \texttt{material\_seed.json} $\rightarrow$
+  \textbf{tiered generator + grounding gate} (basic / intermediate / advanced)
+  $\rightarrow$
+  \textbf{figures + PDFs + app}}}
+  \caption{Centri end-to-end pipeline. The kinematics core is frozen and
+  deterministic; only perception and prose come from learned models.}
+  \label{fig:pipeline}
+\end{figure}
+
+% ===========================================================================
+\section{Measurement: Video to Physics}
+% ===========================================================================
+\subsection{Capture protocol}
+Two failure modes are fixed at capture time rather than in software.
+\emph{Oblique capture} projects the circular orbit into an ellipse, injecting
+a viewing-angle ripple into the per-instant angular velocity that is a
+projection artifact, not physics; the pipeline detects this and degrades
+gracefully (\texttt{measurement\_quality.reliable = false}, dropping
+per-instant claims), but a face-on clip avoids it. \emph{Missing scale} leaves
+only scale-free quantities recoverable. The protocol therefore asks for a
+face-on, braced camera; a small high-contrast marker (red tape) described by a
+simple noun for reliable tracking; a scale reference of known size in frame;
+and a \SIrange{10}{15}{\second} clip that captures start~$\rightarrow$~spin-up~%
+$\rightarrow$~steady, since the constant-$\alpha$ spin-up is genuine physics
+for the advanced tier.
+
+\subsection{Perception}
+A vision--language model proposes the object and a bounding region from a
+simple-noun prompt; a point-tracking model then follows a marked point across
+all frames. A coverage gate retries or, failing that, routes the clip to
+human-in-the-loop annotation in the app. Perception is the only place learned
+models touch the measurement.
+
+\subsection{Frozen, deterministic kinematics}
+The kinematics is \emph{not} authored by the language model. It lives in a
+seeded package copied into every job workspace, so ``same video $\rightarrow$
+byte-identical physics'' holds by construction. Tracked points are fit to a
+circle with a seeded-RNG RANSAC; a single canonical $\omega$ source feeds all
+downstream quantities (eliminating an earlier class of prose/table
+contradictions); an off-axis orbit centre is recovered rather than assumed;
+and when the clip contains a spin-up the pipeline fits a constant angular
+acceleration $\alpha$ with its $R^2$. The seed stores unsigned $\omega$ and
+$v$ (killing sign contradictions between prose and table), radius $r$, period
+$T$, frequency $f$, centripetal acceleration $a_c$, a time-anchored
+$\omega(t)$ timeline, and---for the basic tier---angle-at-time milestones
+(first crossings of \ang{90}, \ang{180}, \ang{270}, \ang{360}).
+
+\subsection{Accuracy}
+An automated ground-truth harness compares the video-only kinematics against a
+phone-gyroscope reference. On pilot clips the tracking-only pipeline matches
+the gyroscope mean $\omega$ to within \textbf{\SIrange{0.2}{0.3}{\percent}}.
+We frame the validity claim as \emph{relative/structural} (trend, peak, phase
+shape) rather than absolute calibration against a single phone, because IMU
+readings themselves vary with sensor placement and manufacturer; a
+known-RPM turntable gives an absolute reference when needed.
+
+% ===========================================================================
+\section{Difficulty-Tiered Material Generation}
+% ===========================================================================
+From the seed alone---never re-deriving quantities---a local LLM
+(\texttt{Qwen3.6-35B}, reasoning enabled) writes three passages.
+
+\paragraph{Shared narrative frame.} A single 5W+1H frame (who/what/where/%
+when/why/how) is generated once per job; its \texttt{scene\_title} hard-%
+overwrites all three tiers, so the tiers can no longer each invent a generic
+title (an observed drift failure). If a learner note is present it is
+authoritative; otherwise the frame is written in the second person and invents
+no proper nouns.
+
+\paragraph{The three tiers} follow a fixed depth ladder grounded in Bloom's
+taxonomy and Cognitive Load Theory (Table~\ref{tab:tiers}). Each tier is
+assigned a \emph{distinct} worked instant so advanced no longer reads like
+intermediate, and each is written in one LLM call (an A3B model bleeds
+vocabulary between tiers if asked for all three at once).
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Tier & Bloom objective & Cognitive load & Content \\
+    \midrule
+    Basic        & Remember / Understand & low      & idea + radius + angle-at-time milestones; no equations \\
+    Intermediate & Apply / Analyze       & moderate & core relations incl.\ $a_c=\omega^2 r$ on this object's numbers \\
+    Advanced     & Analyze / Evaluate    & high     & angular acceleration + timeline + squared-sensitivity + scale caveat \\
+    \bottomrule
+  \end{tabular}
+  \caption{The difficulty ladder. Element interactivity rises strictly across
+  tiers and is checked by the cross-tier gate.}
+  \label{tab:tiers}
+\end{table}
+
+\paragraph{Figures are tiered too.} The basic tier renders against three
+low-load figures---a labelled still, an angle-at-time coloured-dot plot
+(drawn from the same milestones the prose narrates), and the traced
+trajectory---while higher tiers use the $\omega(t)$ and $a_c(t)$ series. All
+figures are produced by seeded, deterministic plotting code.
+
+\paragraph{Steering a small model.} The local model drafts well but corrects
+poorly (Section~\ref{sec:limits}). Two mechanisms address this: (i) an
+editable \emph{hints file} of subtle wording nuances, injected into the prompt
+as a ``nuances'' block, that steers the \emph{first} pass (e.g.\ say a computed
+value ``matches the \emph{measured} value'', never the ``recorded'' value; name
+figures by what they show; say a slowing motion ``slows down'' rather than the
+steady-sounding ``does not speed up or slow down''); and (ii) a best-of-$N$
+failure-informed regeneration that, on a gate failure, re-rolls up to twice fed
+the exact faults and keeps only a strictly-fewer-issues draft.
+
+% ===========================================================================
+\section{The Grounding Gate}
+% ===========================================================================
+Every tier passes through a single deterministic gate
+(Table~\ref{tab:gate}); a failing tier is regenerated once and then
+\emph{kept-but-flagged} (proceed-but-flag---the pipeline never silently ships a
+wrong number, and never hard-blocks on prose). The gate verdict, with a
+per-job \texttt{frame} block and a \texttt{cross\_tier} block, is written to
+\texttt{material\_tiers\_gate.json} and surfaced to the reader.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    Check & What it enforces \\
+    \midrule
+    Arithmetic closure   & every explicit $A\,\mathrm{op}\,B=C$ actually computes \\
+    Number grounding     & every quantity traces to the seed (incl.\ the sanctioned $\omega^2$ intermediate) \\
+    Tier compliance      & basic has no equations; intermediate/advanced use the assigned relations \\
+    Motion faithfulness  & an accelerating/decelerating clip is never called ``steady'' \\
+    Vocabulary fences     & no tracking/pipeline jargon; kinematics-only (no forces/causes) \\
+    Story fence          & the frame's invented who/where colours only the Scenario section \\
+    Cross-tier           & equal titles, distinct worked instants, strictly rising element interactivity \\
+    \bottomrule
+  \end{tabular}
+  \caption{The deterministic grounding gate. Idiomatic false positives (``on
+  track'', ``work together'') are guarded; correct derived intermediates
+  ($\omega^2$) are grounded.}
+  \label{tab:gate}
+\end{table}
+
+% ===========================================================================
+\section{Evaluation Methodology}
+% ===========================================================================
+We assess the material along three complementary axes, mirroring the
+established practice in this research line.
+
+\paragraph{Intrinsic (the gate).} The deterministic gate is itself a quality
+signal: per-tier pass/flag, plus cross-tier monotonicity, title equality, and
+worked-instant distinctness. It is cheap, reproducible, and pedagogy-aware.
+
+\paragraph{Reference-based similarity.} BLEU and ROUGE ($n$-gram overlap) and
+\textbf{BERTScore} (contextual-embedding F1) against a hand-built reference
+set. Because a single fixed reference measures lexical density rather than
+pedagogical quality (an equation-dense reference scores the \emph{advanced}
+tier highest---a confound, not a finding), we sort a 19-source reference set
+into basic/intermediate/advanced buckets on the same element-interactivity axis
+the material is scored on, and evaluate each tier against its matched bucket.
+
+\paragraph{LLM-as-judge.} A rubric-scored judgment (relevance, answerability,
+difficulty-fit, concept accuracy, annotation accuracy) plus an achieved-Bloom
+rating, complementing the surface metrics with a semantics-aware signal. A
+teacher-rater study on the same rubric is future work; agreement between
+human and LLM raters will be reported via correlation / ICC.
+
+% ===========================================================================
+\section{Results}
+% ===========================================================================
+\paragraph{Live generation.} Regenerating a five-object evaluation set
+(turntable/phone, bicycle tire, fan) through the reworked generator on the
+local model yields (Table~\ref{tab:results}): monotonic element interactivity
+on \textbf{5/5} objects, equal titles across tiers on \textbf{5/5}, a clean
+cross-tier verdict on \textbf{4/5}, and all three tiers fully clean on
+\textbf{3/5} (13/15 tier passages). Residual failures were stochastic
+single-word vocabulary flags, addressed by the hints mechanism
+(Section~\ref{sec:limits}). The three original defects the rework targeted---%
+title drift, degenerate ``\emph{X} on \emph{X}'' naming, and advanced~$\approx$~%
+intermediate---were eliminated.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Object (seed) & EI monotonic & titles equal & cross-tier & all tiers clean \\
+    \midrule
+    bicycle tire (8110ab0d)  & \checkmark & \checkmark & \checkmark & \checkmark \\
+    phone (afe0f99f)         & \checkmark & \checkmark & \checkmark & \checkmark \\
+    phone (cc9f02ce)         & \checkmark & \checkmark & \checkmark & \checkmark \\
+    phone (711fffe8)         & \checkmark & \checkmark & --         & -- \\
+    fan (a2627aa2)           & \checkmark & \checkmark & \checkmark & -- \\
+    \midrule
+    \textbf{total}           & \textbf{5/5} & \textbf{5/5} & \textbf{4/5} & \textbf{3/5} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Live 5-seed sweep on \texttt{Qwen3.6-35B}. Residual misses are
+  single-word vocabulary flags or a worked-instant distinctness technicality,
+  not wrong numbers.}
+  \label{tab:results}
+\end{table}
+
+\paragraph{Reference-based scores.} \todo{Run tier-matched BERTScore / BLEU /
+ROUGE and LLM-judge on the regenerated set; report per-tier F1. Prior
+single-reference pilot (fan, vs OpenStax \S6.2): basic 0.815, intermediate
+0.838, advanced 0.841 --- reverse of the naive prediction, i.e.\ the
+lexical-density confound this section's tier-matched design removes.}
+
+\paragraph{Measurement accuracy.} Video-only kinematics matched the phone
+gyroscope mean $\omega$ to \SIrange{0.2}{0.3}{\percent} on pilot clips.
+
+% ===========================================================================
+\section{Limitations}
+\label{sec:limits}
+% ===========================================================================
+\paragraph{Local-model self-correction.} The local \texttt{Qwen3.6-35B} drafts
+well but self-corrects \emph{poorly}: told that a draft used a banned word, it
+frequently re-emits the same word or trades it for another violation (we
+observed ``recorded''$\rightarrow$``pushes''). Our mitigation steers the
+\emph{first} pass through an editable hints file rather than relying on
+regeneration; this eliminated the most stubborn case (the word ``recorded''
+went to zero occurrences after one hint). Fully generalising this---a clean
+gate on every stochastic draft---likely needs a stronger model or a
+review-and-select generation loop (generate several candidates, review, and
+choose one). We report this as a genuine bound on the current system, not a
+solved problem.
+
+\paragraph{Single-reference confound.} A fixed gold reference measures lexical
+overlap, not pedagogy; the tier-matched reference design mitigates but does not
+fully remove this.
+
+\paragraph{Absolute scale.} Absolute SI values require a scale reference in
+frame; without one only scale-free quantities ($\omega$, $\alpha$, $T$, ratios)
+survive. We therefore claim relative/structural validity for the kinematics.
+
+\paragraph{Scope.} The system currently addresses single-object circular
+motion; multi-object comparison (e.g.\ pedal vs.\ wheel) and force-based
+extensions are future work.
+
+% ===========================================================================
+\section{Conclusion}
+% ===========================================================================
+Centri shows that a smartphone video of an everyday circular motion can be
+turned, end-to-end and largely automatically, into authentic physics material
+at three grounded difficulty levels---measuring the motion from the video
+itself, keeping the physics deterministic, and gating every generated passage
+for grounding and tier distinctness. A live five-object evaluation meets the
+structural targets, and the remaining gaps are traced to a documented
+limitation of the local model rather than to the design. Closing them, and
+completing the reference-based and teacher-rater evaluation, is the immediate
+next step.
+
+\bibliographystyle{plain}
+% \bibliography{centri}  % add refs when Background/Related Work is written
+\begin{thebibliography}{1}
+\bibitem{placeholder} \todo{references pending (Background/Related Work skipped in this draft).}
+\end{thebibliography}
+
+\end{document}

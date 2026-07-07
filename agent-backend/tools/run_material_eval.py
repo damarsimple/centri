@@ -39,6 +39,67 @@ def _norm(s):
     return s
 
 
+# ---- pure-Python BLEU + ROUGE (complementary n-gram overlap columns) ----------
+# The lab .venv-eval has no sacrebleu/rouge/nltk/evaluate and installs there aren't
+# assumed, so these are self-contained. They are complementary diagnostics, NOT the
+# headline metric (BERTScore stays the headline, comparable to P-MAGIC).
+import math, re, collections
+
+
+def _tok(s):
+    return re.findall(r"[a-z0-9]+", _norm(s).lower())
+
+
+def _ngrams(toks, n):
+    return collections.Counter(tuple(toks[i:i + n]) for i in range(len(toks) - n + 1))
+
+
+def sentence_bleu(cand, ref, max_n=4):
+    """BLEU-4 with a brevity penalty and add-1 smoothing on higher-order n-grams."""
+    c, r = _tok(cand), _tok(ref)
+    if not c or not r:
+        return 0.0
+    w, log_sum = 1.0 / max_n, 0.0
+    for n in range(1, max_n + 1):
+        cc, rc = _ngrams(c, n), _ngrams(r, n)
+        overlap = sum(min(v, rc[g]) for g, v in cc.items())
+        total = max(1, sum(cc.values()))
+        smooth = 0.0 if n == 1 else 1.0  # add-1 for n>1 so a single miss isn't a hard zero
+        log_sum += w * math.log(max((overlap + smooth) / (total + smooth), 1e-9))
+    bp = 1.0 if len(c) > len(r) else math.exp(1 - len(r) / max(1, len(c)))
+    return bp * math.exp(log_sum)
+
+
+def rouge_n(cand, ref, n):
+    """ROUGE-N F1 (n-gram recall/precision harmonic mean)."""
+    c, r = _ngrams(_tok(cand), n), _ngrams(_tok(ref), n)
+    overlap = sum(min(v, c[g]) for g, v in r.items())
+    prec = overlap / max(1, sum(c.values()))
+    rec = overlap / max(1, sum(r.values()))
+    return 2 * prec * rec / max(1e-9, prec + rec)
+
+
+def _lcs_len(a, b):
+    dp = [0] * (len(b) + 1)
+    for x in a:
+        prev = 0
+        for j, y in enumerate(b, 1):
+            cur = dp[j]
+            dp[j] = prev + 1 if x == y else max(dp[j], dp[j - 1])
+            prev = cur
+    return dp[-1]
+
+
+def rouge_l(cand, ref):
+    """ROUGE-L F1 (longest-common-subsequence overlap)."""
+    c, r = _tok(cand), _tok(ref)
+    if not c or not r:
+        return 0.0
+    lcs = _lcs_len(c, r)
+    prec, rec = lcs / max(1, len(c)), lcs / max(1, len(r))
+    return 2 * prec * rec / max(1e-9, prec + rec)
+
+
 def load_sections(path):
     d = json.loads(pathlib.Path(path).read_text())
     secs = d.get("sections", d)
@@ -164,6 +225,23 @@ def main():
     L.append(f"| BERT Precision (P) | {pm:.3f} ± {ps_:.3f} |")
     L.append(f"| BERT Recall (R)    | {rm:.3f} ± {rs_:.3f} |")
     L.append(f"| BERT F1            | **{wm:.3f} ± {ws_:.3f}** |")
+
+    # Complementary n-gram overlap (BLEU / ROUGE), whole passage vs reference, per object.
+    # Surface-form overlap — much lower than BERTScore by nature; a diagnostic, not headline.
+    L.append("\n## N-gram overlap vs reference — complementary (whole passage, per object)\n")
+    L.append("| Object | BLEU-4 | ROUGE-1 | ROUGE-2 | ROUGE-L |")
+    L.append("|---|---|---|---|---|")
+    bleu_v, r1_v, r2_v, rl_v = [], [], [], []
+    for (name, _), cf in zip(mats, cands_full):
+        b = sentence_bleu(cf, ref_full)
+        r1 = rouge_n(cf, ref_full, 1)
+        r2 = rouge_n(cf, ref_full, 2)
+        rl = rouge_l(cf, ref_full)
+        bleu_v.append(b); r1_v.append(r1); r2_v.append(r2); rl_v.append(rl)
+        L.append(f"| {name} | {b:.3f} | {r1:.3f} | {r2:.3f} | {rl:.3f} |")
+    bm, bs = msd(bleu_v); r1m, r1s = msd(r1_v); r2m, r2s = msd(r2_v); rlm, rls = msd(rl_v)
+    L.append(f"| **mean ± SD** | **{bm:.3f} ± {bs:.3f}** | {r1m:.3f} ± {r1s:.3f} | "
+             f"{r2m:.3f} ± {r2s:.3f} | {rlm:.3f} ± {rls:.3f} |")
 
     L.append("\n## Summary\n")
     L.append("| Metric | Value |")

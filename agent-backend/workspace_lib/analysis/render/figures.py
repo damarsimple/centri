@@ -28,6 +28,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..common import dedup_display_name
+
 DATA = Path("analysis_output/data")
 PLOTS = Path("analysis_output/plots")
 ROI = Path("analysis_output/roi")
@@ -267,6 +269,79 @@ def fig_trajectory_basic(stats, cols, scene):
     plt.close(fig)
 
 
+# CVD-safe categorical dots for the 90/180/270/360-degree milestones, validated with the
+# dataviz palette validator (light surface: all checks pass, worst adjacent ΔE 53+). They
+# echo the tier accent colours (blue/orange/purple/green) for visual coherence.
+_MILESTONE_COLOURS = ["#1565C0", "#EF6C00", "#8E24AA", "#2E7D32"]
+
+
+def fig_angle_points_basic(stats, cols, scene, unreliable=False):
+    """Basic-tier "the angle grows with time" picture: the traced circular path (faint) with
+    a coloured, directly-labelled dot at each 90/180/270/360-degree milestone ("1.0 s · 90°
+    · a quarter turn"), a start marker and a sweep-direction arc. Reuses the basic-trajectory
+    coordinate math and imports ``angle_milestones`` from ``..material_seed`` so the dots and
+    the numbers the prose narrates come from ONE computation and cannot disagree.
+
+    On an oblique clip the seed already drops the quarter-turn milestones (projection-
+    distorted), so only the robust 180°/360° dots are drawn."""
+    from ..material_seed import angle_milestones
+    cal = stats["calibration"]
+    cx, cy = cal.get("cx_px"), cal.get("cy_px")
+    ppm = cal.get("px_per_m") or 1.0
+    r_fit_m = cal.get("r_fit_m")
+    x_px, y_px, t, active = (cols.get("x_px"), cols.get("y_px"),
+                             cols.get("time_s"), cols.get("active"))
+    m = np.isfinite(x_px) & np.isfinite(y_px) & np.isfinite(t)
+    if active is not None:
+        m = m & (active >= 0.5)
+    xm, ym, tm = (x_px[m] - cx) / ppm, (y_px[m] - cy) / ppm, t[m]
+    t0 = tm[0] if len(tm) else 0.0
+    milestones = angle_milestones(DATA / "kinematics.csv", unreliable=unreliable)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot(xm, ym, color="#B0BEC5", lw=1.0, alpha=0.75, zorder=1)  # faint full path
+    if r_fit_m:
+        ax.add_patch(plt.Circle((0, 0), r_fit_m, fill=False, ls="--",
+                                 color="#90A4AE", lw=1.2, zorder=0))
+    ax.plot([0], [0], "+", color="#455A64", ms=12, mew=2, zorder=2)
+    if len(xm):
+        ax.scatter([xm[0]], [ym[0]], s=70, facecolor="white",
+                   edgecolor="#455A64", lw=1.8, zorder=4)
+        ax.annotate("start", (xm[0], ym[0]), textcoords="offset points",
+                    xytext=(6, -12), fontsize=9, color="#455A64")
+    for i, ms in enumerate(milestones):
+        if not len(tm):
+            break
+        j = int(np.argmin(np.abs((tm - t0) - ms["t_s"])))
+        c = _MILESTONE_COLOURS[i % len(_MILESTONE_COLOURS)]
+        ax.scatter([xm[j]], [ym[j]], s=120, color=c, edgecolor="white", lw=1.8, zorder=5)
+        # Steer each label toward the centre so boxes stay inside the frame.
+        dx, dy = (-11 if xm[j] > 0 else 11), (-11 if ym[j] > 0 else 11)
+        ax.annotate(f"{ms['t_s']:.1f} s · {ms['angle_deg']}° · {ms['turn']}",
+                    (xm[j], ym[j]), textcoords="offset points", xytext=(dx, dy),
+                    ha="right" if dx < 0 else "left",
+                    va="top" if dy < 0 else "bottom",
+                    fontsize=9, color=c, fontweight="bold", zorder=6,
+                    bbox=dict(fc="white", ec=c, alpha=0.9,
+                              boxstyle="round,pad=0.25"))
+        if i == 0:  # arc arrow from start toward the first milestone = sweep direction
+            ax.annotate("", xy=(xm[j], ym[j]), xytext=(xm[0], ym[0]),
+                        zorder=3, arrowprops=dict(
+                            arrowstyle="-|>", color="#607D8B", lw=1.6,
+                            connectionstyle="arc3,rad=0.3", shrinkA=8, shrinkB=10))
+    lim = 1.45 * (r_fit_m or (np.nanmax(np.abs(np.concatenate([xm, ym]))) if len(xm) else 1))
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal", "box")
+    ax.set_xlabel("distance across (m)")
+    ax.set_ylabel("distance up/down (m)")
+    ax.set_title(_title(scene, "The angle grows with time"))
+    ax.invert_yaxis()
+    fig.tight_layout()
+    fig.savefig(PLOTS / "angle_points_basic.png")
+    plt.close(fig)
+
+
 def _smooth_1rev(t, y, stats):
     """Moving average over ~one revolution. Averaging over exactly one period
     cancels a 1x/rev (and 2x/rev) sinusoid — so it removes the viewing-angle
@@ -381,7 +456,9 @@ def main() -> int:
     plt.rcParams.update(STYLE)
     stats = json.loads((DATA / "stats.json").read_text())
     cols = _load_csv()
-    scene = stats.get("scene_title") or stats.get("object_name") or ""
+    # Collapse the degenerate "<X> on <X>" composite so figure titles read "fan blade",
+    # not "fan blade on fan blade" (shares the report/seed helper).
+    scene = dedup_display_name(stats.get("scene_title") or stats.get("object_name"))
 
     # Oblique-capture clips have a per-instant omega ripple that is a viewing-angle
     # projection artifact, not real motion. When flagged, the omega(t)/a_c(t) plots show
@@ -404,6 +481,7 @@ def main() -> int:
     fig_annotated_image_basic(stats, scene)  # simplified frame for the basic tier
     traj_x, traj_y = fig_trajectory(stats, cols, scene)
     fig_trajectory_basic(stats, cols, scene)  # single-colour path for the basic tier
+    fig_angle_points_basic(stats, cols, scene, unreliable=unreliable)  # angle-at-time dots
     # ω(t) with phase bands == the "annotated graph"
     _series_plot("annotated_graph.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity & phases",
@@ -436,7 +514,7 @@ def main() -> int:
         "source": "kinematics.csv:x_px,y_px",
     }}
     (PLOTS / "figure_qa.json").write_text(json.dumps(qa, indent=2))
-    print(f"FIGURES OK — wrote 9 plots + summary_panel.png + 2 basic-tier variants "
+    print(f"FIGURES OK — wrote 9 plots + summary_panel.png + 3 basic-tier variants "
           f"to {PLOTS}/ (scene='{scene}')")
     return 0
 

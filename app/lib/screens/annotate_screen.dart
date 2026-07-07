@@ -46,6 +46,7 @@ class _AnnotateScreenState extends State<AnnotateScreen> {
   final _objectCtrl = TextEditingController();
   final _refCtrl = TextEditingController();
   final _sizeCtrl = TextEditingController(); // centimetres
+  final _sceneCtrl = TextEditingController(); // free-text scene context (who/where…)
 
   // Rotation centre as a fraction (0..1) of the frame, so it survives any box size.
   Offset? _centerFrac;
@@ -65,6 +66,7 @@ class _AnnotateScreenState extends State<AnnotateScreen> {
     _objectCtrl.dispose();
     _refCtrl.dispose();
     _sizeCtrl.dispose();
+    _sceneCtrl.dispose();
     _uploadProgress.dispose();
     super.dispose();
   }
@@ -159,6 +161,11 @@ class _AnnotateScreenState extends State<AnnotateScreen> {
     if (_centerFrac == null && c != null) {
       _centerFrac = Offset(c.dx, c.dy);
     }
+    // Pre-fill the scene-context field with the VLM's advisory notes (the user can edit
+    // or clear it); it becomes the authoritative narrative frame for the learning material.
+    if (_sceneCtrl.text.trim().isEmpty && (s.notes ?? '').trim().isNotEmpty) {
+      _sceneCtrl.text = s.notes!.trim();
+    }
     setState(() => _suggestionApplied = true);
   }
 
@@ -213,6 +220,7 @@ class _AnnotateScreenState extends State<AnnotateScreen> {
       // Authoritative rotation axis as a frame fraction (0..1).
       rotationCenterFrac: [_centerFrac!.dx, _centerFrac!.dy],
       physicalSize: cm == null ? null : cm / 100.0, // cm → metres
+      sceneContext: _sceneCtrl.text.trim().isEmpty ? null : _sceneCtrl.text.trim(),
       videoW: _imgW,
       videoH: _imgH,
       displayW: _lastBox.width.round(),
@@ -435,6 +443,17 @@ class _AnnotateScreenState extends State<AnnotateScreen> {
             suffixText: 'cm',
           ),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        ),
+        const SizedBox(height: 20),
+        TextField(
+          controller: _sceneCtrl,
+          minLines: 2,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: "What's happening in this video? (optional)",
+            helperText: 'Who, where, why — used to write the learning material scenario',
+            alignLabelWithHint: true,
+          ),
         ),
         const SizedBox(height: 20),
         AsyncButton(

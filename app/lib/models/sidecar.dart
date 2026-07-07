@@ -9,6 +9,9 @@ class Sidecar {
   // be a scale ruler placed off the axis.
   final List<double>? rotationCenterFrac; // [fx, fy] in 0..1
   final double? physicalSize; // reference physical size in metres (optional)
+  // Optional free-text scene context the user types ("who/where/what is happening").
+  // Forwarded to the learning-material generator as the authoritative narrative frame.
+  final String? sceneContext;
   final int videoW;
   final int videoH;
   final int displayW;
@@ -19,6 +22,7 @@ class Sidecar {
     required this.referenceLabel,
     this.rotationCenterFrac,
     this.physicalSize,
+    this.sceneContext,
     required this.videoW,
     required this.videoH,
     required this.displayW,
@@ -36,6 +40,8 @@ class Sidecar {
         // Authoritative rotation axis, preferred by the orchestrator over the
         // reference-object median. Fraction of the frame, 0..1.
         if (rotationCenterFrac != null) 'rotation_center_frac': rotationCenterFrac,
+        if (sceneContext != null && sceneContext!.trim().isNotEmpty)
+          'scene_context': sceneContext!.trim(),
         'display_w': displayW,
         'display_h': displayH,
         'video_w': videoW,

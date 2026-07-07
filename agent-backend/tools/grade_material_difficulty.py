@@ -24,26 +24,13 @@ Usage:
       material_work/_tiers_fan/material.advanced.json \
       --out material_work/_eval/tier_difficulty_report.md
 """
-import argparse, json, re, pathlib
+import argparse, json, re, pathlib, sys
 
-# Canonical physical quantities + the surface forms (symbols + words) that signal them.
-# Detection is case-insensitive; a quantity counts once if ANY of its cues appears.
-QUANTITIES = {
-    "radius (r)":                 [r"\bradius\b", r"distance from (?:the )?cent(?:er|re)", r"\br\b"],
-    "angular velocity (omega)":   [r"angular (?:velocity|speed)", r"spin rate", r"\bomega\b", "ω", r"rad/?s"],
-    "linear speed (v)":           [r"linear speed", r"tangential", r"\bspeed\b", r"\bvelocity\b", r"m/?s\b"],
-    "centripetal accel. (a_c)":   [r"centripetal accel", r"inward pull", r"a_?c\b", r"m/?s.?2", "m/s²"],
-    "period (T)":                 [r"\bperiod\b", r"one full (?:turn|revolution|cycle)", r"time (?:for|of) one"],
-    "frequency (f)":              [r"\bfrequency\b", r"\bhz\b", r"turns per second", r"revolutions per second"],
-    "angular accel. (alpha)":     [r"angular accel", r"\balpha\b", "α", r"rad/?s.?2"],
-}
-
-# Explicit relations / equations the reader must integrate (CLT element interactivity).
-RELATION_CUES = [
-    r"=", r"∝", r"proportional to", r"varies (?:as|with)", r"divided by",
-    r"product of", r"squared", r"square of", r"the ratio of", r"times the",
-    r"multiplied by", r"\bv\s*=\s*", r"a_?c\s*=", r"2\s*π", r"2pi",
-]
+# The EI counters (QUANTITIES / RELATION_CUES / quantities_in / relations_in) live in the
+# shared gate module so this tool and material_gate.cross_tier_issues score identically.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "workspace_lib"))
+from analysis.material_gate import (  # noqa: E402
+    QUANTITIES, RELATION_CUES, quantities_in, relations_in)
 
 
 def syllables(word):
@@ -68,20 +55,6 @@ def flesch(text):
     ease = 206.835 - 1.015 * wps - 84.6 * spw
     grade = 0.39 * wps + 11.8 * spw - 15.59
     return (round(ease, 1), round(grade, 1), nw, len(sentences))
-
-
-def quantities_in(text):
-    t = text.lower()
-    found = []
-    for name, cues in QUANTITIES.items():
-        if any(re.search(c, t) for c in cues):
-            found.append(name)
-    return found
-
-
-def relations_in(text):
-    t = text.lower()
-    return sum(len(re.findall(c, t)) for c in RELATION_CUES)
 
 
 def passage(d):
@@ -132,7 +105,7 @@ def main():
     L = ["# Tier difficulty — independent (model-free) signal\n",
          "Readability (Flesch) + element-interactivity count (CLT), measured from the prose.",
          "A faithful ladder gets *harder* up the tiers: FK grade ↑, reading ease ↓, EI score ↑.\n",
-         "| Tier | Words | Flesch ease | FK grade | Distinct quantities | Relations | **EI score** | Self-label |",
+         "| Difficulty level | Words | Flesch ease | FK grade | Distinct quantities | Relations | **EI score** | Self-label |",
          "|---|---|---|---|---|---|---|---|"]
     for r in rows:
         L.append(f"| {r['tier']} | {r['words']} | {r['flesch_ease']} | {r['fk_grade']} | "

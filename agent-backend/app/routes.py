@@ -13,6 +13,7 @@ from .schemas import (
     FilePaths,
     MotionSeries,
     Worksheet,
+    MaterialLevel,
     SceneSuggestion,
     VerifyResponse,
     VerifiedObject,
@@ -228,6 +229,7 @@ async def get_result(request: Request, job_id: str, _: None = Depends(verify_api
     from . import result_data
     series = result_data.load_series(job_id)
     worksheet = result_data.load_worksheet(job_id)
+    materials = result_data.load_materials(job_id)
 
     return JobResultResponse(
         job_id=job_id,
@@ -235,6 +237,7 @@ async def get_result(request: Request, job_id: str, _: None = Depends(verify_api
         files=FilePaths(**result["files"]),
         series=MotionSeries(**series) if series else None,
         worksheet=Worksheet(**worksheet) if worksheet else None,
+        materials={t: MaterialLevel(**m) for t, m in materials.items()} if materials else None,
     )
 
 

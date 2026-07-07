@@ -27,61 +27,12 @@ MODEL = "Qwen3.6-35B"
 SECTIONS = ["Scenario", "The variables we measured", "How the variables are related",
             "What the video shows over time", "Reading the figures"]
 
-# Per-tier policy. `figures` MUST mirror TIER_ARTIFACTS in render/report.py so the prose
-# only describes plots the tier's PDF shows. `seed_fields`/`forbidden` are the depth ladder.
-TIERS = {
-    "basic": {
-        "bloom": "Remember / Understand",
-        "interactivity": "low",
-        "seed_fields": "object name, rotation direction, clip duration, and the radius "
-                       "(as 'how far out it sits') plus the IDEA of an inward pull. "
-                       "You may name 'centripetal acceleration' once, in words.",
-        "forbidden": "NO symbols (omega/alpha/v/a_c), NO equations or formula derivations, "
-                     "NO numeric substitution beyond the radius and the duration, NO "
-                     "time-evolution analysis with numbers.",
-        "figures": "Only two pictures: (1) a frame from the video showing the object on its "
-                   "circular path with the radius marked from the centre, and (2) a plot of "
-                   "the traced path showing every point falls on one circle. There is NO "
-                   "data table and NO graph of speed or acceleration over time for this "
-                   "reader — do not mention any table or any 'graph/plot of ... over time'.",
-        "test": "Could a learner who has never seen the equations follow every sentence, "
-                "holding one idea at a time?",
-    },
-    "intermediate": {
-        "bloom": "Apply / Analyze",
-        "interactivity": "moderate",
-        "seed_fields": "the radius, angular velocity (omega), tangential speed (v), "
-                       "centripetal acceleration (a_c), period (T), frequency (f) WITH their "
-                       "measured values and units, and the relations v=omega*r, "
-                       "a_c=v^2/r=omega^2*r, T=2*pi/omega=1/f shown to hold for THIS object.",
-        "forbidden": "Do NOT make the motion's change over time the main point (one sentence "
-                     "of context is fine), NO angular-acceleration value or timeline, NO "
-                     "scale/calibration-caveat discussion.",
-        "figures": "An annotated frame with the radius, a short data table of the core "
-                   "measurements (radius, omega, v, a_c, period, frequency), one graph of "
-                   "tangential speed over time, and the traced circular path. Do not mention "
-                   "angular-acceleration graphs or a summary panel.",
-        "test": "Does the passage coordinate a handful of interacting quantities through the "
-                "standard relations, applied to this object's numbers?",
-    },
-    "advanced": {
-        "bloom": "Analyze / Evaluate",
-        "interactivity": "high",
-        "seed_fields": "everything intermediate uses PLUS angular acceleration (alpha, "
-                       "a_t=alpha*r), the spin-up/coast-down timeline (time evolution), the "
-                       "squared sensitivity a_c proportional to omega^2, and the calibration "
-                       "caveat (relative kinematics are scale-free; absolute a_c depends on "
-                       "the reference size).",
-        "forbidden": "Do not merely restate the intermediate content — the job here is the "
-                     "higher-order integration over time and at limits.",
-        "figures": "An annotated frame, the full measurements table (including angular "
-                   "acceleration and the calibration), graphs of angular velocity and "
-                   "centripetal acceleration over time, and a summary panel that combines the "
-                   "views, plus the traced path.",
-        "test": "Does the passage integrate several quantities AND their change over time, and "
-                "reason about proportionality, limits, or what the measurement does/doesn't pin down?",
-    },
-}
+# Per-tier policy. AUTHORITATIVE SOURCE: analysis/material_tiers.py — this standalone tool
+# imports its TIERS so the two can never drift (the old local copy still had v=omega*r as an
+# intermediate core relation after the live pipeline dropped it). `figures` mirrors
+# TIER_ARTIFACTS in render/report.py so the prose only describes plots the tier's PDF shows.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "workspace_lib"))
+from analysis.material_tiers import TIERS  # noqa: E402
 
 
 def _facts(seed):

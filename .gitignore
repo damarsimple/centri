@@ -61,3 +61,12 @@ agent-backend/vinsa_export_single_backup_*/
 # Scratch notes & scripts
 note-*
 print-props/
+
+# Editor config
+.vscode/
+
+# Sweep/runtime artifacts
+agent-backend/.rerun_jobmap.tsv
+
+# Paper build artifacts (keep the .tex source; *.aux/*.log/*.out already ignored above)
+paper/*.pdf

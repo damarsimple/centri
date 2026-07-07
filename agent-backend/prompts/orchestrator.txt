@@ -989,7 +989,7 @@ DON'T use any worktress or GIT features.
 **STEP 0 (REQUIRED, do this FIRST — these are seeded, deterministic, and must always
 run; never hand-author figures or the annotated video):**
 ```bash
-python -m analysis.render.figures      # 9 plots + summary_panel.png + figure_qa.json
+python -m analysis.render.figures      # 9 plots + summary_panel.png + 3 basic-tier variants + figure_qa.json
 python -m analysis.verify_figures      # must print FIGURE_VERIFY OK
 python -m analysis.render.annotate     # annotated_video.mp4 (banner + symbols-only)
 ```
@@ -1032,7 +1032,11 @@ offset to the original frame if needed.
 - Definition: `.pi/agents/figures-gen-subagent.md`
 - **The plots are now SEEDED, deterministic code** — `python -m analysis.render.figures`
   writes all 9 plots + `summary_panel.png` + `figure_qa.json` from `stats.json` +
-  `kinematics.csv` (correct cropped space, scene title in every title). The subagent's
+  `kinematics.csv` (correct cropped space, scene title in every title), plus the **3
+  basic-tier figure variants** the basic material renders against: `annotated_image_basic.png`
+  (one clean frame, radius called out), `angle_points_basic.png` (coloured dots at each
+  angle milestone — the same `angle_milestones()` the basic prose narrates), and
+  `trajectory_basic.png` (the traced path). The subagent's
   job is RELAXED to: run that module first, then look at the output and only patch a
   panel if it genuinely looks wrong. It must NOT re-author the plots from scratch or
   plot geometry from `api_cache.json`. (Relaxed vs the frozen kinematics — small
@@ -1063,14 +1067,27 @@ offset to the original frame if needed.
   - `analysis_output/data/material.intermediate.json`
   - `analysis_output/data/material.advanced.json`
   Each follows `docs/difficulty-tiered-material-spec.md` (Bloom + Cognitive-Load Theory):
-  basic = the idea + radius, no equations; intermediate = the core relations on this
-  object's numbers; advanced = angular acceleration + the timeline + the squared-sensitivity
-  and scale caveat. The numbers come ONLY from the seed — the model never invents quantities.
-- **GROUNDING GATE (built in):** every tier is run through deterministic checks (arithmetic
-  closure, tier compliance, motion-type faithfulness); a failing tier is regenerated once,
-  then kept-but-flagged in `analysis_output/data/material_tiers_gate.json` (proceed-but-flag,
-  like the figure-verify phase — never silently ship a wrong number). Surface the gate verdict
-  in `report.md`.
+  basic = the idea + radius + the angle-at-time milestones, no equations; intermediate = the
+  core relations (incl. the structured `a_c = ω²·r`) on this object's numbers; advanced =
+  angular acceleration + the timeline + the squared-sensitivity and scale caveat. The numbers
+  come ONLY from the seed — the model never invents quantities.
+- A single shared **5W+1H narrative frame** is generated once per job and its `scene_title`
+  hard-overwrites every tier, so the three tiers can no longer each invent a different generic
+  title; each tier also gets a **distinct worked instant** (its `TIER_ANCHORS` anchor) so
+  advanced no longer reads like intermediate.
+- **The basic tier renders against three figures** (`annotated_image_basic.png`,
+  `angle_points_basic.png`, `trajectory_basic.png`, produced by Subagent B); the basic prose
+  names the angle-at-time figure and narrates the same `angle_milestones()` those dots come
+  from. Intermediate/advanced keep the ω(t) / a_c(t) series figures.
+- **GROUNDING GATE (built in, `analysis.material_gate`):** every tier is run through
+  deterministic checks — arithmetic closure, number grounding (`allowed_values` incl. the angle
+  milestones), tier compliance, motion-type faithfulness, **vocabulary** (`vocab_issues`:
+  tracking- and dynamics-only leakage), and **story-fence** — plus **cross-tier** checks (title
+  equality, per-tier worked-instant compliance/uniqueness, EI monotonicity). A failing tier is
+  regenerated once, then kept-but-flagged in `analysis_output/data/material_tiers_gate.json`
+  (proceed-but-flag, like the figure-verify phase — never silently ship a wrong number). The
+  gate JSON carries `frame` + `cross_tier` blocks alongside the per-tier verdicts. Surface the
+  gate verdict in `report.md`.
 - Needs only `material_seed.json` — no dependency on figures. Runs in the worker (the
   inference server `192.168.1.205:8083` is reachable there).
 - The legacy single-material LLM subagent (`.pi/agents/material-gen-subagent.md`) is retained
@@ -1177,7 +1194,7 @@ Include:
 6. Phase boundaries from `phases.json`
 7. Validation flags raised (if any)
 8. Question bank summary (count, difficulty distribution [easy/intermediate/advanced], format coverage [text/image/graph/table], regenerations)
-8b. Learning-material tiers: which tiers were written (basic/intermediate/advanced) and the grounding-gate verdict from `material_tiers_gate.json` (passed, or the flagged issues per tier)
+8b. Learning-material difficulty levels: which levels were written (basic/intermediate/advanced) and the grounding-gate verdict from `material_tiers_gate.json` (passed, or the flagged issues per level, including the cross-tier and frame blocks)
 9. Subagent status: completed / failed / skipped (A, B, C, D)
 10. Full output file manifest — all PDFs, videos, plots, CSVs, JSONs
 

@@ -6,10 +6,32 @@ the `[STEP START] stepN` / `[STEP END] stepN` log lines and the
 not change the marker format without updating the feed parser.
 """
 import json
+import re
 import time
 from pathlib import Path
 
 import numpy as np
+
+
+# ── Display-name hygiene ─────────────────────────────────────────────────────
+_DUP_ON = re.compile(r"^(.+?)\s+on\s+\1$", re.I)
+
+
+def dedup_display_name(name: str | None) -> str:
+    """Collapse the degenerate ``"<X> on <X>"`` composite (which arises when the
+    tracked label equals the reference label, e.g. "fan blade on fan blade") down to
+    ``"<X>"``, and normalise whitespace. Idempotent; ``None`` → "".
+
+    The ``"<tracked> on <ref>"`` scene title is built in prompts/orchestrator.txt; when
+    the two halves coincide it read as "fan blade on fan blade" in every figure/report
+    title. Deduping was inlined only in render/report.py — this is the shared helper so
+    figures.py, the seed, and the report all collapse it identically.
+    """
+    if not name:
+        return ""
+    s = re.sub(r"\s+", " ", str(name)).strip()
+    m = _DUP_ON.fullmatch(s)
+    return m.group(1).strip() if m else s
 
 # ── Determinism ─────────────────────────────────────────────────────────────
 # RANSAC and any other sampling MUST draw from this generator. An unseeded

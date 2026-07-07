@@ -87,6 +87,8 @@ class JobStatusResponse(BaseModel):
 
 
 class FilePaths(BaseModel):
+    # For a tiered job these resolve to the BASIC-difficulty PDF (see worker/tasks.py glob);
+    # tier_pdfs below carries the per-difficulty URLs.
     student_pdf: str
     teacher_pdf: str
     annotated_video: str
@@ -94,6 +96,9 @@ class FilePaths(BaseModel):
     # Per-frame kinematics time-series (time_s, omega_rad_s, ac_m_s2, ...).
     # Optional so older cached results (written before this field existed) still deserialize.
     kinematics_csv: Optional[str] = None
+    # Difficulty → student PDF URL, for tiered jobs (basic/intermediate/advanced). Additive
+    # and optional so older cached results (single PDF) still deserialize.
+    tier_pdfs: Optional[Dict[str, str]] = None
 
 
 class MotionSeries(BaseModel):
@@ -130,6 +135,17 @@ class Worksheet(BaseModel):
     questions: List[QuestionItem] = []
 
 
+class MaterialLevel(BaseModel):
+    """One difficulty level of the grounded learning material, for native rendering."""
+    object_name: Optional[str] = None
+    scene_title: Optional[str] = None
+    difficulty_level: Optional[str] = None
+    bloom_objective: Optional[str] = None
+    element_interactivity: Optional[str] = None
+    concepts_introduced: List[str] = []
+    sections: Dict[str, str] = {}
+
+
 class JobResultResponse(BaseModel):
     job_id: str
     stats: Dict[str, Any]
@@ -138,6 +154,9 @@ class JobResultResponse(BaseModel):
     # rather than the pipeline's PNG/PDF (the annotated_video stays a file artifact).
     series: Optional[MotionSeries] = None
     worksheet: Optional[Worksheet] = None
+    # Difficulty-tiered learning material (basic/intermediate/advanced), native JSON.
+    # Nullable so legacy/untiered cached results still validate.
+    materials: Optional[Dict[str, MaterialLevel]] = None
 
 
 class JobListItem(BaseModel):

@@ -165,8 +165,11 @@ def run_pi_analysis(self, job_id: str):
     extractor_input = f"{extractor_prompt}\n\njob_id={job_id}"
     extractor_env = env.copy()
     extractor_env["job_id"] = job_id
-    extractor_env["OUTPUT_STUDENT_PDF"] = "analysis_output/report/student_edition.pdf"
-    extractor_env["OUTPUT_TEACHER_PDF"] = "analysis_output/report/teacher_key.pdf"
+    # Tiered jobs have no plain student_edition.pdf — point the extractor at the basic-level
+    # PDF (or whichever tier exists) instead of a nonexistent single file (Defect B).
+    _pdfs = _resolve_report_pdfs(str(workspace))
+    extractor_env["OUTPUT_STUDENT_PDF"] = _pdfs["student_pdf"]
+    extractor_env["OUTPUT_TEACHER_PDF"] = _pdfs["teacher_pdf"]
     extractor_env["OUTPUT_ANNOTATED_VIDEO"] = "analysis_output/video_annotation/annotated_video.mp4"
     extractor_env["OUTPUT_SUMMARY_PANEL"] = "analysis_output/plots/summary_panel.png"
     extractor_env["OUTPUT_KINEMATICS_CSV"] = "analysis_output/data/kinematics.csv"
@@ -201,6 +204,35 @@ def run_pi_analysis(self, job_id: str):
     set_state(job_id, status="done", progress_pct=100, step="Complete")
 
 
+_REPORT_REL = "analysis_output/report"
+_TIER_ORDER = ("basic", "intermediate", "advanced")
+
+
+def _resolve_report_pdfs(workspace_path: str) -> dict:
+    """Resolve which report PDFs actually exist on disk. A difficulty-tiered job emits
+    student_edition.{basic,intermediate,advanced}.pdf and NO plain student_edition.pdf, so the
+    old hardcoded single path shipped a dead link on every tiered job (Defect B). Returns the
+    primary student/teacher relative paths (basic preferred) plus a per-difficulty map.
+    """
+    rdir = os.path.join(workspace_path, "analysis_output", "report")
+
+    def pick(stem: str):
+        if os.path.exists(os.path.join(rdir, f"{stem}.pdf")):
+            return f"{_REPORT_REL}/{stem}.pdf", {}
+        tiers = {t: f"{_REPORT_REL}/{stem}.{t}.pdf" for t in _TIER_ORDER
+                 if os.path.exists(os.path.join(rdir, f"{stem}.{t}.pdf"))}
+        if tiers:
+            primary = tiers.get("basic") or next(iter(tiers.values()))
+        else:
+            primary = f"{_REPORT_REL}/{stem}.pdf"  # stable fallback even if absent
+        return primary, tiers
+
+    student_primary, student_tiers = pick("student_edition")
+    teacher_primary, _t = pick("teacher_key")
+    return {"student_pdf": student_primary, "teacher_pdf": teacher_primary,
+            "tier_pdfs": student_tiers}
+
+
 def _parse_extractor_output(output: str, job_id: str, workspace_path: str) -> dict | None:
     import re
     m = re.search(r"\{[\s\S]*\"files\"[\s\S]*\}", output)
@@ -211,9 +243,10 @@ def _parse_extractor_output(output: str, job_id: str, workspace_path: str) -> di
     except json.JSONDecodeError:
         return None
 
+    pdfs = _resolve_report_pdfs(workspace_path)
     fallback = {
-        "student_pdf": "analysis_output/report/student_edition.pdf",
-        "teacher_pdf": "analysis_output/report/teacher_key.pdf",
+        "student_pdf": pdfs["student_pdf"],
+        "teacher_pdf": pdfs["teacher_pdf"],
         "annotated_video": "analysis_output/video_annotation/annotated_video.mp4",
         "summary_panel": "analysis_output/plots/summary_panel.png",
         "kinematics_csv": "analysis_output/data/kinematics.csv",
@@ -240,4 +273,8 @@ def _parse_extractor_output(output: str, job_id: str, workspace_path: str) -> di
             files_dict[key] = f"{url_prefix}/{rel}"
         else:
             files_dict[key] = f"{url_prefix}/{fallback[key]}"
+    # Per-difficulty student PDFs (tiered jobs), so the app can offer each level's PDF.
+    if pdfs["tier_pdfs"]:
+        files_dict["tier_pdfs"] = {t: f"{url_prefix}/{rel}"
+                                   for t, rel in pdfs["tier_pdfs"].items()}
     return files_dict

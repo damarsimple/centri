@@ -102,3 +102,60 @@ compare PDF-vs-PDF**.
 - Bicycle **two-rotation** recognition (pedal vs wheel) — professor's stretch goal.
 - Reliability hardening of the video recognition (lighting/angle/sensor-quality
   sensitivity) before student deployment.
+
+---
+
+## Learning-material quality rework — notes/feedback backlog (2026-07-05)
+
+Built on commit `b59cf79`. Addresses the defects Vinsa/Prof. Hwang flagged in the
+generated material (title drift, prose↔table sign contradictions, "fan blade on fan
+blade" naming, advanced ≈ intermediate, tracking-jargon leakage) plus the app-surfacing
+gap. **Now LLM-live-validated (2026-07-05)** against the inference server — see the
+live-results block below. `MATERIAL_REWORK_STATUS.md` holds the full per-file detail;
+this table is the durable tracking home.
+
+| WS | What | Status |
+|---|---|---|
+| WS-1a | Naming/seed hygiene: `dedup_display_name()`, unsigned ω/v (kills −2.12 vs 2.08 contradiction) | ✅ code + offline |
+| WS-1b–1e | `material_tiers.py` rework: shared 5W+1H frame overwrites tier titles, `TIER_ANCHORS` distinct instants, RULE 8/8b vocab fences | ✅ code + offline |
+| WS-2 | Gate unification → single `analysis/material_gate.py` (arithmetic, grounding, tier, motion, vocab, story-fence, cross-tier, frame); tests 9/9 | ✅ code + live |
+| WS-3.1 | Seed `angle_milestones()` + `narrative_context` (from `sidecar.json scene_context`) | ✅ code + offline |
+| WS-3.2/3.3 | Basic angle-at-time figure `fig_angle_points_basic()` (CVD-validated), wired into report | ✅ code + offline |
+| WS-4 | tier → user-facing `difficulty_level` (report badge, orchestrator 8b, eval header) | ✅ code + offline |
+| WS-5 | Surface material in app + **Defect B** (dead `student_edition.pdf` link → `student_edition*` glob + `tier_pdfs`); backend schema + Flutter `_MaterialSection`, `flutter analyze` clean | ✅ code + offline |
+| WS-6 | Eval tooling: BLEU/ROUGE in `run_material_eval.py`, new `run_llm_judge.py`, `split_references_by_difficulty.py` | ✅ code (scores not yet run on new set) |
+| WS-7 | Docs: `capture-protocol.md`; spec §9 resolved → tier-matched refs, new §10 (no-4th-tier) | ✅ code |
+| WS-7.2 | Backlog table + live results (folds in `MATERIAL_REWORK_STATUS.md`) | ✅ done here |
+| WS-8 | Best-of-N regen + external hints file (`material_hints.md`); 35B self-correction limitation | ✅ code + live |
+
+**Offline-verified this rework:** gate tests 9/9 · fake-LLM e2e (titles equal, per-tier
+instants distinct, gate JSON has `frame`+`cross_tier`, no "X on X") · figure render+eyeball
+· report render (badge, angle fig, no dup titles) · API schema round-trip (+ old cached
+results still validate) · PDF resolver (tiered/single/missing) · BLEU/ROUGE unit checks ·
+reference classifier · `flutter analyze` clean.
+
+### LIVE results — 5-seed sweep, 2026-07-05 (Qwen3.6-35B @ `192.168.1.205:8083`)
+Regenerated all 5 eval seeds through the reworked generator:
+- **EI monotonicity 5/5**, **titles equal 5/5**, **cross-tier PASS 4/5**, all tiers fully
+  clean 3/5 (13/15 tiers). Gate JSON carries `frame`+`cross_tier` every run.
+- Spot-confirmed the original defects are gone: no title drift, no "X on X", advanced ≠
+  intermediate (distinct worked instants), grounded/consistent numbers.
+
+**Post-sweep fixes (this session):** `_STEADY` false-positive fixed; ω² grounded as the
+sanctioned `a_c=ω²·r` intermediate; idiom guards ("on track"/"work together"); quote-T/f
+rule (no re-derivation); **best-of-N failure-informed regen** + separate cross-tier budget;
+**external hints file** `workspace_lib/analysis/material_hints.md` (steers the first pass —
+live-eliminated the stubborn `recorded`).
+
+**Documented limitation — Qwen3.6-35B self-correction.** The 35B drafts well but corrects
+poorly on regen (re-emits or trades banned words). Durable strategy = steer the first pass
+via the hints file, not lean on regeneration. Full generalization needs a bigger model or a
+review-and-select loop (cf. Utami SocioMathLLM CoT candidate selection). Residual gate flags
+are proceed-but-flag stochastic single-word cases; the pipeline never hard-blocks.
+
+### Still open (eval metrics + build steps)
+- **Reference-based scores on the regenerated set** (gate verdicts done via the sweep; these
+  are NOT yet run on the new material): `split_references_by_difficulty.py` → tier-matched
+  `run_multi_reference_eval.py` (BERTScore), `run_material_eval.py` (BLEU/ROUGE),
+  `run_llm_judge.py`. Target: F1 within noise of 0.840.
+- **PDF compile** (texlive), **full Flutter build/run**, formal **A-B vs `job_477df73f`**.

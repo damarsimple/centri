@@ -29,6 +29,8 @@ import re
 RENDER_QUESTIONS = os.environ.get("PI_RENDER_QUESTIONS", "0") == "1"
 from pathlib import Path
 
+from ..common import dedup_display_name
+
 DATA = Path("analysis_output/data")
 REPORT = Path("analysis_output/report")
 
@@ -58,6 +60,9 @@ FIG_META = {
                                         "circular path, with the radius marked from the centre."),
     "trajectory_basic.png": (0.55, "The path the object traced — every tracked point falls on "
                                    "one circle."),
+    "angle_points_basic.png": (0.6, "Where the object is after each second: coloured dots mark "
+                                    "how far round it has swept (90° is a quarter turn, 180° "
+                                    "half a turn), so the angle grows steadily with time."),
     "trajectory.png":  (0.55, "The tracked path in video space with the fitted circular orbit."),
     "omega_t.png":     (0.78, "Angular velocity $\\omega$ vs.\\ time, phase regions shaded."),
     "ac_t.png":        (0.78, "Centripetal acceleration $a_c$ vs.\\ time."),
@@ -88,6 +93,7 @@ SECTION_ARTIFACTS = {
 TIER_ARTIFACTS = {
     "basic": {
         "Scenario":                       ["annotated_image_basic.png"],
+        "What the video shows over time": ["angle_points_basic.png"],
         "Reading the figures":            ["trajectory_basic.png"],
     },
     "intermediate": {
@@ -373,7 +379,7 @@ def _titleblock(title: str, scene: str, tier=None) -> str:
     badge = ""
     if tier in _TIER_ACCENT:
         badge = ("\\colorbox{accent}{\\textcolor{white}{\\sffamily\\bfseries\\small~"
-                 + tier.upper() + " LEVEL~}}")
+                 + tier.upper() + " DIFFICULTY~}}")
     scene_tex = (f"\\textcolor{{inkgray}}{{\\sffamily {tex_escape(scene)}}}" if scene else "")
     sub = (f"\\noindent {badge}\\hfill {scene_tex}\\\\[3pt]\n"
            if (badge or scene_tex) else "")
@@ -564,12 +570,9 @@ def main() -> int:
     questions = json.loads(qpath.read_text()) if qpath.exists() else []
     if isinstance(questions, dict):  # tolerate {"questions": [...]} shape
         questions = questions.get("questions", [])
-    scene = stats.get("scene_title") or stats.get("object_name") or ""
     # De-duplicate the "<X> on <X>" scene title that arises when the tracked label
     # equals the reference label (e.g. "black ball on black ball" -> "black ball").
-    m = re.fullmatch(r"(.+?) on \1", scene.strip())
-    if m:
-        scene = m.group(1)
+    scene = dedup_display_name(stats.get("scene_title") or stats.get("object_name"))
     unreliable = _is_unreliable(stats)
 
     tiers = _load_tiers()

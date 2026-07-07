@@ -69,16 +69,21 @@ its content:
 
 | Tier | Figures embedded | Table |
 |---|---|---|
-| **Basic** | a simplified annotated frame (`annotated_image_basic.png`: circle + radius arrow, no axes/vectors), the plain traced path (`trajectory_basic.png`, single colour, no phase legend) | **none** |
-| **Intermediate** | standard annotated frame, one trend (`v_t.png`), the traced path | **core** (r, ω, v, a_c, T, f) |
-| **Advanced** | annotated frame, `omega_t.png`, `ac_t.png`, `summary_panel.png`, trajectory | **full** (adds peak a_c, α, a_t, ω init→final, calibration) |
+| **Basic** | a simplified annotated frame (`annotated_image_basic.png`: circle + radius arrow, no axes/vectors); the **angle-at-time picture** (`angle_points_basic.png`: coloured dots at 90/180/270/360°, each labelled "1.0 s · 90° · a quarter turn", so the growing angle is concrete); the plain traced path (`trajectory_basic.png`, single colour, no phase legend) | **none** |
+| **Intermediate** | standard annotated frame, the turn-rate trend (`omega_t.png`), the traced path | **core** (r, ω, a_c, T, f) |
+| **Advanced** | annotated frame, `omega_t.png`, `ac_t.png`, the traced path (no `summary_panel.png` — it re-shows every raw plot and duplicates the trajectory) | **full** (adds peak a_c, α, a_t, ω init→final, calibration) |
 
-This lives in two places that **must agree**:
-- `render/figures.py` emits the basic-tier variants alongside the standard plots.
+This lives in places that **must agree**:
+- `render/figures.py` emits the basic-tier variants (`annotated_image_basic`, `angle_points_basic`, `trajectory_basic`) alongside the standard plots.
 - `render/report.py` `TIER_ARTIFACTS` selects per tier; `_measurements_table(level=...)` gives
   the core/full table.
-- `tools/generate_tier_material.py` feeds the **same allowlist** into the prompt, so a tier's
-  `Reading the figures` only narrates plots it is actually shown (see HARD CONSTRAINT #10).
+- `analysis/material_tiers.py` (authoritative) and `tools/generate_tier_material.py` (imports its
+  `TIERS`) feed the **same allowlist** into the prompt, so a tier's `Reading the figures` only
+  narrates plots it is actually shown (see HARD CONSTRAINT #10).
+
+The basic angle figure's dots come from `material_seed.angle_milestones()` — the SAME function
+whose values the basic prose narrates — so figure and text agree by construction. On an oblique
+clip the quarter-turn dots are dropped (projection-distorted); only 180°/360° remain.
 
 > **Generation–render coupling (was a real desync):** the basic prose used to describe
 > "graphs showing speed and acceleration climbing" — plots the basic tier no longer shows.
@@ -317,6 +322,21 @@ Only when all six pass, output the JSON.
   thinking on; the instruction above plus a post-parse fence-strip handles it.
 - **In-domain few-shot (§3)** rather than the off-domain BST examples — measurably steadier
   tier calibration for a sparse MoE.
+- **Poor self-correction on regen (documented limitation).** The 35B drafts well on the FIRST
+  pass but corrects poorly when told what failed: given "you used a banned word", it frequently
+  re-emits the same word or trades it for another violation (observed `recorded`→`pushes`). So:
+  1. **Steer the first pass, not the regen.** Subtle wording nuances live in an editable sidecar
+     `workspace_lib/analysis/material_hints.md`, loaded by `material_tiers._load_hints()` and
+     injected into the system prompt as a NUANCES block. Add a hint there (no code change) when
+     the model reaches for a bad phrasing — e.g. `recorded`→`measured`, "slows down" not "does
+     not speed up or slow down", figures by what they SHOW, use only the given milestone times.
+  2. **Best-of-N regen as a backstop.** On a gate failure the generator re-rolls up to 2× fed the
+     exact faults and keeps the draft with STRICTLY fewer issues (never a lateral trade); the
+     cross-tier pass has a SEPARATE regen budget fed both the cross-tier fault and any residual
+     per-tier issue. This converges most cases but not all — see the limitation above.
+  - Full generalization (a clean gate on every stochastic run) needs a stronger model or a
+    review-and-select generation loop (cf. Utami's SocioMathLLM: generate 5 candidates, CoT-review,
+    pick 1). Residual flags are proceed-but-flag; the pipeline never hard-blocks.
 
 ### Validation run (2026-06-27)
 Tested live against the fan seed `a2627aa2` (accelerating, α=1.18) on Qwen3.6-35B
@@ -330,9 +350,21 @@ Tested live against the fan seed `a2627aa2` (accelerating, α=1.18) on Qwen3.6-3
   re-run was faithful at every tier. This is why per-tier output must be spot-checked on
   accelerating/decelerating clips.
 
+### Validation run (2026-07-05) — full 5-seed sweep
+Regenerated all 5 eval seeds (`8110ab0d`, `711fffe8`, `afe0f99f`, `cc9f02ce`, `a2627aa2`) live
+on Qwen3.6-35B through the reworked generator (best-of-N regen + hints file active):
+- **EI monotonicity 5/5**, **titles equal 5/5**, **cross-tier PASS 4/5**, all tiers fully clean
+  **3/5** (13/15 tiers). Gate JSON carries `frame`+`cross_tier` on every run.
+- The three original defects are gone: no title drift, no "X on X", advanced ≠ intermediate
+  (distinct assigned worked instants), numbers grounded/consistent (T,f quoted not re-derived).
+- Residual flags were stochastic single words. Root causes fixed after the sweep: `_STEADY`
+  false-positive on "does not speed up"; ω² not grounded (now added); idiom false-positives
+  ("on track"/"work together"); and the stubborn `recorded` — killed by a hints-file entry
+  (`recorded`→`measured`), live-confirmed 0 occurrences on re-run. See §8's limitation note.
+
 ---
 
-## 9. Evaluation hook (note-29's hypothesis) — DECISION NEEDED
+## 9. Evaluation hook (note-29's hypothesis) — RESOLVED → (b) tier-matched references
 note-29 predicts **basic = high F1, advanced = low F1** vs the reference. With the current
 single gold reference (**OpenStax §6.2**, which is itself equation-focused, ~intermediate
 level and mostly *linear*/centripetal, not angular), the likely real ordering is
@@ -352,10 +384,40 @@ Two clean options (pick before reporting per-tier numbers):
 - **(a) Single fixed reference** — simplest; report the three F1s honestly and *explain* the
   ordering as level-match to an intermediate reference (still a real, defensible result).
 - **(b) Tier-matched references** — basic ↔ a conceptual text, intermediate ↔ §6.2, advanced
-  ↔ an angular-kinematics text. Cleaner test of note-29's hypothesis. The question spec's
-  `classify` mode (Bloom+CLT) can auto-sort our existing 19-ref English set into tiers to
-  build these. More setup; recommended for the paper.
+  ↔ an angular-kinematics text. Cleaner test of note-29's hypothesis.
 
-Eval runs unchanged either way: `run_material_eval.py --materials material.basic.json
-material.intermediate.json material.advanced.json` (per object), grouped by tier.
-```
+**DECISION (resolved): (b) tier-matched references.** This is what note-1 asks for ("divide
+the 19-reference set by difficulty into three parts, then re-run the eval") and it removes the
+lexical-density confound above. `tools/split_references_by_difficulty.py` auto-sorts the 19-
+source English set into basic/intermediate/advanced buckets on the SAME element-interactivity
+axis (`material_gate.quantities_in`/`relations_in`) the material is scored on; then
+`run_multi_reference_eval.py` runs per bucket. Option (a) stays available as a sanity baseline.
+
+Eval runs: `run_material_eval.py --materials material.basic.json material.intermediate.json
+material.advanced.json` (per object, grouped by tier), plus the tier-matched multi-reference
+runs from the split, plus `run_llm_judge.py` (model-based rubric + achieved Bloom level) and
+`grade_material_difficulty.py` (model-free EI ladder) for the difficulty-fit signal note-29
+and the deck's "Bloom-level column" call for.
+
+---
+
+## 10. Decisions & future work
+
+- **No fourth tier (note-1).** Three levels (basic / intermediate / advanced) stay the design.
+  A fourth tier was considered and declined: the seed's physics (r, ω, a_c, α, T, f + the
+  spin-up timeline) saturates at "advanced" (Analyze/Evaluate over time and at limits); a
+  fourth level would repeat advanced content without a new cognitive process to scaffold, and
+  the A3B model's vocabulary bleed worsens as tiers multiply. Extra difficulty signal comes
+  instead from more Bloom/CLT-graded evidence per tier (the EI ladder + LLM-judge), not from
+  another tier.
+- **Difficulty grounded in literature (note-29).** The ladder maps onto **Anderson &
+  Krathwohl (2001)** — basic = Remember/Understand, intermediate = Apply/Analyze, advanced =
+  Analyze/Evaluate — and onto **Sweller's Cognitive Load Theory** element interactivity — the
+  count of interacting quantities/relations the reader must hold at once rises basic <
+  intermediate < advanced. `grade_material_difficulty.py` measures that interactivity directly
+  so the ladder is evidence, not an assertion.
+- **Future work — advanced two-video / force comparison (note-1, deferred).** The professor's
+  richer advanced idea (compare two clips, or bring in the forces) needs a two-clip capture
+  and a dynamics extension that this kinematics-only spec deliberately excludes (HARD RULE 8b).
+  Recorded here as a deliberate next step, not a gap.
+- **Knowledge graph (deferred, paper 2).**

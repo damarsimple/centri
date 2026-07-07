@@ -51,6 +51,51 @@ def load_series(job_id: str) -> dict | None:
     return cols
 
 
+_TIERS = ("basic", "intermediate", "advanced")
+
+
+def load_materials(job_id: str) -> dict | None:
+    """The difficulty-tiered learning material as native JSON (mirrors load_worksheet), so
+    the app can render it in-place instead of only offering the PDF. Returns
+    {tier: {object_name, scene_title, difficulty_level, bloom_objective, sections, ...}} for
+    every material.<tier>.json present, or None for legacy/untiered jobs."""
+    data = _ws(job_id)
+    out = {}
+    for t in _TIERS:
+        p = data / f"material.{t}.json"
+        if not p.exists():
+            continue
+        try:
+            m = json.loads(p.read_text(errors="replace"))
+        except Exception:
+            continue
+        if not isinstance(m, dict):
+            continue
+        secs = m.get("sections")
+        out[t] = {
+            "object_name": m.get("object_name"),
+            "scene_title": m.get("scene_title"),
+            "difficulty_level": m.get("difficulty_level") or m.get("tier") or t,
+            "bloom_objective": m.get("bloom_objective"),
+            "element_interactivity": m.get("element_interactivity"),
+            "concepts_introduced": m.get("concepts_introduced") or [],
+            "sections": secs if isinstance(secs, dict) else {},
+        }
+    return out or None
+
+
+def load_material_gate(job_id: str) -> dict | None:
+    """The grounding-gate verdict (material_tiers_gate.json), if present."""
+    p = _ws(job_id) / "material_tiers_gate.json"
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(errors="replace"))
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
 def load_worksheet(job_id: str) -> dict | None:
     path = _ws(job_id) / "questions.json"
     if not path.exists():
