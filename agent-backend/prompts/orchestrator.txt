@@ -989,7 +989,7 @@ DON'T use any worktress or GIT features.
 **STEP 0 (REQUIRED, do this FIRST — these are seeded, deterministic, and must always
 run; never hand-author figures or the annotated video):**
 ```bash
-python -m analysis.render.figures      # 9 plots + summary_panel.png + 3 basic-tier variants + figure_qa.json
+python -m analysis.render.figures      # 9 plots + summary_panel.png + 3 basic-tier variants + figure_qa.json (incl. the per-figure annotation manifest material_tiers reads)
 python -m analysis.verify_figures      # must print FIGURE_VERIFY OK
 python -m analysis.render.annotate     # annotated_video.mp4 (banner + symbols-only)
 ```
@@ -1021,7 +1021,9 @@ offset to the original frame if needed.
 - Input video: `cropped_video_path` from stats.json (the cropped video)
 - Output: `analysis_output/video_annotation/annotated_video.mp4`
 - **The overlay is SEEDED, deterministic code** — `python -m analysis.render.annotate`
-  draws the bright-green orbit, the `r`/`v`/`ac`/`w` symbols + legend, the scene title,
+  draws the bright-green orbit, the `r`/`v`/`a_c`/`ω` symbols + legend (real Unicode via
+  PIL/freetype — ω and the a_c subscript now render on the video, not the old ASCII `w`/`ac`),
+  the scene title,
   symbols-only (no numeric values), in cropped space. The subagent RUNS it and verifies a
   contact sheet — it must NOT hand-roll a weaker overlay or print measured numbers (the
   old hand-authored video drew stray rainbow circles and a numeric readout box, breaking
@@ -1088,8 +1090,16 @@ offset to the original frame if needed.
   (proceed-but-flag, like the figure-verify phase — never silently ship a wrong number). The
   gate JSON carries `frame` + `cross_tier` blocks alongside the per-tier verdicts. Surface the
   gate verdict in `report.md`.
-- Needs only `material_seed.json` — no dependency on figures. Runs in the worker (the
-  inference server `192.168.1.205:8083` is reachable there).
+- **Depends on the figures step.** Besides `material_seed.json` it reads the annotation
+  manifest `analysis_output/plots/figure_qa.json["annotations"]` (written by
+  `render.figures`) so each tier's prose can reference the REAL on-figure overlays (radius,
+  the ω arrow, the angle-at-time milestones, the phase bands) and quote their exact values.
+  STEP 0 runs `render.figures` before any subagent, so the manifest already exists when this
+  step runs — do NOT reorder material ahead of figures. If the figure-verification phase
+  re-authors figures (recovery path), **re-run `python -m analysis.material_tiers`** afterwards
+  so the prose matches the regenerated annotations. (The manifest is optional grounding: if it
+  is somehow absent the step still runs, falling back to the tier's built-in figure text.)
+  Runs in the worker (the inference server `192.168.1.205:8083` is reachable there).
 - The legacy single-material LLM subagent (`.pi/agents/material-gen-subagent.md`) is retained
   only as a fallback; the seeded tiered step above is the default path.
 - **LaTeX compilation waits for the three tier files.**

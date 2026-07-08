@@ -27,6 +27,7 @@ from . import material_gate as G
 from .common import dedup_display_name
 
 DATA = pathlib.Path("analysis_output/data")
+PLOTS = pathlib.Path("analysis_output/plots")
 BASE = os.environ.get("PI_INFERENCE_URL", "http://192.168.1.205:8083") + "/v1/chat/completions"
 KEY = os.environ.get("PI_INFERENCE_API_KEY", "hwanglabyoungdumbandbreak")
 MODEL = os.environ.get("PI_MATERIAL_MODEL", "Qwen3.6-35B")
@@ -538,8 +539,45 @@ def _frame_block(frame) -> str:
         f"  Story: {frame.get('scenario_story')}")
 
 
+def _annotation_note(tier):
+    """Append the REAL on-figure annotations (radius, ω, angle milestones, phases) from the render
+    step's manifest (figure_qa.json["annotations"], written by render.figures) to this tier's
+    figures text, resolved through TIER_ARTIFACTS. This is why material now runs AFTER figures — the
+    prose can reference the actual annotated frames. Empty string when the manifest is absent
+    (fallback = the tier's hardcoded figures description alone), so it never blocks a run."""
+    try:
+        from .render.report import TIER_ARTIFACTS
+        man = (json.loads((PLOTS / "figure_qa.json").read_text()).get("annotations")) or {}
+    except Exception:  # noqa: BLE001 — manifest is optional grounding, never fatal
+        return ""
+    amap = TIER_ARTIFACTS.get(tier) or {}
+    seen, lines = set(), []
+    for figs in amap.values():
+        for fig in figs:
+            if fig.startswith("__") or fig in seen:  # __TABLE_CORE__/__TABLE_FULL__ placeholders
+                continue
+            seen.add(fig)
+            e = man.get(fig)
+            if not e:
+                continue
+            bits = []
+            for a in (e.get("annotations") or []):
+                sym = f" ({a['symbol']})" if a.get("symbol") else ""
+                val = f" = {a['value']}" if a.get("value") else ""
+                note = f" — {a['note']}" if a.get("note") else ""
+                bits.append(f"{a.get('label', '')}{sym}{val}{note}".strip())
+            if e.get("phases"):
+                bits.append("phases: " + ", ".join(p.get("meaning", "") for p in e["phases"]))
+            if bits:
+                lines.append(f"  • {e.get('shows', fig)} — labelled on it: " + "; ".join(bits))
+    if not lines:
+        return ""
+    return ("\n\nThese figures carry REAL on-image annotations you may reference by what they show "
+            "(quote these EXACT values; introduce no other numbers):\n" + "\n".join(lines))
+
+
 def _generate(tier, facts, seed, frame, prior_issues=None):
-    spec = TIERS[tier]
+    spec = {**TIERS[tier], "figures": TIERS[tier]["figures"] + _annotation_note(tier)}
     quality_policy = _quality_policy(seed)
     anchor_policy = _anchor_policy(tier, seed)
     if quality_policy:

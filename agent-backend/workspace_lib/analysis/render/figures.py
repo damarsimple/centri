@@ -50,6 +50,7 @@ PHASE_COLOURS = {
     "INACTIVE": "#9E9E9E",
     "IDLE": "#9E9E9E",
 }
+PHASE_WORDS = {"INCREASE": "speeding up", "STABLE": "steady", "DECREASE": "slowing down"}
 TRACE = {  # per-series colour
     "omega": "#FB8C00",
     "ac": "#E53935",
@@ -118,11 +119,42 @@ def _phase_spans(labels: list[str]):
     return spans
 
 
+def _phases_trustworthy(stats, labels) -> bool:
+    """False when the per-frame phase labels CONTRADICT the authoritative motion type: a
+    non-uniform (accelerating/decelerating) clip whose labels collapsed to a single STABLE run.
+    That happens on an impulsive flick — the near-vertical spike dominates the labeller's
+    slope threshold (kinematics `_phases` uses 0.10·max|dω/dt|), so the real coast-down falls
+    below it and is mislabelled STABLE. Calling that "steady" would be a lie, so callers skip the
+    phase shading/words and the manifest omits phases; the ω(t) curve itself shows the change.
+    Uniform clips (is_clip_average False) label STABLE legitimately and stay trusted. Once the
+    labeller emits a real INCREASE/DECREASE the contradiction clears and phases render again."""
+    _v, is_clip_average = canonical_omega(stats)
+    if not is_clip_average:
+        return True
+    return bool({str(lab).upper() for lab in (labels or [])} & {"INCREASE", "DECREASE"})
+
+
 def _shade_phases(ax, t, labels):
+    """Shade each motion phase AND print its plain-language word ("speeding up" / "steady" /
+    "slowing down") at the band centre, so the reader sees WHERE the spin changes without
+    decoding a colour key. Bands too narrow to fit the word keep the colour but stay unlabelled.
+    Callers pass already-vetted labels (see `_phases_trustworthy`) — an empty list draws nothing."""
+    if t is None or len(t) == 0 or not labels:
+        return
+    n = min(len(t), len(labels))
+    total = float(t[n - 1] - t[0]) or 1.0
+    trans = ax.get_xaxis_transform()  # x in data coords, y in axes fraction
     for s, e, lab in _phase_spans(labels):
         c = PHASE_COLOURS.get(str(lab).upper())
-        if c and e > s and s < len(t):
-            ax.axvspan(t[s], t[min(e, len(t)) - 1], color=c, alpha=0.12, lw=0)
+        if not (c and e > s and s < len(t)):
+            continue
+        t0, t1 = t[s], t[min(e, len(t)) - 1]
+        ax.axvspan(t0, t1, color=c, alpha=0.12, lw=0)
+        word = PHASE_WORDS.get(str(lab).upper())
+        if word and (t1 - t0) >= 0.16 * total:  # wide enough to fit the label
+            ax.text((t0 + t1) / 2, 0.96, word, transform=trans, ha="center", va="top",
+                    fontsize=8, color=c, fontweight="bold",
+                    bbox=dict(fc="white", ec=c, alpha=0.75, boxstyle="round,pad=0.2"))
 
 
 # ── individual figures ───────────────────────────────────────────────────────
@@ -168,6 +200,21 @@ def fig_annotated_image(stats, scene):
                     (cx + r_fit_px, cy), color="#00E676", fontsize=11,
                     va="center", ha="left",
                     bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
+        # Angular velocity as a tangential arrow at the top of the orbit, labelled with the REAL
+        # ω glyph — matplotlib renders Unicode; the cv2 video overlay in annotate.py cannot (see
+        # its comment). Direction from the sign of ω (rotation_direction is not in stats).
+        omega_val, _oca = canonical_omega(stats)
+        if omega_val is not None:
+            ccw = omega_val >= 0
+            top = (cx, cy - r_fit_px)  # image y grows downward → this is the top of the circle
+            tipx = cx - 0.45 * r_fit_px if ccw else cx + 0.45 * r_fit_px
+            ax.annotate("", xy=(tipx, cy - r_fit_px), xytext=top,
+                        arrowprops=dict(arrowstyle="-|>", color="#FB8C00", lw=2.4,
+                                        connectionstyle=f"arc3,rad={-0.3 if ccw else 0.3}"))
+            ax.annotate(f"ω = {_fmt(abs(omega_val), 2, 'rad/s')}", top,
+                        textcoords="offset points", xytext=(0, 10),
+                        color="#FB8C00", fontsize=11, va="bottom", ha="center",
+                        bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
     ax.set_title(_title(scene, "Scene geometry"))
     ax.set_xlabel("x (px, cropped)")
     ax.set_ylabel("y (px, cropped)")
@@ -334,6 +381,18 @@ def fig_angle_points_basic(stats, cols, scene, unreliable=False):
                         zorder=3, arrowprops=dict(
                             arrowstyle="-|>", color="#607D8B", lw=1.6,
                             connectionstyle="arc3,rad=0.3", shrinkA=8, shrinkB=10))
+    # Degrees-per-second: turn the angular velocity into the plain "how fast the angle grows"
+    # number the basic tier reasons with. Derived from canonical_omega (the ONE angular velocity
+    # every surface quotes) so it can never disagree with the milestones above or the prose.
+    # Only drawn for uniform motion — for a (de)accelerating clip the angle does NOT grow at a
+    # constant rate, so a single "°/second" would contradict the evenly-spaced milestone dots.
+    omega_val, oca = canonical_omega(stats)
+    if omega_val is not None and not oca:
+        dps = omega_val * 180.0 / np.pi
+        ax.text(0.5, 0.015, f"the angle grows about {dps:.0f}° every second",
+                transform=ax.transAxes, ha="center", va="bottom", fontsize=9.5,
+                color="#37474F", fontweight="bold",
+                bbox=dict(fc="white", ec="#90A4AE", alpha=0.92, boxstyle="round,pad=0.3"))
     lim = 1.45 * (r_fit_m or (np.nanmax(np.abs(np.concatenate([xm, ym]))) if len(xm) else 1))
     ax.set_xlim(-lim, lim)
     ax.set_ylim(-lim, lim)
@@ -369,6 +428,8 @@ def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
     t = cols.get("time_s")
     y = cols.get(col)
     labels = stats.get("phases", {}).get("phase_labels") or []
+    if not _phases_trustworthy(stats, labels):  # non-uniform clip mislabelled all-STABLE
+        labels = []
     fig, ax = plt.subplots(figsize=(8, 5))
     _shade_phases(ax, t, labels)
     if smooth_trend:
@@ -456,6 +517,82 @@ def fig_summary_panel(scene):
     cv2.imwrite(str(PLOTS / "summary_panel.png"), panel)
 
 
+# ── annotation manifest (extends figure_qa.json) ─────────────────────────────
+
+def _phase_sequence(stats):
+    """Ordered, de-duplicated motion phases present (speeding up / steady / slowing down).
+    Returns [] when the labels contradict the authoritative motion type (see
+    `_phases_trustworthy`), so the manifest never asserts a false "steady" for a flick."""
+    labels = (stats.get("phases", {}) or {}).get("phase_labels") or []
+    if not _phases_trustworthy(stats, labels):
+        return []
+    friendly = {"INCREASE": "speeding up", "STABLE": "steady", "DECREASE": "slowing down"}
+    seq = []
+    for lab in labels:
+        L = str(lab).upper()
+        if L in ("INACTIVE", "IDLE"):
+            continue
+        if not seq or seq[-1]["label"] != L.lower():
+            seq.append({"label": L.lower(), "meaning": friendly.get(L, L.lower())})
+    return seq
+
+
+def _annotation_manifest(stats):
+    """Per-figure annotation manifest, written under figure_qa.json["annotations"]. Keyed by
+    figure filename; material_tiers resolves tier -> figures (report.TIER_ARTIFACTS) -> these
+    annotations so the prose describes the REAL overlays, and the Axis-4 annotation_correctness
+    eval grounds prose claims against them. Defensive: any missing field is simply omitted."""
+    cal = stats.get("calibration", {}) or {}
+    omega_val, _oca = canonical_omega(stats)
+    r_m = cal.get("r_fit_m")
+    man = {}
+
+    img = []
+    if r_m is not None:
+        img.append({"label": "radius", "symbol": "r", "value": _fmt(r_m, 3, "m"),
+                    "target": "arrow from the centre to the object"})
+    if omega_val is not None:
+        img.append({"label": "angular velocity", "symbol": "ω",
+                    "value": _fmt(abs(omega_val), 2, "rad/s"),
+                    "target": "curved tangential arrow on the orbit showing the spin direction"})
+    if img:
+        man["annotated_image.png"] = {
+            "shows": "photo of the object with the fitted circle, radius and angular velocity marked",
+            "annotations": img}
+    if r_m is not None:
+        man["annotated_image_basic.png"] = {
+            "shows": "the same photo with just the circular path and how far out the object sits",
+            "annotations": [{"label": "how far out it sits", "value": _fmt(r_m, 3, "m"),
+                             "target": "arrow from the centre outward"}]}
+
+    # Angle milestones live in the seed (not stats); include them if the seed is present.
+    try:
+        seed = json.loads((DATA / "material_seed.json").read_text())
+        ms = seed.get("angle_milestones") or []
+        if ms:
+            man["angle_points_basic.png"] = {
+                "shows": "the path with a coloured dot at each 90-degree milestone, labelled by time and turn",
+                "annotations": [{"label": f"{m.get('t_s')} s", "value": f"{m.get('angle_deg')}°",
+                                 "note": m.get("turn")} for m in ms]}
+    except Exception:  # noqa: BLE001 — the manifest is best-effort provenance, never fatal
+        pass
+
+    phases = _phase_sequence(stats)
+    for fig in ("omega_t.png", "annotated_graph.png"):
+        man[fig] = {"shows": "angular velocity over time"}
+        if phases:
+            man[fig]["phases"] = phases
+    man["ac_t.png"] = {"shows": "centripetal acceleration over time"}
+    if phases:
+        man["ac_t.png"]["phases"] = phases
+
+    man["annotated_table.png"] = {
+        "shows": "a table of the core measured values",
+        "annotations": [{"label": lbl} for lbl in
+                        ("radius", "angular velocity", "centripetal acceleration", "period", "frequency")]}
+    return man
+
+
 # ── entrypoint ───────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -523,6 +660,7 @@ def main() -> int:
         "y_min": float(np.min(traj_y)), "y_max": float(np.max(traj_y)),
         "source": "kinematics.csv:x_px,y_px",
     }}
+    qa["annotations"] = _annotation_manifest(stats)  # per-figure manifest for material + Axis-4 eval
     (PLOTS / "figure_qa.json").write_text(json.dumps(qa, indent=2))
     print(f"FIGURES OK — wrote 9 plots + summary_panel.png + 3 basic-tier variants "
           f"to {PLOTS}/ (scene='{scene}')")

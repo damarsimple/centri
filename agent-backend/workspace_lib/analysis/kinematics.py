@@ -398,23 +398,48 @@ def _phases(k: Kinematics, inp: Inputs, FPS: float, theta_smooth) -> None:
     n = inp.n_raw_frames
     smoothed = scipy.ndimage.median_filter(k.omega, size=max(5, int(FPS * 0.5)), mode="nearest")
     domega = _segmented(smoothed, lambda seg, m: np.gradient(seg, k.t_s[m]))
-    max_abs = float(np.nanmax(np.abs(domega))) if np.isfinite(domega).any() else 0.0
-    inc_thr, dec_thr = 0.10 * max_abs, -0.10 * max_abs
-
-    labels = np.full(n, "INACTIVE", dtype=object)
-    labels[k.active_mask] = "STABLE"
+    # Threshold off the 90th percentile of |dω/dt| over ACTIVE frames, NOT its max. An impulsive
+    # flick's near-vertical rise spike dominates the max, lifting the threshold so high that the
+    # genuine coast-down falls under it and the whole flick reads STABLE ("steady"). The percentile
+    # ignores the lone spike; the min-phase clean-up below still suppresses noise on a uniform spin.
+    absd = np.abs(domega)
+    active_absd = absd[k.active_mask & np.isfinite(absd)]
+    base = float(np.percentile(active_absd, 90)) if active_absd.size else 0.0
+    inc_thr, dec_thr = 0.10 * base, -0.10 * base
     min_phase = max(1, int(0.5 * FPS))
-    cur, start = "STABLE", 0
-    for i in range(1, n):
+
+    # Per-frame raw label, then clean up to whole phases: (1) close short STABLE gaps flanked by
+    # the SAME direction (gradient noise briefly dipping under threshold mid-phase), then
+    # (2) despeckle any non-STABLE run shorter than min_phase to STABLE (this also absorbs the
+    # brief impulsive-flick rise). This replaces the old transition-commit loop, which silently
+    # CLOBBERED the last active phase to STABLE when the clip went inactive (came to rest) before a
+    # final transition — a valid 88-frame coast-down DECREASE was being overwritten wholesale.
+    labels = np.full(n, "INACTIVE", dtype=object)
+    for i in range(n):
         if not k.active_mask[i]:
-            cur = "STABLE"
             continue
-        new = "INCREASE" if domega[i] > inc_thr else "DECREASE" if domega[i] < dec_thr else "STABLE"
-        if new != cur:
-            if i - start >= min_phase:
-                labels[start:i] = cur
-            cur, start = new, i
-    labels[start:] = cur
+        d = domega[i]
+        labels[i] = ("INCREASE" if d > inc_thr else "DECREASE" if d < dec_thr else "STABLE") \
+            if np.isfinite(d) else "STABLE"
+
+    def _runs():
+        out, i = [], 0
+        while i < n:
+            j = i
+            while j < n and labels[j] == labels[i]:
+                j += 1
+            out.append((i, j, labels[i]))
+            i = j
+        return out
+
+    for idx, (a, b, lab) in enumerate(rs := _runs()):
+        if lab == "STABLE" and (b - a) < min_phase and 0 < idx < len(rs) - 1:
+            prv, nxt = rs[idx - 1][2], rs[idx + 1][2]
+            if prv == nxt and prv in ("INCREASE", "DECREASE"):
+                labels[a:b] = prv
+    for a, b, lab in _runs():
+        if lab in ("INCREASE", "DECREASE") and (b - a) < min_phase:
+            labels[a:b] = "STABLE"
 
     stable_mask = labels == "STABLE"
     segments, inseg, s0 = [], False, 0

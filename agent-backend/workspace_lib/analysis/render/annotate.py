@@ -5,12 +5,13 @@ Overlays the orbit, radius, velocity and centripetal-acceleration vectors, the
 rotation centre, a fading trajectory trail, and a phase-coloured border onto the
 cropped video.
 
-PEDAGOGY RULE: label every quantity by SYMBOL only — `r`, `v`, `ac`, `w` — and
+PEDAGOGY RULE: label every quantity by SYMBOL only — `r`, `v`, `a_c`, `ω` — and
 show a definitions legend. NEVER print numeric values (no "v=1.2 m/s"), so the
 student measures and reasons instead of reading the answer off the screen.
 
 All coordinates are cropped-video space (matches kinematics.csv / stats.json).
-ASCII labels only — cv2's Hershey fonts can't render Unicode (omega, subscripts).
+Text is drawn via PIL/freetype (DejaVu Sans) so real symbols render — cv2's
+Hershey fonts are ASCII-only (they cannot draw ω or subscripts).
 """
 import json
 import math
@@ -54,12 +55,56 @@ def _p(base: float) -> int:
     """Scaled pixel length."""
     return int(round(base * _S))
 
+
+# ── Unicode text via PIL (cv2's Hershey fonts are ASCII-only; we need ω, subscripts) ──
+try:
+    import matplotlib.font_manager as _fm
+    _FONT_PATH = _fm.findfont("DejaVu Sans")
+except Exception:  # noqa: BLE001 — fall back to the standard system path
+    _FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+from PIL import Image, ImageDraw, ImageFont  # noqa: E402
+_FONT_CACHE: dict = {}
+
+
+def _font(px: int):
+    px = max(10, int(px))
+    if px not in _FONT_CACHE:
+        _FONT_CACHE[px] = ImageFont.truetype(_FONT_PATH, px)
+    return _FONT_CACHE[px]
+
+
+def _px(base: float) -> int:
+    """cv2 fontScale → PIL pixel size (≈ the old Hershey cap height)."""
+    return max(10, int(round(base * _S * 30)))
+
+
+def _measure(text: str, base: float):
+    l, t, r, b = _font(_px(base)).getbbox(text)
+    return (r - l, b - t)
+
+
+def _draw_text(img, text, org, color_bgr, base, bg=True):
+    """Draw Unicode text in place on a BGR frame via PIL. org = bottom-left baseline (like
+    cv2.putText); base = the old cv2 fontScale; color is BGR to match the cv2 call sites."""
+    x, y = int(org[0]), int(org[1])
+    font = _font(_px(base))
+    rgb = (int(color_bgr[2]), int(color_bgr[1]), int(color_bgr[0]))
+    pil = Image.fromarray(img[:, :, ::-1])
+    d = ImageDraw.Draw(pil)
+    if bg:
+        l, t, r, b = d.textbbox((x, y), text, font=font, anchor="ls")
+        pad = _p(3)
+        d.rectangle([l - pad, t - pad, r + pad, b + pad], fill=(0, 0, 0))
+    d.text((x, y), text, font=font, anchor="ls", fill=rgb)
+    img[:, :, :] = np.asarray(pil)[:, :, ::-1]
+
+
 # Symbol -> definition. Definitions only; no values.
 LEGEND = [
     ("r", "radius", C_R),
     ("v", "tangential velocity", C_V),
-    ("ac", "centripetal acceleration", C_AC),
-    ("w", "angular velocity", C_ORBIT),
+    ("a_c", "centripetal acceleration", C_AC),
+    ("ω", "angular velocity", C_ORBIT),
     ("+", "centre of rotation", C_CENTRE),
 ]
 
@@ -77,12 +122,7 @@ def _cropped_video() -> Path:
 
 
 def _label(img, text, pos, color):
-    x, y = int(pos[0]), int(pos[1])
-    fs, th = _f(0.7), _t(2)
-    (tw, t_h), _ = cv2.getTextSize(text, FONT, fs, th)
-    pad = _p(3)
-    cv2.rectangle(img, (x - pad, y - t_h - pad), (x + tw + pad, y + pad), (0, 0, 0), -1)
-    cv2.putText(img, text, (x, y), FONT, fs, color, th, cv2.LINE_AA)
+    _draw_text(img, text, pos, color, 0.7, bg=True)
 
 
 def _vector(img, start, end, color, label=None):
@@ -111,19 +151,18 @@ def _render_banner(vw: int, scene_label: str) -> np.ndarray:
     Drawn OUTSIDE the video frame so the legend never covers the (tightly-cropped)
     footage. The legend items are packed into rows that fit the frame width."""
     margin = _p(16)
-    tf, tth = _f(0.95), _t(2)                       # title font
-    lf, lth = _f(0.6), _t(2)                        # legend font
-    (_, title_h), _ = cv2.getTextSize(scene_label or "M", FONT, tf, tth)
-    (_, item_h), _ = cv2.getTextSize("Mg", FONT, lf, lth)
+    _, title_h = _measure(scene_label or "M", 0.95)  # title font
+    _, item_h = _measure("Mg", 0.6)                  # legend font
     gap = _p(28)
     row_h = item_h + _p(16)
     max_w = vw - 2 * margin
 
-    # Pre-measure each "sym = definition" item, then greedily pack into rows.
+    # Pre-measure each "sym = definition" item (PIL metrics — match the PIL drawing below),
+    # then greedily pack into rows.
     items = []
     for sym, definition, color in LEGEND:
-        (sw, _), _ = cv2.getTextSize(sym + " ", FONT, lf, lth)
-        (dw, _), _ = cv2.getTextSize("= " + definition, FONT, lf, lth)
+        sw, _ = _measure(sym + " ", 0.6)
+        dw, _ = _measure("= " + definition, 0.6)
         items.append((sym, definition, color, sw, dw, sw + _p(6) + dw))
     rows, cur, cur_w = [], [], 0
     for it in items:
@@ -136,15 +175,13 @@ def _render_banner(vw: int, scene_label: str) -> np.ndarray:
 
     banner_h = margin + title_h + _p(12) + len(rows) * row_h + margin
     banner = np.full((banner_h, vw, 3), 28, np.uint8)
-    cv2.putText(banner, scene_label, (margin, margin + title_h), FONT, tf,
-                (255, 255, 255), tth, cv2.LINE_AA)
+    _draw_text(banner, scene_label, (margin, margin + title_h), (255, 255, 255), 0.95, bg=False)
     y = margin + title_h + _p(12) + item_h
     for row in rows:
         x = margin
         for sym, definition, color, sw, dw, tot in row:
-            cv2.putText(banner, sym, (x, y), FONT, lf, color, lth, cv2.LINE_AA)
-            cv2.putText(banner, "= " + definition, (x + sw + _p(6), y), FONT, lf,
-                        (220, 220, 220), _t(1), cv2.LINE_AA)
+            _draw_text(banner, sym, (x, y), color, 0.6, bg=False)
+            _draw_text(banner, "= " + definition, (x + sw + _p(6), y), (220, 220, 220), 0.6, bg=False)
             x += tot + gap
         y += row_h
     return banner
@@ -243,10 +280,10 @@ def main() -> int:
             dx, dy = cx - ox, cy - oy
             n = math.hypot(dx, dy) or 1.0
             _vector(frame, (ox, oy),
-                    (ox + dx / n * ac * ac_scale, oy + dy / n * ac * ac_scale), C_AC, "ac")
+                    (ox + dx / n * ac * ac_scale, oy + dy / n * ac * ac_scale), C_AC, "a_c")
 
         # angular-velocity symbol near the top of the orbit (direction only).
-        _label(frame, "w", (cx - 8, cy - r_fit_px - 12), orbit_color)
+        _label(frame, "ω", (cx - 8, cy - r_fit_px - 12), orbit_color)
         # Stack the static info banner above the annotated video frame.
         out.write(np.vstack([banner, frame]))
         i += 1
