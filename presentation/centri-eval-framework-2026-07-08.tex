@@ -50,26 +50,26 @@
 \maketitle
 
 % =========================================================================
-\begin{frame}{What changed this week --- from ``adopt the parent rubric'' to a formalized framework}
+\begin{frame}{Two parent rubrics, reconciled for video material}
 \small
-\begin{tcolorbox}[colback=cGrey!8,colframe=cGrey,title=\footnotesize Context,boxsep=2pt,left=4pt,right=4pt]
+\begin{tcolorbox}[colback=cGrey!8,colframe=cGrey,title=\footnotesize The two parents,boxsep=2pt,left=4pt,right=4pt]
 \scriptsize
-Last week we adopted the parent rubric --- \textbf{Ika Utami}'s PhD dissertation (NCU, same advisor):
-its \textbf{SocioMathLLM} study is the LLM-judge $+$ linguistic rubric (Tables 8--10), its \textbf{Geo-QG}
-study the AR-sensing / 3-tier precedent. This week we found the \textbf{sibling paper} --- \textbf{P-MAGIC}
-(Hwang, Sari et al., \emph{J.\ Educational Computing Research} 2026): same lab, multimodal physics
-\emph{word problems} from object-image $+$ phone sensors. Its \textbf{Table 2} is a rubric organised
-\emph{by modality} --- the missing piece for evaluating \emph{our} multimodal output.
+The framework reconciles two rubrics from the lab. The \textbf{parent MWP dissertation}
+(\textbf{Ika Utami}, NCU, same advisor): its \textbf{SocioMathLLM} study is the LLM-judge $+$ linguistic
+rubric (Tables 8--10), its \textbf{Geo-QG} study the AR-sensing / 3-tier precedent. The \textbf{sibling
+paper P-MAGIC} (Hwang, Sari et al., \emph{J.\ Educational Computing Research} 2026): same lab, multimodal
+physics \emph{word problems} from object-image $+$ phone sensors. Its \textbf{Table 2} is a rubric organised
+\emph{by modality} --- the piece needed to evaluate \emph{our} multimodal output.
 \end{tcolorbox}
 \vspace{0.3em}
-Three moves, all written down as docs this week:
+Three moves that define the framework:
 \begin{itemize}\setlength\itemsep{2pt}
   \item \textbf{\color{cMeas}Reframed for our real unit} \ok\ --- learning \emph{material} (exposition),
   not word problems; the problem-only rubric rows simply don't apply.
   \item \textbf{\color{cPed}Reconciled two parent rubrics} \ok\ --- SocioMathLLM (linguistic) $+$ P-MAGIC
   (multimodal) $+$ Centri (physics/tier $+$ video) into one 4-axis rubric.
   \item \textbf{\color{cApp}Formalized the whole method} \ok\ --- \texttt{eval-framework.md}: axes,
-  layers, statistics, and two new contributions.
+  channels, statistics, and two new contributions.
 \end{itemize}
 \end{frame}
 
@@ -106,60 +106,33 @@ content} --- \textbf{no one generates grounded, difficulty-tiered physics \emph{
 % =========================================================================
 \section{The formalized method}
 
-\begin{frame}{Why the rubric needed reframing --- and the fix}
+\begin{frame}{Four rubric axes, four scoring channels}
 \small
-Both parent rubrics were written for \textbf{problems to solve}. Scored on \emph{exposition}, rows like
-``answerability'', ``\# solution steps'', ``multiple strategies'' punish a passage for not being a
-question --- last week's \hl{``expository-unfair''} caveat.
-\vspace{0.4em}
-\begin{columns}[T]
-\begin{column}{0.5\textwidth}
-\begin{tcolorbox}[colback=cAccent!6,colframe=cAccent,title=\scriptsize Dropped (problem-only),boxsep=1pt,left=3pt,right=3pt]
-\scriptsize problem answerability · solvability · multiple solution strategies
-\end{tcolorbox}
-\end{column}
-\begin{column}{0.5\textwidth}
-\begin{tcolorbox}[colback=cApp!6,colframe=cApp,title=\scriptsize Kept / added (fits exposition),boxsep=1pt,left=3pt,right=3pt]
-\scriptsize comprehension · structure \& clarity · concept accuracy · realistic · variable-name consistency
-\end{tcolorbox}
-\end{column}
-\end{columns}
-\vspace{0.5em}
-\begin{tcolorbox}[colback=cMeas!6,colframe=cMeas,boxsep=2pt,left=4pt,right=4pt]
-\scriptsize Slimming \textbf{Axis 2} retires the caveat \emph{by construction} --- we no longer score a
-lesson as if it were a question. The pedagogy signal moves to the axes that fit exposition.
-\end{tcolorbox}
-\end{frame}
-
-\begin{frame}{Four rubric \emph{axes}, five measurement \emph{layers}}
-\scriptsize
+Four axes get scored 1--5. Four channels score them --- the \textbf{gate} is ours and runs first
+for free; the \textbf{human panel and MLLM-judge share identical rubric rows}.
+\vfill
 \begin{center}
-\begin{tikzpicture}
-% rubric axes band (what gets scored 1-5)
-\node[box=cPed] (a1) {\textbf{Axis 1}\\Linguistic};
-\node[box=cMeas, right=of a1] (a2) {\textbf{Axis 2}\\Structural /\\comprehension};
-\node[box=cApp, right=of a2] (a3) {\textbf{Axis 3}\\Physics/tier\\$+$ recognition};
-\node[box=cInfra, right=of a3] (a4) {\textbf{Axis 4}\\Multimodal\\(image/graph/table)};
-% measurement layers
-\node[box=cAccent, below=11mm of a1, xshift=5mm] (gate) {\textbf{0. Gate}\\deterministic\\(ours)};
-\node[box=cMeas, right=of gate] (auto) {\textbf{1. Automatic}\\BERT·BLEU·STS·LSTM};
-\node[box=cInfra, right=of auto] (mllm) {\textbf{2. MLLM-judge}\\vision, semi-auto};
-\node[box=cPed, right=of mllm] (human) {\textbf{3. Human}\\teachers,\\per-modality};
-\node[box=cGrey, below=9mm of auto, xshift=12mm, text width=7.4cm] (stat)
-  {\textbf{4. Correlate:} Cohen's $\kappa$ (inter-rater) · ICC (human$\leftrightarrow$MLLM) · Pearson (auto$\leftrightarrow$human)};
-\draw[flow] (gate)--(auto); \draw[flow] (auto)--(mllm); \draw[flow] (mllm)--(human);
-\draw[flow] (auto.south)--(auto.south|-stat.north);
-\draw[flow] (mllm.south)--(mllm.south|-stat.north);
-\draw[flow] (human.south)--(human.south|-stat.north);
-\end{tikzpicture}
+\renewcommand{\arraystretch}{1.5}
+\setlength{\tabcolsep}{9pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Channel} & \textbf{\color{cPed}Ax1}\,{\scriptsize Ling.} & \textbf{\color{cMeas}Ax2}\,{\scriptsize Struct.} & \textbf{\color{cApp}Ax3}\,{\scriptsize Phys+rec} & \textbf{\color{cInfra}Ax4}\,{\scriptsize Multi.} \\
+\midrule
+\textbf{0 Gate}\, {\scriptsize\color{cGrey}deterministic, ours} & {\color{cGrey}\textendash} & {\color{cGrey}\textendash} & \ok & \ok \\
+\textbf{1 Automatic}\, {\scriptsize\color{cGrey}BERT·BLEU·STS} & \ok & \ok & {\color{cGrey}\textendash} & {\color{cGrey}\textendash} \\
+\textbf{2 MLLM-judge}\, {\scriptsize\color{cGrey}vision, semi-auto} & \ok & \ok & \ok & \ok \\
+\textbf{3 Human}\, {\scriptsize\color{cGrey}teachers, per-modality} & \ok & \ok & \ok & \ok \\
+\bottomrule
+\end{tabular}\\[5pt]
+{\scriptsize\color{cGrey}Axes: \textbf{1} Linguistic \,·\, \textbf{2} Structural / comprehension \,·\,
+\textbf{3} Physics-tier + video-recognition \,·\, \textbf{4} Multimodal (image / graph / table)}
 \end{center}
-\vspace{0.2em}
-\begin{itemize}\setlength\itemsep{1pt}
-  \item The \textbf{human panel and the MLLM-judge score the same 4 axes} (identical rubric rows).
-  \item The \textbf{gate} (Layer 0) runs first, for free, and feeds number/Bloom \textbf{ground truth}
-  into Axes 3--4 --- neither parent has it.
-  \item ``Axis'' $=$ a rubric group; ``layer'' $=$ a measurement channel (fixes last week's overloaded ``axis'').
-\end{itemize}
+\vfill
+\begin{center}
+\footnotesize\itshape Then correlate across channels: Cohen's $\kappa$ (inter-rater) · ICC
+(human$\leftrightarrow$MLLM) · Pearson (auto$\leftrightarrow$human).\\
+The gate feeds ground truth into Axes 3--4 --- neither parent has it.
+\end{center}
 \end{frame}
 
 \begin{frame}{The reconciled rubric --- who each axis comes from}
@@ -178,8 +151,11 @@ lesson as if it were a question. The pedagogy signal moves to the axes that fit 
 \end{tabular}
 \end{center}
 \vspace{0.3em}
-{\footnotesize Adopted rows kept \emph{verbatim} (with P-MAGIC's citations: Otani 2023, Stefanel 2019)
-so our numbers sit beside the lab's. Source of truth: \texttt{eval-rubric-ika.md}.}
+{\footnotesize \textbf{Axis 2 is slimmed for exposition:} the parents' problem-only rows
+(answerability, \# solution steps, multiple strategies) score a passage as if it were a question, so
+they are dropped; the pedagogy signal moves to comprehension / structure / accuracy.\\[3pt]
+Adopted rows kept \emph{verbatim} (with P-MAGIC's citations: Otani 2023, Stefanel 2019) so our numbers
+sit beside the lab's. Source of truth: \texttt{eval-rubric-ika.md}.}
 \end{frame}
 
 % =========================================================================
@@ -194,17 +170,17 @@ so our numbers sit beside the lab's. Source of truth: \texttt{eval-rubric-ika.md
   $\omega, a_c, r, T$ against it (cf.\ the pendulum $r=0.99$ in the CV-tracking precedent).
   \item \textbf{\color{cInfra}MLLM-as-judge over annotated video frames (Axis 4).} A vision model gets
   the \emph{annotated frame $+$ gate ground truth as reference} $\to$ per-criterion 1--5 $+$ rationale
-  (the VideoJudge recipe), calibrated on a few teacher-verified items --- the \emph{semi-automatic} layer.
+  (the VideoJudge recipe), calibrated on a few teacher-verified items --- the \emph{semi-automatic} channel.
 \end{enumerate}
 \vspace{0.3em}
 \begin{tcolorbox}[colback=cPed!6,colframe=cPed,boxsep=2pt,left=4pt,right=4pt]
-\scriptsize \textbf{Annotation is worth doing well:} P-MAGIC's own ablation shows annotated modalities
+\scriptsize \textbf{Annotation quality matters:} P-MAGIC's own ablation shows annotated modalities
 beat non-annotated (image$+$annotation $0.896$ vs table$-$annotation $0.822$; Cohen's $d$ up to $1.7$).
 Our differentiator is doing it \textbf{on video} --- per-frame, across the motion.
 \end{tcolorbox}
 \end{frame}
 
-\begin{frame}{Preliminary signal is already there (from last week's judge run)}
+\begin{frame}{Preliminary signal is already there}
 \scriptsize
 15 passages (5 objects $\times$ 3 tiers), judged by the lab model on the rubric.
 \emph{Preliminary --- the teacher panel is next.}
@@ -245,7 +221,7 @@ comparable framework.
 \small
 \begin{columns}[T]
 \begin{column}{0.52\textwidth}
-\textbf{\color{cApp}Done this week}
+\textbf{\color{cApp}Done}
 \begin{itemize}\setlength\itemsep{1pt}\small
   \item Found $+$ read the P-MAGIC sibling paper \ok
   \item Reconciled 4-axis rubric (SocioMathLLM $+$ P-MAGIC $+$ ours) \ok
