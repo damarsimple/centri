@@ -1,0 +1,276 @@
+% Centri — Formalized evaluation framework (week ending 2026-07-08)
+% Reconciles Utami (2025) + P-MAGIC (2026); adds video-recognition + multimodal axes.
+% Compile: pdflatex -interaction=nonstopmode ... (run twice). Reuses the 06-30/07-08 preamble.
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{metropolis}
+\metroset{sectionpage=progressbar, subsectionpage=none, numbering=fraction, progressbar=frametitle}
+
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,fit,backgrounds}
+\usepackage[most]{tcolorbox}
+
+% ---- palette (shared with the other Centri decks) ------------------------
+\definecolor{cMeas}{HTML}{1F6FB2}
+\definecolor{cPed}{HTML}{B5651D}
+\definecolor{cApp}{HTML}{2E7D32}
+\definecolor{cInfra}{HTML}{5E35B1}
+\definecolor{cAccent}{HTML}{C62828}
+\definecolor{cGrey}{HTML}{616161}
+\definecolor{cBg}{HTML}{F4F6F8}
+\definecolor{cBasic}{HTML}{2E7D32}
+\definecolor{cInter}{HTML}{1565C0}
+\definecolor{cAdv}{HTML}{6A1B9A}
+\setbeamercolor{frametitle}{bg=cMeas}
+\setbeamercolor{progress bar}{fg=cAccent}
+
+\newcommand{\hl}[1]{{\bfseries\color{cAccent}#1}}
+\newcommand{\ok}{{\color{cApp}\textbf{\checkmark}}}
+
+\tikzset{
+  box/.style={rounded corners=2pt, draw=#1, line width=0.8pt, fill=#1!8,
+              text=black, align=center, font=\scriptsize, inner sep=4pt, minimum height=8mm},
+  node distance=5mm and 7mm,
+  flow/.style={-{Stealth[length=2.2mm]}, line width=0.7pt, draw=cGrey},
+}
+
+\title{Centri --- A Formalized Evaluation Framework}
+\subtitle{Reconciling the parent MWP rubric \& P-MAGIC (2026) for video-based, tiered physics material}
+\author{Damar Albaribin}
+\institute{MSc Thesis --- advisor: Prof.\ Wu-Yuin Hwang}
+\date{Week ending 2026-07-08}
+
+\begin{document}
+\maketitle
+
+% =========================================================================
+\begin{frame}{What changed this week --- from ``adopt the parent rubric'' to a formalized framework}
+\small
+\begin{tcolorbox}[colback=cGrey!8,colframe=cGrey,title=\footnotesize Context,boxsep=2pt,left=4pt,right=4pt]
+\scriptsize
+Last week we adopted the parent rubric --- \textbf{Ika Utami}'s PhD dissertation (NCU, same advisor):
+its \textbf{SocioMathLLM} study is the LLM-judge $+$ linguistic rubric (Tables 8--10), its \textbf{Geo-QG}
+study the AR-sensing / 3-tier precedent. This week we found the \textbf{sibling paper} --- \textbf{P-MAGIC}
+(Hwang, Sari et al., \emph{J.\ Educational Computing Research} 2026): same lab, multimodal physics
+\emph{word problems} from object-image $+$ phone sensors. Its \textbf{Table 2} is a rubric organised
+\emph{by modality} --- the missing piece for evaluating \emph{our} multimodal output.
+\end{tcolorbox}
+\vspace{0.3em}
+Three moves, all written down as docs this week:
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{\color{cMeas}Reframed for our real unit} \ok\ --- learning \emph{material} (exposition),
+  not word problems; the problem-only rubric rows simply don't apply.
+  \item \textbf{\color{cPed}Reconciled two parent rubrics} \ok\ --- SocioMathLLM (linguistic) $+$ P-MAGIC
+  (multimodal) $+$ Centri (physics/tier $+$ video) into one 4-axis rubric.
+  \item \textbf{\color{cApp}Formalized the whole method} \ok\ --- \texttt{eval-framework.md}: axes,
+  layers, statistics, and two new contributions.
+\end{itemize}
+\end{frame}
+
+% =========================================================================
+\section{Positioning}
+
+\begin{frame}{The video niche --- and hard differentiation from P-MAGIC}
+\scriptsize
+P-MAGIC is the \emph{direct sibling}: same advisor, also multimodal, and it \emph{already} does
+automated annotation. So multimodality/annotation are \textbf{not} our novelty --- we lead on what differs:
+\vspace{0.3em}
+\begin{center}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \textbf{\color{cPed}P-MAGIC (sibling)} & \textbf{\color{cApp}Centri} \\
+\midrule
+Input & phone IMU bolted to the object & \hl{ordinary video / CV tracking} (nothing attached) \\
+Output & multimodal word \emph{problems} & difficulty-tiered learning \emph{material} \\
+Grounding & --- & deterministic gate: every number vs ground truth \\
+Annotation & one still image $+$ sensor graph & \hl{per-frame, across the motion} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{0.4em}
+\begin{tcolorbox}[colback=cAccent!6,colframe=cAccent,boxsep=2pt,left=5pt,right=5pt]
+\scriptsize \textbf{The niche (from our own video-lit review):} video analysis is \emph{manual}
+(Tracker), CV tracking is a \emph{measurement aid}, VLM question-generation is for \emph{lecture
+content} --- \textbf{no one generates grounded, difficulty-tiered physics \emph{material} from
+\emph{motion}-video recognition.} (And we are the inverse of the text$\to$video generation crowd.)
+\end{tcolorbox}
+\end{frame}
+
+% =========================================================================
+\section{The formalized method}
+
+\begin{frame}{Why the rubric needed reframing --- and the fix}
+\small
+Both parent rubrics were written for \textbf{problems to solve}. Scored on \emph{exposition}, rows like
+``answerability'', ``\# solution steps'', ``multiple strategies'' punish a passage for not being a
+question --- last week's \hl{``expository-unfair''} caveat.
+\vspace{0.4em}
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\begin{tcolorbox}[colback=cAccent!6,colframe=cAccent,title=\scriptsize Dropped (problem-only),boxsep=1pt,left=3pt,right=3pt]
+\scriptsize problem answerability · solvability · multiple solution strategies
+\end{tcolorbox}
+\end{column}
+\begin{column}{0.5\textwidth}
+\begin{tcolorbox}[colback=cApp!6,colframe=cApp,title=\scriptsize Kept / added (fits exposition),boxsep=1pt,left=3pt,right=3pt]
+\scriptsize comprehension · structure \& clarity · concept accuracy · realistic · variable-name consistency
+\end{tcolorbox}
+\end{column}
+\end{columns}
+\vspace{0.5em}
+\begin{tcolorbox}[colback=cMeas!6,colframe=cMeas,boxsep=2pt,left=4pt,right=4pt]
+\scriptsize Slimming \textbf{Axis 2} retires the caveat \emph{by construction} --- we no longer score a
+lesson as if it were a question. The pedagogy signal moves to the axes that fit exposition.
+\end{tcolorbox}
+\end{frame}
+
+\begin{frame}{Four rubric \emph{axes}, five measurement \emph{layers}}
+\scriptsize
+\begin{center}
+\begin{tikzpicture}
+% rubric axes band (what gets scored 1-5)
+\node[box=cPed] (a1) {\textbf{Axis 1}\\Linguistic};
+\node[box=cMeas, right=of a1] (a2) {\textbf{Axis 2}\\Structural /\\comprehension};
+\node[box=cApp, right=of a2] (a3) {\textbf{Axis 3}\\Physics/tier\\$+$ recognition};
+\node[box=cInfra, right=of a3] (a4) {\textbf{Axis 4}\\Multimodal\\(image/graph/table)};
+% measurement layers
+\node[box=cAccent, below=11mm of a1, xshift=5mm] (gate) {\textbf{0. Gate}\\deterministic\\(ours)};
+\node[box=cMeas, right=of gate] (auto) {\textbf{1. Automatic}\\BERT·BLEU·STS·LSTM};
+\node[box=cInfra, right=of auto] (mllm) {\textbf{2. MLLM-judge}\\vision, semi-auto};
+\node[box=cPed, right=of mllm] (human) {\textbf{3. Human}\\teachers,\\per-modality};
+\node[box=cGrey, below=9mm of auto, xshift=12mm, text width=7.4cm] (stat)
+  {\textbf{4. Correlate:} Cohen's $\kappa$ (inter-rater) · ICC (human$\leftrightarrow$MLLM) · Pearson (auto$\leftrightarrow$human)};
+\draw[flow] (gate)--(auto); \draw[flow] (auto)--(mllm); \draw[flow] (mllm)--(human);
+\draw[flow] (auto.south)--(auto.south|-stat.north);
+\draw[flow] (mllm.south)--(mllm.south|-stat.north);
+\draw[flow] (human.south)--(human.south|-stat.north);
+\end{tikzpicture}
+\end{center}
+\vspace{0.2em}
+\begin{itemize}\setlength\itemsep{1pt}
+  \item The \textbf{human panel and the MLLM-judge score the same 4 axes} (identical rubric rows).
+  \item The \textbf{gate} (Layer 0) runs first, for free, and feeds number/Bloom \textbf{ground truth}
+  into Axes 3--4 --- neither parent has it.
+  \item ``Axis'' $=$ a rubric group; ``layer'' $=$ a measurement channel (fixes last week's overloaded ``axis'').
+\end{itemize}
+\end{frame}
+
+\begin{frame}{The reconciled rubric --- who each axis comes from}
+\scriptsize
+\renewcommand{\arraystretch}{1.35}
+\begin{center}
+\begin{tabular}{@{}p{2.3cm}p{2.6cm}p{3.1cm}p{3.2cm}@{}}
+\toprule
+\textbf{Axis} & \textbf{\color{cPed}From SocioMathLLM} & \textbf{\color{cMeas}From P-MAGIC} & \textbf{\color{cApp}Centri-only} \\
+\midrule
+1 Linguistic & Table 8 (all 5) & Linguistic block & --- \\
+2 Structural / comprehension & structure \& clarity & concept · realistic · variable-name & comprehension; \emph{drops problem-only rows} \\
+3 Physics/tier $+$ recognition & --- & difficulty $\to$ difficulty\_fit & grounding · achieved\_bloom · \hl{video\_recognition\_quality} \\
+4 Multimodal & --- & \textbf{image-text · text-graph · text-table} (Table 2) & \hl{annotation\_correctness} (on video) \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{0.3em}
+{\footnotesize Adopted rows kept \emph{verbatim} (with P-MAGIC's citations: Otani 2023, Stefanel 2019)
+so our numbers sit beside the lab's. Source of truth: \texttt{eval-rubric-ika.md}.}
+\end{frame}
+
+% =========================================================================
+\section{Contributions \& preliminary signal}
+
+\begin{frame}{Two evaluation contributions the parents structurally cannot make}
+\small
+\begin{enumerate}\setlength\itemsep{4pt}
+  \item \textbf{\color{cApp}Video-recognition quality (Axis 3).} Geo-QG senses via AR, P-MAGIC via a
+  phone IMU --- neither recognises from \emph{video}, so neither can score recognition quality. We
+  \emph{can}: the grounding gate already computes ground truth, so we score CV-measured
+  $\omega, a_c, r, T$ against it (cf.\ the pendulum $r=0.99$ in the CV-tracking precedent).
+  \item \textbf{\color{cInfra}MLLM-as-judge over annotated video frames (Axis 4).} A vision model gets
+  the \emph{annotated frame $+$ gate ground truth as reference} $\to$ per-criterion 1--5 $+$ rationale
+  (the VideoJudge recipe), calibrated on a few teacher-verified items --- the \emph{semi-automatic} layer.
+\end{enumerate}
+\vspace{0.3em}
+\begin{tcolorbox}[colback=cPed!6,colframe=cPed,boxsep=2pt,left=4pt,right=4pt]
+\scriptsize \textbf{Annotation is worth doing well:} P-MAGIC's own ablation shows annotated modalities
+beat non-annotated (image$+$annotation $0.896$ vs table$-$annotation $0.822$; Cohen's $d$ up to $1.7$).
+Our differentiator is doing it \textbf{on video} --- per-frame, across the motion.
+\end{tcolorbox}
+\end{frame}
+
+\begin{frame}{Preliminary signal is already there (from last week's judge run)}
+\scriptsize
+15 passages (5 objects $\times$ 3 tiers), judged by the lab model on the rubric.
+\emph{Preliminary --- the teacher panel is next.}
+\vspace{0.2em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\centering{\scriptsize\bfseries Criteria that should rise with tier}\\[2pt]
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Criterion} & \color{cBasic}basic & \color{cInter}int. & \color{cAdv}adv. \\
+\midrule
+cognitive\_demand & 2.2 & 2.6 & \textbf{4.0} \\
+solution\_steps & 1.2 & 2.0 & \textbf{3.0} \\
+achieved Bloom & \multicolumn{2}{c}{Understand} & \textbf{Analyze} \\
+\bottomrule
+\end{tabular}
+\end{column}
+\begin{column}{0.52\textwidth}
+\centering{\scriptsize\bfseries Honest reading}\\[2pt]
+\scriptsize
+\begin{itemize}\setlength\itemsep{2pt}
+  \item Grounding drops at advanced ($4.4\to1.0$) on oblique clips --- now an explicit
+  \emph{video\_recognition\_quality} signal, not a footnote.
+  \item Automatic baseline holds: BERTScore F1 $=0.830\pm0.014$ (n$=$75).
+\end{itemize}
+\end{column}
+\end{columns}
+\vspace{0.4em}
+\begin{tcolorbox}[colback=cApp!6,colframe=cApp,boxsep=2pt,left=5pt,right=5pt]
+\scriptsize The ladder an independent model sees (cognitive demand $2.2\to4.0$, Bloom
+Understand$\to$Analyze) is the pedagogy signal BERTScore can't give --- now inside a formalized,
+comparable framework.
+\end{tcolorbox}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Status \& what's next}
+\small
+\begin{columns}[T]
+\begin{column}{0.52\textwidth}
+\textbf{\color{cApp}Done this week}
+\begin{itemize}\setlength\itemsep{1pt}\small
+  \item Found $+$ read the P-MAGIC sibling paper \ok
+  \item Reconciled 4-axis rubric (SocioMathLLM $+$ P-MAGIC $+$ ours) \ok
+  \item Formalized method doc \texttt{eval-framework.md} \ok
+  \item Video literature review $+$ hard positioning \ok
+  \item New Axis 3 video-recognition $+$ Axis 4 multimodal \ok
+  \item Stats/judge/rater tooling already wired \ok
+\end{itemize}
+\end{column}
+\begin{column}{0.48\textwidth}
+\textbf{\color{cAccent}Next}
+\begin{itemize}\setlength\itemsep{1pt}\small
+  \item \textbf{Teacher panel} on the per-modality rubric $\to$ real $\kappa$/ICC/Pearson
+  \item \textbf{Wire the MLLM-judge} over annotated frames (mimo-v2.5)
+  \item \textbf{Fix video-frame annotation} (arrow$+\omega$, degree overlay, phase figure) --- adopt P-MAGIC's methods
+  \item \textbf{Reorder pipeline:} material waits for the annotated video, then generates
+  \item Implement the reconciled rubric in \texttt{run\_llm\_judge.py}
+\end{itemize}
+\end{column}
+\end{columns}
+\vspace{0.5em}
+\begin{center}
+{\footnotesize\itshape A formalized, comparable evaluation framework --- reconciled with both parent
+lines, extended for video --- ready for the teacher panel to turn preliminary into publishable.}
+\end{center}
+\end{frame}
+
+\end{document}
