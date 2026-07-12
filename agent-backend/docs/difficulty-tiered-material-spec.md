@@ -476,3 +476,13 @@ rows into one `Orbit radius (fitted) — … (px @ px/m)` row (A9).
 - Figure titles wrap instead of clipping to "…a playground whe" (A8, `figures._title`).
 - `material_tiers._parse_json` repairs stray LaTeX backslashes (`\omega`, `\alpha`) before
   `json.loads`, so a slip degrades to a cosmetic blemish instead of losing the whole draft.
+
+## Bilingual output (`tools/translate_material.py`)
+The grounded English `material.{tier}.json` translates to another language (default Bahasa
+Indonesia, aligning with the P-MAGIC line) via the same local 35B, preserving every number, unit,
+and symbol exactly (only the prose is translated) and keeping the English section keys so the
+output stays structurally identical (still renderable/scorable); a `section_titles_<lang>` map
+carries the translated headings:
+```bash
+python tools/translate_material.py --workspace analysis_output/data --lang id
+```

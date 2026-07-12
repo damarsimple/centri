@@ -99,11 +99,20 @@ the word (see [data-contract.md §1a](data-contract.md)):
 - **`/verify-objects`** — a setup that verifies on frame 0 with a simple noun is far more
   likely to track well across the video.
 
+## Prompt micro-sweep — automated (`tools/prompt_sweep.py`)
+The manual probe below is now a tool. Give it a video and candidate prompts; it tracks each on
+a short clip via the real `/track` endpoint, ranks by coverage, and names the winner (add
+`--reset` to recycle SAM3 between probes — off by default, since `/reset` exits the server):
+```bash
+python tools/prompt_sweep.py --video clip.mp4 \
+    --prompts "yellow toy" "hanging toy" "toy" "cream colored doll" --clip-seconds 4
+```
+Use it when a cue tracks poorly, before committing a sidecar `visual_cues`. On the red-phone
+clip: `"red phone"` = 100% (180/180), single generic nouns = 0% — the same wording effect.
+
 ## Recommended follow-ups (not yet done)
 - Update the `/suggest-scene` prompt to return a **single common noun** per object (strip
   adjectives), and add an AnnotateScreen hint ("use one simple word, e.g. *toy*, *wheel*").
-- Optional: a built-in **prompt micro-sweep** — before a full `/track`, probe a few candidate
-  nouns on ~10 sampled frames via `/segment` and pick the highest hit-rate cue automatically.
 
 ## Reproduce the sweep
 ```python
