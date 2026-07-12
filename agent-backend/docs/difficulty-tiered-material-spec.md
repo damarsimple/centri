@@ -486,3 +486,15 @@ carries the translated headings:
 ```bash
 python tools/translate_material.py --workspace analysis_output/data --lang id
 ```
+
+## Addendum (2026-07-12): basic-tier definitions section + glossary render
+Basic now leads with a **"What these words mean"** section (basic = 6 sections; int/adv unchanged at 5) —
+each variable defined in PLAIN WORDS before the scenario: radius, angle & the radian (named, no number),
+angular velocity (turn rate), linear velocity + how it differs, and linear vs centripetal acceleration, plus
+one optional worded worked step. Still Remember/Understand; no symbols/equals (gate-safe). Built in
+`material_tiers.py` (`SECTIONS_BASIC`, `_sections_for`, `_section_spec`, `_definitions_policy`); grounded on
+already-measured quantities only (no ungrounded number). `render/report.py` `_MATERIAL_ORDER` leads with the
+heading and `_definitions_list` renders it as a per-term **glossary bullet list** (prefers the model's line
+breaks, else splits a run-on paragraph on the `term:` boundaries). `run_material_eval` scores only the 5
+canonical sections → the definitions are excluded from BERTScore by design. Live-validated (jobs 31c1fb44,
+e6fed2e9): 6 sections in order, gate clean, bullets render.
