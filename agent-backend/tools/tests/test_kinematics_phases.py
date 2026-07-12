@@ -90,6 +90,39 @@ def test_spin_up_then_steady():
     assert "DECREASE" not in labels, seq
 
 
+def test_staircase_not_oversegmented():
+    # Frequency-synth omega is a quantised staircase: spin up 1→4 in 0.5-step treads, then coast
+    # 4→1. The step-edges must NOT chop this into dozens of alternating bands — the directional
+    # merge collapses each side into ONE coarse phase: a single INCREASE then a single DECREASE.
+    up = np.concatenate([np.full(int(1.5 * FPS), v) for v in (1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0)])
+    down = np.concatenate([np.full(int(1.5 * FPS), v) for v in (4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0)])
+    seq, labels = _phase_seq(np.concatenate([up, down]), "accelerating")
+    dir_runs = [x for x in seq if x in ("INCREASE", "DECREASE")]
+    assert dir_runs == ["INCREASE", "DECREASE"], seq   # exactly one of each, in order
+    assert len(seq) <= 5, seq                          # not 20+ speckled bands
+
+
+def test_ripple_decel_no_spurious_increase():
+    # Decelerating spin with a strong 1/rev projection ripple (±25 %). The ripple crests must not
+    # be read as INCREASE phases on a clip that is overall slowing down.
+    t = np.arange(int(12.0 * FPS)) / FPS
+    base = np.linspace(11.0, 5.5, t.size)              # slow decline
+    ripple = 1.0 * np.sin(2 * np.pi * 1.0 * t)         # ~1 Hz orbital ripple, ~12 %
+    seq, labels = _phase_seq(base + ripple, "decelerating")
+    assert "INCREASE" not in labels, seq               # no ripple-crest INCREASE
+    assert "DECREASE" in labels, seq                   # the real slowdown still shows
+
+
+def test_clockwise_spin_up_is_increase():
+    # Clockwise rotation → negative omega. As it spins UP the magnitude grows (0.5→12) even though
+    # signed omega decreases. Labelling SPEED means this reads INCREASE ("speeding up"), not the
+    # inverted DECREASE that signed-omega labelling produced.
+    rng = np.random.default_rng(4)
+    om = -(np.linspace(0.5, 12.0, int(6.0 * FPS)) + rng.normal(0, 0.1, int(6.0 * FPS)))
+    seq, labels = _phase_seq(om, "accelerating")
+    assert "INCREASE" in labels and "DECREASE" not in labels, seq
+
+
 def run():
     fns = [v for kk, v in sorted(globals().items()) if kk.startswith("test_")]
     for fn in fns:

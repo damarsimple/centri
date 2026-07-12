@@ -122,9 +122,9 @@ def _phase_spans(labels: list[str]):
 def _phases_trustworthy(stats, labels) -> bool:
     """False when the per-frame phase labels CONTRADICT the authoritative motion type: a
     non-uniform (accelerating/decelerating) clip whose labels collapsed to a single STABLE run.
-    That happens on an impulsive flick — the near-vertical spike dominates the labeller's
-    slope threshold (kinematics `_phases` uses 0.10·max|dω/dt|), so the real coast-down falls
-    below it and is mislabelled STABLE. Calling that "steady" would be a lie, so callers skip the
+    That can happen when a clip's speed change is too small/noisy to clear the labeller's
+    magnitude floor (kinematics `_phases` labels |ω| off the P90 of |dω/dt| with a floor tied to
+    the ω range), so it collapses to STABLE. Calling that "steady" would be a lie, so callers skip the
     phase shading/words and the manifest omits phases; the ω(t) curve itself shows the change.
     Uniform clips (is_clip_average False) label STABLE legitimately and stay trusted. Once the
     labeller emits a real INCREASE/DECREASE the contradiction clears and phases render again."""

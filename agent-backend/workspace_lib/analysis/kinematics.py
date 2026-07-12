@@ -394,52 +394,113 @@ def _fft_period(k: Kinematics, FPS: float) -> float | None:
     return 1.0 / peak if peak > 0 else None
 
 
-def _phases(k: Kinematics, inp: Inputs, FPS: float, theta_smooth) -> None:
-    n = inp.n_raw_frames
-    smoothed = scipy.ndimage.median_filter(k.omega, size=max(5, int(FPS * 0.5)), mode="nearest")
-    domega = _segmented(smoothed, lambda seg, m: np.gradient(seg, k.t_s[m]))
-    # Threshold off the 90th percentile of |dω/dt| over ACTIVE frames, NOT its max. An impulsive
-    # flick's near-vertical rise spike dominates the max, lifting the threshold so high that the
-    # genuine coast-down falls under it and the whole flick reads STABLE ("steady"). The percentile
-    # ignores the lone spike; the min-phase clean-up below still suppresses noise on a uniform spin.
-    absd = np.abs(domega)
-    active_absd = absd[k.active_mask & np.isfinite(absd)]
-    base = float(np.percentile(active_absd, 90)) if active_absd.size else 0.0
-    inc_thr, dec_thr = 0.10 * base, -0.10 * base
-    min_phase = max(1, int(0.5 * FPS))
+def _phase_runs(labels, n):
+    """Contiguous (start, end, label) runs over the label array."""
+    out, i = [], 0
+    while i < n:
+        j = i
+        while j < n and labels[j] == labels[i]:
+            j += 1
+        out.append((i, j, labels[i]))
+        i = j
+    return out
 
-    # Per-frame raw label, then clean up to whole phases: (1) close short STABLE gaps flanked by
-    # the SAME direction (gradient noise briefly dipping under threshold mid-phase), then
-    # (2) despeckle any non-STABLE run shorter than min_phase to STABLE (this also absorbs the
-    # brief impulsive-flick rise). This replaces the old transition-commit loop, which silently
-    # CLOBBERED the last active phase to STABLE when the clip went inactive (came to rest) before a
-    # final transition — a valid 88-frame coast-down DECREASE was being overwritten wholesale.
-    labels = np.full(n, "INACTIVE", dtype=object)
-    for i in range(n):
-        if not k.active_mask[i]:
-            continue
-        d = domega[i]
-        labels[i] = ("INCREASE" if d > inc_thr else "DECREASE" if d < dec_thr else "STABLE") \
-            if np.isfinite(d) else "STABLE"
 
-    def _runs():
-        out, i = [], 0
-        while i < n:
-            j = i
-            while j < n and labels[j] == labels[i]:
-                j += 1
-            out.append((i, j, labels[i]))
-            i = j
-        return out
-
-    for idx, (a, b, lab) in enumerate(rs := _runs()):
+def _despeckle_phases(labels, min_phase, n) -> None:
+    """Clean raw per-frame labels into whole phases: (1) close short STABLE gaps flanked by the
+    SAME direction (gradient noise briefly dipping under threshold mid-phase), then (2) despeckle
+    any non-STABLE run shorter than min_phase to STABLE. Mutates `labels` in place."""
+    rs = _phase_runs(labels, n)
+    for idx, (a, b, lab) in enumerate(rs):
         if lab == "STABLE" and (b - a) < min_phase and 0 < idx < len(rs) - 1:
             prv, nxt = rs[idx - 1][2], rs[idx + 1][2]
             if prv == nxt and prv in ("INCREASE", "DECREASE"):
                 labels[a:b] = prv
-    for a, b, lab in _runs():
+    for a, b, lab in _phase_runs(labels, n):
         if lab in ("INCREASE", "DECREASE") and (b - a) < min_phase:
             labels[a:b] = "STABLE"
+
+
+def _merge_same_direction(labels, speed_smoothed, rest_level, n) -> None:
+    """A frequency-synth staircase (and a stepwise real spin-up) reads as many short same-direction
+    runs split by stable treads. Merge two same-direction runs — and the STABLE treads between them
+    — into one coarse phase, so a spin-up is ONE INCREASE not a dozen step-edges. Do NOT merge
+    across a gap that dips toward rest: that marks a genuinely separate spin-down event (repeated
+    impulses, e.g. a hand re-spinning a wheel). Mutates `labels` in place."""
+    changed = True
+    while changed:
+        changed = False
+        rs = _phase_runs(labels, n)
+        for i in range(len(rs)):
+            a, b, lab = rs[i]
+            if lab not in ("INCREASE", "DECREASE"):
+                continue
+            j = i + 1
+            while j < len(rs) and rs[j][2] == "STABLE":
+                j += 1
+            if j >= len(rs) or rs[j][2] != lab:
+                continue
+            gap_lo, gap_hi = b, rs[j][0]
+            gap_min = (float(np.nanmin(np.abs(speed_smoothed[gap_lo:gap_hi])))
+                       if gap_hi > gap_lo else rest_level + 1.0)
+            if gap_min < rest_level:
+                continue
+            labels[a:rs[j][1]] = lab
+            changed = True
+            break
+
+
+def _phases(k: Kinematics, inp: Inputs, FPS: float, theta_smooth) -> None:
+    n = inp.n_raw_frames
+    min_phase = max(1, int(0.5 * FPS))
+    if k.motion_type == "uniform":
+        # A uniform clip has, by definition, no speeding/slowing phase — the single-regime
+        # angular-acceleration fit already found alpha ~ 0. Label every active frame STABLE so
+        # tracking jitter on a steady spin cannot sprout a spurious INCREASE/DECREASE band.
+        labels = np.where(k.active_mask, "STABLE", "INACTIVE").astype(object)
+    else:
+        # Label on SPEED |ω| (rotation-direction-invariant): "speeding up / slowing down" is about
+        # how fast it spins, not the sign of ω. Labelling signed ω inverts every clockwise clip,
+        # mislabelling a spin-up as "slowing down".
+        speed = np.abs(k.omega)
+        smoothed = scipy.ndimage.median_filter(speed, size=max(5, int(FPS * 0.5)), mode="nearest")
+        # A longer trend window (~1.2 s) erases 1/rev projection ripples and frequency-synth
+        # staircase step-edges, so the gradient reflects only the coarse spin-up / coast-down.
+        trend = scipy.ndimage.uniform_filter1d(smoothed, size=max(5, int(1.2 * FPS)), mode="nearest")
+        domega = _segmented(trend, lambda seg, m: np.gradient(seg, k.t_s[m]))
+        # Threshold off the 90th percentile of |dω/dt| over ACTIVE frames, NOT its max: an impulsive
+        # flick's near-vertical rise spike dominates the max, lifting the threshold so high the
+        # genuine coast-down falls under it. Floor it to a fraction of the ω dynamic range per unit
+        # time so a real phase must change speed by a meaningful amount, not by tracking jitter on a
+        # near-uniform spin.
+        absd = np.abs(domega)
+        active_absd = absd[k.active_mask & np.isfinite(absd)]
+        base = float(np.percentile(active_absd, 90)) if active_absd.size else 0.0
+        oact = np.abs(k.omega[k.active_mask & ~np.isnan(k.omega)])
+        orange = float(np.percentile(oact, 95) - np.percentile(oact, 5)) if oact.size else 0.0
+        omed = float(np.nanmedian(oact)) if oact.size else 0.0
+        dur = max(k.active_mask.sum() / FPS, 1e-6)
+        thr = max(0.10 * base, 0.06 * orange / dur)
+
+        labels = np.full(n, "INACTIVE", dtype=object)
+        for i in range(n):
+            if not k.active_mask[i]:
+                continue
+            d = domega[i]
+            labels[i] = ("INCREASE" if d > thr else "DECREASE" if d < -thr else "STABLE") \
+                if np.isfinite(d) else "STABLE"
+        _despeckle_phases(labels, min_phase, n)
+        # Merge staircase steps into coarse phases BEFORE the net-change filter, so a spin-up's
+        # steps sum into one band (rather than each step being filtered away individually).
+        _merge_same_direction(labels, smoothed, 0.30 * omed, n)
+        # Net-change filter (post-merge): drop a phase whose net |Δω| is a small fraction of the
+        # typical spin speed — a ripple crest / wobble, not a real acceleration. Median-normalised so
+        # a small oscillation on a fast steady spin is suppressed while a real burst survives.
+        for a, b, lab in _phase_runs(labels, n):
+            if lab in ("INCREASE", "DECREASE") and (
+                    omed <= 0 or abs(float(trend[b - 1] - trend[a])) < 0.30 * omed):
+                labels[a:b] = "STABLE"
+        _despeckle_phases(labels, min_phase, n)
 
     stable_mask = labels == "STABLE"
     segments, inseg, s0 = [], False, 0
