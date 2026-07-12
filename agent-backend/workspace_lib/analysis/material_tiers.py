@@ -50,6 +50,16 @@ HINTS = _load_hints()
 
 SECTIONS = ["Scenario", "The variables we measured", "How the variables are related",
             "What the video shows over time", "Reading the figures"]
+# Basic gets a leading definitions section: the terms are defined in plain words BEFORE the
+# scenario (comprehension foundation), then the shared five follow. The extra heading is
+# basic-only scaffolding — render/report._MATERIAL_ORDER puts it first, and run_material_eval
+# scores only the shared five, so it is excluded from BERTScore by construction.
+SECTIONS_BASIC = ["What these words mean"] + SECTIONS
+_NWORD = {5: "five", 6: "six"}
+
+
+def _sections_for(tier):
+    return SECTIONS_BASIC if tier == "basic" else SECTIONS
 
 # Per-tier worked instants: indices into the seed's 4-point timeline. Distinct instants
 # per tier stop advanced ≈ intermediate (both verifying at the same moment). Basic gets
@@ -68,7 +78,9 @@ TIERS = {
                        "('one full turn takes about T seconds'), the turn rate as a plain "
                        "TURNS-PER-SECOND count derived from the frequency ('it makes about "
                        "F full turns each second') — NEVER a bare 'per second' number with no "
-                       "unit, and NEVER radians or rad/s, and angular velocity taught "
+                       "unit, and never rad/s and never a radian NUMBER for this object (you MAY "
+                       "name the radian once, in words, as another angle unit in the definitions "
+                       "section), and angular velocity taught "
                        "as a LIVED IDEA (NOT a symbol): the object sweeps around by a growing "
                        "angle as time passes. Use ONLY the ANGLE-AT-TIME MILESTONES actually "
                        "supplied in the data to make this concrete and time-anchored (narrate "
@@ -246,15 +258,56 @@ SYSTEM_TMPL = (
     "makes the JSON invalid and unparseable.\n"
     "{quality_policy}\n"
     "{anchor_policy}\n"
+    "{definitions_policy}"
     "{hints}"
     "Return ONLY a JSON object (no markdown fences, no prose outside JSON) with keys: "
     "object_name, scene_title, tier, bloom_objective, element_interactivity, "
     "concepts_introduced (list of the seed symbols/relations this tier actually used), "
-    "sections (an object with EXACTLY these five string keys, in order: "
-    + ", ".join(f'\"{h}\"' for h in SECTIONS) + "), and tier_conflict (boolean). "
+    "{section_spec}, and tier_conflict (boolean). "
     "If the tier cannot be honestly reached for this seed, set tier_conflict true, explain in "
     "Scenario, and write the nearest honest tier."
 )
+
+
+def _section_spec(tier):
+    secs = _sections_for(tier)
+    return ("sections (an object with EXACTLY these " + _NWORD[len(secs)] + " string keys, in "
+            "order: " + ", ".join(f'"{h}"' for h in secs) + ")")
+
+
+def _definitions_policy(tier):
+    """Basic-only 'What these words mean' section: define each idea in PLAIN WORDS before the
+    scenario, no symbols/equals, and using ONLY already-grounded quantities (radius, period,
+    turns-per-second, the angle milestones) so no ungrounded number slips in."""
+    if tier != "basic":
+        return ""
+    return (
+        "DEFINITIONS SECTION — 'What these words mean' (basic tier only, comes FIRST): before the "
+        "scenario, define each idea in PLAIN WORDS, one at a time, so a beginner meets every term "
+        "before the story uses it. No symbols, no equals signs, no rad/s, no numbers except the "
+        "ones already in the data (the radius, the period in seconds, the turns-per-second count, "
+        "the angle milestones). Cover, in this order:\n"
+        "  - radius: how far the object sits from the centre of its circle.\n"
+        "  - angle and the radian: the angle is how far around the circle it has turned; you can "
+        "measure it in degrees or in fractions of a full turn. Mention that scientists also measure "
+        "angle in 'radians' — name it as just another angle unit — but KEEP all your own angles in "
+        "degrees or turns, and give NO radian number.\n"
+        "  - angular velocity (the turn rate): how fast that angle grows — how much of the circle "
+        "it sweeps each second (say it in turns per second or degrees per second).\n"
+        "  - linear velocity (how fast it actually travels) and how it DIFFERS from the turn rate: "
+        "how far the object itself moves along the circle each second; two objects can share the "
+        "same turn rate, but the one on the bigger circle actually travels faster.\n"
+        "  - linear (tangential) acceleration vs centripetal acceleration: linear acceleration is a "
+        "change in how fast it travels along the path (speeding up or slowing down along the "
+        "circle); centripetal acceleration is the inward pull that keeps the object curving along "
+        "the circle instead of flying off in a straight line — it always points inward, toward the "
+        "centre. (Do NOT describe this clip's own speed as steady/unchanging — describe only the "
+        "inward direction of this pull.)\n"
+        "You MAY include ONE short worded worked step for comprehension (e.g. 'one full turn takes "
+        "about T seconds, so it makes a little under one turn every second') — entirely in words, "
+        "never with an equals sign, a slash, or a symbol. The ω symbol appears only on the labelled "
+        "figure, never in this prose.\n"
+    )
 
 
 def _call_qwen(system, user, temperature=0.4, max_tokens=24000):
@@ -586,7 +639,9 @@ def _generate(tier, facts, seed, frame, prior_issues=None):
         facts = re.sub(r"time-anchored samples.*", "", facts, flags=re.S)
     system = SYSTEM_TMPL.format(tier=tier, tier_upper=tier.upper(),
                                 quality_policy=quality_policy,
-                                anchor_policy=anchor_policy, hints=HINTS,
+                                anchor_policy=anchor_policy,
+                                definitions_policy=_definitions_policy(tier),
+                                section_spec=_section_spec(tier), hints=HINTS,
                                 motion_policy=_motion_policy(seed), **spec)
     # Failure-informed regeneration: a blind re-roll at temperature 0.4 rarely clears the
     # same fault, so on a retry we hand the model the EXACT gate failures to fix. Each issue
@@ -597,10 +652,12 @@ def _generate(tier, facts, seed, frame, prior_issues=None):
                     "specific problems — rewrite the passage so EVERY one is fixed, and change "
                     "nothing else that was already correct:\n"
                     + "\n".join(f"  - {i}" for i in prior_issues))
+    headers = _sections_for(tier)
     user = ("Ground-truth measurements for this clip:\n\n" + facts + _frame_block(frame) +
             revision +
             f"\n\nWrite the {tier.upper()} passage now, following every rule and using "
-            "the exact five section headers as JSON keys.")
+            f"EXACTLY these {_NWORD[len(headers)]} section headers as JSON keys, in order: "
+            + ", ".join(f'"{h}"' for h in headers) + ".")
     obj = _parse_json(_call_qwen(system, user))
     # Hard-overwrite the identity fields (same pattern as the tier label below): the frame
     # holds the ONE authoritative title, so a tier can never invent its own generic one.
@@ -683,7 +740,7 @@ def main():
         out_p.write_text(json.dumps(obj, indent=2, ensure_ascii=False))
         passed = gate_report[tier]["passed"]
         secs = obj.get("sections", {})
-        miss = [h for h in SECTIONS if h not in secs]
+        miss = [h for h in _sections_for(tier) if h not in secs]
         flag = "OK" if passed else "FLAGGED"
         print(f"{flag} {out_p.name}: {len(secs)} sections, "
               f"bloom={obj.get('bloom_objective')}, ei={obj.get('element_interactivity')}"

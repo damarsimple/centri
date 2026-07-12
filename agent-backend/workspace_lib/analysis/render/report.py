@@ -276,6 +276,7 @@ def _figures_block() -> str:
 
 
 _MATERIAL_ORDER = [
+    "What these words mean",  # basic-tier definitions foundation (absent in int/adv → filtered out)
     "Scenario",
     "The variables we measured",
     "How the variables are related",
