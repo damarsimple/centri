@@ -431,6 +431,31 @@ def _cyu_block(items, bridge=None) -> str:
     return out
 
 
+# Split a run-on definitions paragraph at each new "term: ..." label — the boundary is a
+# sentence end (., em/en dash) then a short label (no colon/period) followed by ": ".
+_DEF_SPLIT = re.compile(r"(?<=[.—–])\s+(?=[^:.\n]{1,95}?:\s)")
+
+
+def _definitions_list(body: str) -> str:
+    """Render the basic 'What these words mean' section as a per-term bulleted list (a glossary),
+    not one running paragraph. Prefer the model's own line breaks; if it wrote a single paragraph,
+    fall back to splitting on the 'term:' boundaries. Each term (text before the first colon) is
+    bolded."""
+    items = [s.strip() for s in body.split("\n") if s.strip()]
+    if len(items) <= 1:
+        items = [s.strip() for s in _DEF_SPLIT.split(body) if s.strip()]
+    lines = ["\\begin{itemize}[leftmargin=*]"]
+    for it in items:
+        m = re.match(r"([^:]{1,95}?):\s*(.*)", it, re.S)
+        if m:
+            lines.append(f"  \\item \\textbf{{{tex_escape(m.group(1).strip())}:}} "
+                         f"{tex_escape(m.group(2).strip())}")
+        else:
+            lines.append(f"  \\item {tex_escape(it)}")
+    lines.append("\\end{itemize}")
+    return "\n".join(lines)
+
+
 def _material_block(material, stats=None, unreliable=False, seed=None) -> str:
     """Render Subagent D's grounded learning passage (material.json sections), with
     the relevant figures and the measurements table interleaved into each section so
@@ -466,12 +491,16 @@ def _material_block(material, stats=None, unreliable=False, seed=None) -> str:
         body = (sections.get(h) or "").strip()
         if not body:
             continue
-        paras = [tex_escape(p.strip()) for p in re.split(r"\n\s*\n", body) if p.strip()]
         block = f"\\subsection*{{{tex_escape(h)}}}\n"
-        # Lead the relations section with the scannable numbered formula list, then the prose.
-        if h == "How the variables are related" and relations:
-            block += relations + "\n\n"
-        block += "\n\n".join(paras)
+        if h == "What these words mean":
+            # Basic-tier definitions render as a per-term glossary list, not a wall of prose.
+            block += _definitions_list(body)
+        else:
+            paras = [tex_escape(p.strip()) for p in re.split(r"\n\s*\n", body) if p.strip()]
+            # Lead the relations section with the scannable numbered formula list, then the prose.
+            if h == "How the variables are related" and relations:
+                block += relations + "\n\n"
+            block += "\n\n".join(paras)
         if stats is not None:
             block += _section_artifacts(h, stats, tier, unreliable)
         out.append(block)

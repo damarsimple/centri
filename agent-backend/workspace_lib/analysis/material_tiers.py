@@ -306,7 +306,9 @@ def _definitions_policy(tier):
         "You MAY include ONE short worded worked step for comprehension (e.g. 'one full turn takes "
         "about T seconds, so it makes a little under one turn every second') — entirely in words, "
         "never with an equals sign, a slash, or a symbol. The ω symbol appears only on the labelled "
-        "figure, never in this prose.\n"
+        "figure, never in this prose. Write EACH definition on its OWN line (put a newline between "
+        "them), each starting with the term then a colon (e.g. 'radius: ...') so they read as a "
+        "glossary.\n"
     )
 
 
