@@ -49,11 +49,11 @@
 \maketitle
 
 % =========================================================================
-\begin{frame}{Where this came from --- and what this week delivered}
+\begin{frame}{Where this comes from --- and what's in place}
 \small
-\begin{tcolorbox}[colback=cGrey!8,colframe=cGrey,title=\footnotesize Context,boxsep=2pt,left=4pt,right=4pt]
+\begin{tcolorbox}[colback=cGrey!8,colframe=cGrey,title=\footnotesize The gap this fills,boxsep=2pt,left=4pt,right=4pt]
 \scriptsize
-Last week's deck flagged the quality axes still missing: \emph{``LLM-judge $+$ teacher panel
+A similarity metric alone misses the quality axes: \emph{``LLM-judge $+$ teacher panel
 (lab rubric: linguistic $+$ mathematical), $\kappa$ vs.\ humans, auto$\leftrightarrow$human Pearson.''}
 Those come from the \textbf{parent line} --- \textbf{Ika Q.\ Utami's PhD} (NCU, same advisor):
 \emph{Authentic MWP Generation with Generative AI}. Its \textbf{SocioMathLLM} study defines the
@@ -61,16 +61,16 @@ LLM-judge $+$ rubric (Tables 8--10) and \textbf{Geo-QG} the 3-tier design --- ex
 should inherit so our numbers sit \textbf{beside the lab's published ones}.
 \end{tcolorbox}
 \vspace{0.2em}
-This week turned that into a real, wired evaluation method:
+That gap is now a real, wired evaluation method:
 \begin{itemize}\setlength\itemsep{1pt}
   \item \textbf{\color{cMeas}Rubric adopted verbatim} \ok\ --- SocioMathLLM's Tables 8--9 (authenticity/linguistic
-  $+$ mathematical) now drive our LLM-judge and a teacher rating sheet, plus a Centri physics/tier block.
-  \item \textbf{\color{cPed}The correlation layer she uses} \ok\ --- Cohen's $\kappa$, ICC, Pearson
+  $+$ mathematical) drive our LLM-judge and a teacher rating sheet, plus a Centri physics/tier block.
+  \item \textbf{\color{cPed}The parent line's correlation layer} \ok\ --- Cohen's $\kappa$, ICC, Pearson
   in one tool (\texttt{eval\_stats.py}).
-  \item \textbf{\color{cApp}Preliminary numbers already} \ok\ --- 15 passages judged on the new rubric;
-  the tier ladder shows up in the scores. Teachers deploy \textbf{next week}.
+  \item \textbf{\color{cApp}Preliminary numbers in hand} \ok\ --- 15 passages judged on the new rubric;
+  the tier ladder shows up in the scores. The teacher panel is the one axis not yet run.
 \end{itemize}
-{\footnotesize Code $+$ docs set up now; full production run and teacher panel are next week.}
+{\footnotesize The code $+$ docs are in place; the full production run and teacher panel are the remaining steps.}
 \end{frame}
 
 % =========================================================================
@@ -78,8 +78,8 @@ This week turned that into a real, wired evaluation method:
 
 \begin{frame}{BERTScore/BLEU measure overlap, not pedagogy}
 \small
-Our headline metric so far is \textbf{BERTScore vs a reference}. Last week made its blind spot
-concrete: on all 5 objects, \hl{basic scored \emph{lowest}} --- not because it is worse, but
+Our headline metric so far is \textbf{BERTScore vs a reference}, and its blind spot is
+concrete: on all 5 objects, \hl{basic scores \emph{lowest}} --- not because it is worse, but
 because it has the fewest equation-like tokens to overlap with an equation-dense textbook.
 \vspace{0.4em}
 \begin{tcolorbox}[colback=cAccent!6,colframe=cAccent,boxsep=2pt,left=5pt,right=5pt]
@@ -128,41 +128,35 @@ We adopt it wholesale and optimise for our case (tiers $+$ physics $+$ our groun
 \begin{frame}{SocioMathLLM's Tables 8--9, verbatim --- plus a Centri tier block}
 \scriptsize
 Every dimension scored \textbf{1--5}. Source of truth: \texttt{docs/eval-rubric-ika.md}
-(shared by the LLM-judge \emph{and} the teacher sheet, so both score the same criteria).
-\vspace{0.2em}
-\renewcommand{\arraystretch}{1.15}
-\begin{columns}[T]
-\begin{column}{0.34\textwidth}
-\begin{tcolorbox}[colback=cPed!6,colframe=cPed,title=\tiny Axis 1 --- Authenticity/linguistic (Table 8),boxsep=1pt,left=3pt,right=3pt]
-\tiny
-motivating context · language \& cultural clarity · appropriate \# solution steps · variety of
-solution strategies · attention to cognitive demand
-\end{tcolorbox}
-\end{column}
-\begin{column}{0.30\textwidth}
-\begin{tcolorbox}[colback=cMeas!6,colframe=cMeas,title=\tiny Axis 2 --- Mathematical (Table 9),boxsep=1pt,left=3pt,right=3pt]
-\tiny
-problem answerability · structure \& clarity · multiple solution strategies
-\end{tcolorbox}
-\end{column}
-\begin{column}{0.34\textwidth}
-\begin{tcolorbox}[colback=cApp!6,colframe=cApp,title=\tiny Axis 3 --- Centri physics/tier (ours),boxsep=1pt,left=3pt,right=3pt]
-\tiny
-difficulty\_fit (basic/int/adv) · concept\_accuracy · grounding\_accuracy · achieved\_bloom
-(vs the tier's designed Bloom)
-\end{tcolorbox}
-\end{column}
-\end{columns}
+--- shared by the LLM-judge \emph{and} the teacher sheet, so both score the same criteria.
+\vspace{0.3em}
+\renewcommand{\arraystretch}{1.35}
+\begin{center}
+\begin{tabular}{@{}p{2.7cm}p{2.0cm}p{7.2cm}@{}}
+\toprule
+\textbf{Axis} & \textbf{Source} & \textbf{Dimensions (each 1--5)} \\
+\midrule
+\textbf{\color{cPed}Authenticity / linguistic} & SocioMathLLM Table 8 &
+motivating context · language \& cultural clarity · appropriate \# solution steps ·
+variety of solution strategies · cognitive demand \\
+\textbf{\color{cMeas}Mathematical} & SocioMathLLM Table 9 &
+problem answerability · structure \& clarity · multiple solution strategies \\
+\textbf{\color{cApp}Physics / tier} & Centri \emph{(ours)} &
+difficulty\_fit (basic/int/adv) · concept\_accuracy · grounding\_accuracy ·
+achieved\_bloom (vs the tier's designed Bloom) \\
+\bottomrule
+\end{tabular}
+\end{center}
 \vspace{0.5em}
 \begin{itemize}\setlength\itemsep{2pt}
   \item Table 10 (\textbf{socialization}) is \emph{intentionally not} adopted --- it is the SocioMathLLM
   (Study 4) contribution, outside Centri's lane.
-  \item BLEU is read on her interpretation scale (§3.2.4): $<$1 undesired $\ldots$ 4--5 high quality
-  $\ldots$ $>$6 better-than-human.
+  \item BLEU is read on the parent line's interpretation scale (§3.2.4): $<$1 undesired $\ldots$ 4--5 high
+  quality $\ldots$ $>$6 better-than-human.
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Tooling shipped this week}
+\begin{frame}{The evaluation tooling in place}
 \small
 \renewcommand{\arraystretch}{1.25}
 \begin{center}
@@ -172,22 +166,22 @@ difficulty\_fit (basic/int/adv) · concept\_accuracy · grounding\_accuracy · a
 \midrule
 \texttt{run\_llm\_judge.py} & LLM-judge re-aligned to SocioMathLLM Tables 8--9 $+$ tier block; can take the
 gate's measured EI as ground truth. \\
-\texttt{eval\_stats.py} \hl{(new)} & Cohen's $\kappa$ $+$ \% agreement, ICC(2,k), Pearson --- her
+\texttt{eval\_stats.py} & Cohen's $\kappa$ $+$ \% agreement, ICC(2,k), Pearson --- the parent line's
 §3.4.3 correlation layer, numpy-only, tidy-CSV in. \\
-\texttt{build\_rater\_sheet.py} \hl{(new)} & Emits one CSV per teacher (item $\times$ rubric row),
+\texttt{build\_rater\_sheet.py} & Emits one CSV per teacher (item $\times$ rubric row),
 ingestible \emph{unchanged} by \texttt{eval\_stats.py}. \\
 \texttt{generate\_tier\_material.py} & \hl{\texttt{-{}-candidates K}}: generate-K, gate-select the
 cleanest draft (SocioMathLLM's generate$\to$review$\to$select) --- the durable fix for the 35B
 self-correction limit. \\
 \midrule
-\multicolumn{2}{@{}l}{\textbf{Docs:} \texttt{eval-rubric-ika.md}, \texttt{related-work-positioning.md}
-(SLR niche), \texttt{effectiveness-study-blueprint.md}} \\
+\multicolumn{2}{@{}l}{\scriptsize\textbf{Docs:} \texttt{eval-rubric-ika.md},
+\texttt{related-work-positioning.md}, \texttt{effectiveness-study-blueprint.md}} \\
 \bottomrule
 \end{tabular}
 \end{center}
 \vspace{0.3em}
-{\footnotesize Default behaviour unchanged (\texttt{-{}-candidates 1}); the human pipeline is wired
-and waiting on teacher scores.}
+{\footnotesize Default behaviour unchanged (\texttt{-{}-candidates 1}); the human pipeline is wired,
+pending teacher scores.}
 \end{frame}
 
 % =========================================================================
@@ -235,17 +229,17 @@ demand $2.2\to4.0$, solution steps $1.2\to3.0$, achieved Bloom Understand $\to$ 
 
 \begin{frame}{Honest reading of the preliminary numbers}
 \small
-Three findings worth flagging (they shape next week's real run):
+Three findings worth flagging (they shape the full production run):
 \begin{itemize}\setlength\itemsep{4pt}
   \item \hl{Grounding drops at advanced} (grounding\_accuracy $4.4\to3.6\to1.0$). The advanced
   tier makes per-instant numeric claims; on oblique-capture clips those cannot be verified ---
   the \emph{same} limitation the deterministic gate flags. A real result, not noise.
   \item \textbf{The mathematical axis is expository-unfair.} Dimensions like ``\# solution steps''
   and ``multiple strategies'' assume a \emph{problem to solve}; our material is \emph{exposition}.
-  Basic scores low there by construction --- we will report it, and note it as the one place her
+  Basic scores low there by construction --- reported honestly, and noted as the one place the
   question-rubric doesn't map cleanly onto passages.
-  \item \textbf{EI monotonicity fails 4/5} (intermediate overshoots advanced) --- consistent with
-  last week: advanced trades \emph{breadth} of quantities for \emph{depth}. FK grade rises for all 5.
+  \item \textbf{EI monotonicity fails 4/5} (intermediate overshoots advanced) --- advanced trades
+  \emph{breadth} of quantities for \emph{depth}. FK grade rises for all 5.
 \end{itemize}
 \vspace{0.3em}
 \begin{tcolorbox}[colback=cMeas!6,colframe=cMeas,boxsep=2pt,left=4pt,right=4pt]
@@ -255,11 +249,11 @@ whole-passage F1 $=0.823$, diversity $0.311$.
 \end{frame}
 
 % =========================================================================
-\begin{frame}{Status \& what's next}
+\begin{frame}{Where the method stands}
 \small
 \begin{columns}[T]
 \begin{column}{0.52\textwidth}
-\textbf{\color{cApp}Done this week}
+\textbf{\color{cApp}In place}
 \begin{itemize}\setlength\itemsep{1pt}\small
   \item Rubric adopted from SocioMathLLM Tables 8--9 \ok
   \item LLM-judge re-aligned to it $+$ tier block \ok
@@ -271,20 +265,20 @@ whole-passage F1 $=0.823$, diversity $0.311$.
 \end{itemize}
 \end{column}
 \begin{column}{0.48\textwidth}
-\textbf{\color{cAccent}Next}
+\textbf{\color{cAccent}Open --- not yet run}
 \begin{itemize}\setlength\itemsep{1pt}\small
-  \item \textbf{Deploy rating sheets to teachers} $\rightarrow$ real Cohen's $\kappa$, ICC
+  \item \textbf{Teacher rating sheets deployed} $\rightarrow$ real Cohen's $\kappa$, ICC
         (human$\leftrightarrow$LLM), Pearson (auto$\leftrightarrow$human)
   \item Full production run with \textbf{tier-matched references}
-  \item Tune \textbf{candidate-select K} (does best-of-K reach 15/15 clean?)
-  \item Effectiveness study, per the Study-3 blueprint (later; needs IRB $+$ app instrumentation)
+  \item \textbf{Candidate-select K} tuned (does best-of-K reach 15/15 clean?)
+  \item Effectiveness study, per the Study-3 blueprint (needs IRB $+$ app instrumentation)
 \end{itemize}
 \end{column}
 \end{columns}
 \vspace{0.6em}
 \begin{center}
-{\footnotesize\itshape We inherited the parent line's evaluation method, wired it end-to-end, and it
-already sees the difficulty ladder --- the teacher panel next week turns preliminary into publishable.}
+{\footnotesize\itshape The parent line's evaluation method is inherited, wired end-to-end, and
+already sees the difficulty ladder --- the teacher panel is what turns preliminary into publishable.}
 \end{center}
 \end{frame}
 
