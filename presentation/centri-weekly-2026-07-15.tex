@@ -1,0 +1,222 @@
+% Centri — Weekly progress (week ending 2026-07-15)
+% Standalone deck: every slide readable cold, no narration needed.
+% Compile: pdflatex -interaction=nonstopmode centri-weekly-2026-07-15.tex  (run twice)
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{metropolis}
+\metroset{sectionpage=progressbar, subsectionpage=none, numbering=fraction, progressbar=frametitle}
+
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+\usepackage[most]{tcolorbox}
+
+% ---- palette (shared with the other Centri decks) ------------------------
+\definecolor{cMeas}{HTML}{1F6FB2}
+\definecolor{cPed}{HTML}{B5651D}
+\definecolor{cApp}{HTML}{2E7D32}
+\definecolor{cInfra}{HTML}{5E35B1}
+\definecolor{cAccent}{HTML}{C62828}
+\definecolor{cGrey}{HTML}{616161}
+\definecolor{cBasic}{HTML}{2E7D32}
+\definecolor{cInter}{HTML}{1565C0}
+\definecolor{cAdv}{HTML}{6A1B9A}
+\setbeamercolor{frametitle}{bg=cMeas}
+\setbeamercolor{progress bar}{fg=cAccent}
+
+\newcommand{\ok}{{\color{cApp}\textbf{\checkmark}}}
+\newcommand{\nw}{{\scriptsize\color{cAccent}\textbf{[new]}}}
+% one-line, self-contained takeaway centred under the slide body
+\newcommand{\takeaway}[1]{\vfill{\footnotesize\itshape\color{cGrey}#1\par}}
+
+\title{Centri --- Trustworthy Material \& Multimodal Annotation}
+\subtitle{Video-generated tiered physics material, audited against the P-MAGIC teacher rubric}
+\author{Damar Albaribin}
+\institute{MSc Thesis --- advisor: Prof.\ Wu-Yuin Hwang}
+\date{Week ending 2026-07-15}
+
+\begin{document}
+\maketitle
+
+% =========================================================================
+\begin{frame}{What Centri produces, and the bar it is held to}
+\small
+\textbf{Centri} takes an ordinary phone video of an object spinning in a circle and, using
+computer-vision tracking (no phone sensors), turns it into physics learning material at
+\textbf{three levels} --- basic, intermediate, advanced --- together with \textbf{annotated figures}
+(the tracked frame, the motion graphs, a data table).
+\vspace{0.5em}
+
+\textbf{P-MAGIC} is the sibling app: it builds the same kind of three-level multimodal material, but
+from a phone's motion \emph{sensors} and GPT-4o. Ten physics teachers rated its material
+\textbf{8.2--8.6 / 10} on a rubric that asks three concrete things --- does the \emph{image} match the
+text, is the \emph{graph} accurate and fully labelled, does the \emph{table} agree with the prose.
+\vspace{0.5em}
+
+\begin{tcolorbox}[colback=cMeas!6,colframe=cMeas,boxsep=2pt,left=6pt,right=6pt,top=3pt,bottom=3pt]
+\small This week's work holds every piece of Centri's \emph{video}-generated material to that same
+teacher rubric --- and closes the places where a grounded number was narrating a motion that did not
+actually happen that way. The four headings below are each unpacked on their own slide.
+\end{tcolorbox}
+\vspace{0.4em}
+{\small \ok\ \textbf{\color{cMeas}Correct} \quad \ok\ \textbf{\color{cPed}Annotated} \quad
+\ok\ \textbf{\color{cInfra}Self-checking} \quad \ok\ \textbf{\color{cApp}Pedagogically sound}}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Correct: the words never outrun the measurement}
+\small
+Six things every generated passage now gets right. The right column is \emph{how} each is guaranteed
+--- stated in plain terms, so no claim rests on trusting the language model.
+\vspace{0.3em}
+\scriptsize
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{6.6cm}cp{5.6cm}@{}}
+\toprule
+\textbf{The material now says\ldots} & & \textbf{\ldots because} \\
+\midrule
+distance/laps are counted over the time the object is \textbf{actually turning}, not the whole clip &
+\ok & most clips sit still part of the time; a check rejects any ``rate $\times$ whole-clip'' figure \\
+the \textbf{fastest} lap ($\approx$0.7\,s) is told apart from the \textbf{average} lap ($\approx$1.1\,s) &
+\ok & the story is handed both numbers; a check rejects the average pinned to the fast moment \\
+the moment-by-moment account only ever \textbf{slows} (no ``sped up then slowed'' on a single coast) &
+\ok & the timeline is read only from the peak onward, so it cannot double back \\
+the \textbf{turn direction} is the one the viewer sees on screen (clockwise / counter-clockwise) &
+\ok & direction is converted from image coordinates into the camera's view \\
+a figure's number carries an \textbf{``(avg)''} tag whenever it is a whole-clip average &
+\ok & the label is generated from the same record that knows it is an average \\
+the prose names \textbf{only the motion phases the graph actually draws} &
+\ok & a check compares the wording against the phases drawn on the graph \\
+\bottomrule
+\end{tabular}
+\takeaway{None of these is a ``small model'' problem --- they were data / figure / wording defects that
+would mislead any model, GPT-4o included. Fixing them is what makes ``video $\to$ correct material'' true.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Annotated: the figures a student actually reads}
+\scriptsize
+The same three quantities are marked on the tracked frame and explained on the graphs. Values that are
+whole-clip averages are labelled \emph{(avg)} so a frozen frame never implies an instant reading.
+\emph{(All figures here are from one live end-to-end run --- job \texttt{9ed918d0}.)}
+\vspace{2pt}
+\begin{columns}[T]
+\begin{column}{0.35\textwidth}
+\centering
+\includegraphics[height=3.9cm]{flick_annotated_image.png}\\[2pt]
+{\scriptsize\textbf{Tracked frame.} The fitted circle, and radius $r$, turn-rate $\omega$\,(avg) and
+inward acceleration $a_c$\,(avg) as labelled arrows.}
+\end{column}
+\begin{column}{0.34\textwidth}
+\centering
+\includegraphics[height=3.9cm]{flick_omega.png}\\[2pt]
+{\scriptsize\textbf{Turn-rate over time.} Both motion phases are named on the graph --- \emph{speeding
+up} then \emph{slowing down} --- with the clip-average line.}
+\end{column}
+\begin{column}{0.31\textwidth}
+\centering
+\includegraphics[height=3.9cm]{flick_turns.png}\\[2pt]
+{\scriptsize\textbf{Basic-level figure.} Turns completed as time passes: the line \emph{bending flatter}
+shows the object is slowing down.}
+\end{column}
+\end{columns}
+\takeaway{The basic figure used to plot only the four quarter-turns of the fast first spin, which read
+as \emph{steady}; ``turns completed vs.\ time'' is the one honest way a beginner can \emph{see} the
+slowing without any equation.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Self-checking: a fixed checklist runs before anything ships}
+\small
+Each generated passage passes an automatic checklist first --- it costs nothing, needs no model, and
+each row rejects one specific kind of mistake. This is the layer \emph{underneath} any human or
+AI quality rating.
+\vspace{0.3em}
+\scriptsize
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}p{4.9cm}p{7.7cm}@{}}
+\toprule
+\textbf{The check} & \textbf{The mistake it refuses to ship} \\
+\midrule
+arithmetic actually computes & a stated equation whose two sides do not match at a real instant \\
+every number is traceable & a value that does not come from this video's measurements \\
+right duration & counting distance/laps over the whole clip when the object was turning for part of it \\
+average vs.\ peak & the whole-clip average lap time presented as the fastest-moment pace \\
+real phases only & a one-frame blip on the graph narrated as a genuine motion phase \\
+\rowcolor{cAccent!8}\textbf{figure matches text} \nw & prose claiming more motion phases than the graph actually draws \\
+level \& tone & equations at the basic level; calling a slowing clip ``steady''; camera jargon \\
+\bottomrule
+\end{tabular}
+\takeaway{``Figure matches text'' is new this week and reads the phase list from the \emph{same} source
+the graph is drawn from --- so it checks the words against what is actually rendered, not just against
+intent.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Pedagogically sound: aligned to the teacher rubric}
+\scriptsize
+\begin{columns}[T]
+\begin{column}{0.56\textwidth}
+\textbf{\color{cApp}What the material does for the learner}
+\begin{itemize}\setlength\itemsep{1.2pt}
+  \item Opens the basic level with a plain-words \emph{glossary} of each term before the story \ok
+  \item Worked examples whose arithmetic checks out at a real moment in the clip \ok
+  \item A ``how far to trust this measurement'' box --- honest about averages and calibration \ok
+  \item Confronts \emph{the} classic error: which way does it fly if released? (straight on, not
+        outward) \ok\ \nw
+  \item Puts answers in the \textbf{teacher} copy, not the student's --- so the student actually
+        attempts them \ok\ \nw
+  \item Wraps the data in a real situation (who is doing this, where, and why) \ok\ \nw
+\end{itemize}
+\end{column}
+\begin{column}{0.44\textwidth}
+\textbf{\color{cMeas}The difficulty rises, and it is measured}
+\vspace{3pt}
+\renewcommand{\arraystretch}{1.3}
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+& \color{cBasic}basic & \color{cInter}int. & \color{cAdv}adv. \\
+\midrule
+reading grade level & 7.8 & 8.1 & \textbf{11.7} \\
+ideas held at once & few & more & \textbf{many} \\
+thinking level & \multicolumn{2}{c}{understand} & \textbf{analyse} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{4pt}
+{\scriptsize Difficulty is \emph{measured} from the text, not asserted --- exactly what a
+word-overlap score against one textbook can never see.}
+\end{column}
+\end{columns}
+\takeaway{Centri already goes beyond the sibling app here: three measured difficulty levels, an
+honesty box, and the automatic checklist --- none of which P-MAGIC has.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Open questions --- decisions for the team}
+\small
+The correctness and figure defects are fixed and guarded. What is left is \emph{design}, and needs a
+teaching call rather than a code fix:
+\vspace{0.2em}
+\begin{itemize}\setlength\itemsep{2.5pt}
+  \item \textbf{\color{cAccent}Ask before showing?} Add a ``what do you predict?'' box before the
+  measurement is revealed --- turning the learner from a spectator into a participant.
+  \item \textbf{\color{cAccent}Annotate the table too?} The sibling app colours its table rows by
+  motion phase. Ours is clean but plain --- do we colour a per-phase table, or leave it as is?
+  \item \textbf{\color{cAccent}A compare-two task at advanced?} The sibling app has students compare
+  two experiments. From one video we cannot --- do we pair two clips, or compare two phases of one?
+  \item \textbf{\color{cAccent}Tie ideas to what is on screen?} Anchor each definition to the visible
+  object, turn ``here is the graph'' into ``find where it is steepest --- what is happening there?'',
+  and give sizes a feel ($a_c \approx 0.6\times$ gravity).
+  \item \textbf{\color{cAccent}The last evaluation step.} Give the teacher rating sheets to real
+  teachers and check how well their scores agree with the automatic ones --- the step that turns
+  these results from preliminary into publishable.
+\end{itemize}
+\takeaway{Every open question above is about making the material a better \emph{lesson} --- not a more
+correct one.}
+\end{frame}
+
+\end{document}
