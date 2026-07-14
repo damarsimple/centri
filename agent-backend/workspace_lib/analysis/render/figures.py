@@ -119,6 +119,14 @@ def _phase_spans(labels: list[str]):
     return spans
 
 
+def _phase_significant(width_s: float) -> bool:
+    """A MOTION phase is real (not a 1-2 frame despeckle sliver) when it lasts at least this
+    long. ~0.12 s ≈ 3-4 frames at 30 fps — enough to be a genuine spin-up/coast segment. Keeps
+    the manifest/prose ("three distinct phases") and the ω(t) figure in agreement: on the flick
+    the STABLE transition between spin-up and coast-down is a single frame and must not count."""
+    return width_s >= 0.12
+
+
 def _phases_trustworthy(stats, labels) -> bool:
     """False when the per-frame phase labels CONTRADICT the authoritative motion type: a
     non-uniform (accelerating/decelerating) clip whose labels collapsed to a single STABLE run.
@@ -137,24 +145,37 @@ def _phases_trustworthy(stats, labels) -> bool:
 def _shade_phases(ax, t, labels):
     """Shade each motion phase AND print its plain-language word ("speeding up" / "steady" /
     "slowing down") at the band centre, so the reader sees WHERE the spin changes without
-    decoding a colour key. Bands too narrow to fit the word keep the colour but stay unlabelled.
-    Callers pass already-vetted labels (see `_phases_trustworthy`) — an empty list draws nothing."""
+    decoding a colour key. A motion phase that survives only as a 1-2 frame despeckle sliver is
+    skipped (see `_phase_significant`) so the figure agrees with the prose; every phase that IS
+    drawn gets its word, with the label height staggered when adjacent bands sit close together
+    (A5/C2 — the flick's short spin-up band used to draw unlabelled). INACTIVE rest bands keep
+    their grey shading but no word. Callers pass already-vetted labels (see `_phases_trustworthy`)
+    — an empty list draws nothing."""
     if t is None or len(t) == 0 or not labels:
         return
     n = min(len(t), len(labels))
     total = float(t[n - 1] - t[0]) or 1.0
     trans = ax.get_xaxis_transform()  # x in data coords, y in axes fraction
+    rows_y = (0.96, 0.83, 0.70)
+    row, last_cx = 0, None
     for s, e, lab in _phase_spans(labels):
-        c = PHASE_COLOURS.get(str(lab).upper())
+        L = str(lab).upper()
+        c = PHASE_COLOURS.get(L)
         if not (c and e > s and s < len(t)):
             continue
         t0, t1 = t[s], t[min(e, len(t)) - 1]
+        width = t1 - t0
+        if L in PHASE_WORDS and not _phase_significant(width):
+            continue                                   # drop a sliver of a real motion phase
         ax.axvspan(t0, t1, color=c, alpha=0.12, lw=0)
-        word = PHASE_WORDS.get(str(lab).upper())
-        if word and (t1 - t0) >= 0.16 * total:  # wide enough to fit the label
-            ax.text((t0 + t1) / 2, 0.96, word, transform=trans, ha="center", va="top",
+        word = PHASE_WORDS.get(L)
+        if word and width >= 0.06 * total:             # wide enough that a (short) label reads
+            cx = (t0 + t1) / 2
+            row = (row + 1) % len(rows_y) if last_cx is not None and (cx - last_cx) < 0.2 * total else 0
+            ax.text(cx, rows_y[row], word, transform=trans, ha="center", va="top",
                     fontsize=8, color=c, fontweight="bold",
-                    bbox=dict(fc="white", ec=c, alpha=0.75, boxstyle="round,pad=0.2"))
+                    bbox=dict(fc="white", ec=c, alpha=0.8, boxstyle="round,pad=0.2"))
+            last_cx = cx
 
 
 # ── individual figures ───────────────────────────────────────────────────────
@@ -432,7 +453,7 @@ def _smooth_1rev(t, y, stats):
 
 
 def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
-                 hline=None, hline_lbl=None, star_peak=False, smooth_trend=False):
+                 hline=None, hline_lbl=None, smooth_trend=False):
     t = cols.get("time_s")
     y = cols.get(col)
     labels = stats.get("phases", {}).get("phase_labels") or []
@@ -454,12 +475,6 @@ def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
                    label=hline_lbl or None)
         if hline_lbl:
             ax.legend(fontsize=8, loc="best")
-    if star_peak and not smooth_trend:  # the raw peak is the ripple artifact — don't mark it
-        yy = np.where(np.isfinite(y), y, -np.inf)
-        if np.isfinite(yy).any():
-            i = int(np.nanargmax(yy))
-            ax.plot([t[i]], [y[i]], "*", color="#FFB300", ms=16,
-                    markeredgecolor="black")
     ax.set_xlabel("time (s)")
     ax.set_ylabel(ylabel)
     ax.set_title(_title(scene, what))
@@ -534,12 +549,15 @@ def _phase_sequence(stats):
     labels = (stats.get("phases", {}) or {}).get("phase_labels") or []
     if not _phases_trustworthy(stats, labels):
         return []
+    fps = (stats.get("video_info") or {}).get("fps") or 30.0
     friendly = {"INCREASE": "speeding up", "STABLE": "steady", "DECREASE": "slowing down"}
     seq = []
-    for lab in labels:
+    for s, e, lab in _phase_spans(labels):
         L = str(lab).upper()
         if L in ("INACTIVE", "IDLE"):
             continue
+        if not _phase_significant((e - s) / fps):       # skip a 1-2 frame despeckle sliver
+            continue                                     # (so prose can't claim a phantom "steady")
         if not seq or seq[-1]["label"] != L.lower():
             seq.append({"label": L.lower(), "meaning": friendly.get(L, L.lower())})
     return seq
@@ -641,7 +659,13 @@ def main() -> int:
     stable_omega, _omega_is_clip_avg = canonical_omega(stats)
     omega_hline_lbl = "clip average" if _omega_is_clip_avg else "stable mean"
     mean_r = s.get("mean_r_m")
-    stable_ac = st.get("stable_mean_ac")
+    # The a_c(t) reference line must match the typeset Table 1 the student reads (A5): that
+    # table shows the clip-average a_c (summary.mean_ac). On a (de)accelerating clip use that
+    # average, labelled "clip average"; the stable-phase mean (stable_mean_ac, ~8.55 on the
+    # flick) is only meaningful — and only matches the table — for a genuinely uniform spin,
+    # where it equals the average anyway. Mirrors the ω(t) clip-average/stable-mean choice.
+    ac_hline = s.get("mean_ac") if _omega_is_clip_avg else st.get("stable_mean_ac")
+    ac_hline_lbl = "clip average" if _omega_is_clip_avg else "stable mean"
 
     fig_annotated_image(stats, scene)
     fig_annotated_image_basic(stats, scene)  # simplified frame for the basic tier
@@ -658,7 +682,7 @@ def main() -> int:
                  hline=stable_omega, hline_lbl=omega_hline_lbl, smooth_trend=unreliable)
     _series_plot("ac_t.png", cols, stats, scene, "ac_m_s2",
                  "centripetal acceleration (m/s^2)", "Centripetal acceleration",
-                 TRACE["ac"], hline=stable_ac, hline_lbl="stable mean", star_peak=True,
+                 TRACE["ac"], hline=ac_hline, hline_lbl=ac_hline_lbl,
                  smooth_trend=unreliable)
     _series_plot("radius_t.png", cols, stats, scene, "r_m",
                  "radius (m)", "Orbit radius", TRACE["r"], hline=mean_r,
