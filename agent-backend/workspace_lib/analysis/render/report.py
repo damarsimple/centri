@@ -411,16 +411,18 @@ def _honesty_block(text) -> str:
             + tex_escape(text) + "\n\\end{minipage}}\\par\\medskip")
 
 
-def _cyu_block(items, bridge=None) -> str:
-    """Check-your-understanding questions with a compact answer key beneath each, plus the
-    one-line tier bridge (Part B section 9)."""
+def _cyu_block(items, bridge=None, with_answers: bool = False) -> str:
+    """Check-your-understanding questions plus the one-line tier bridge (Part B section 9).
+    The answer key prints ONLY in the teacher edition (``with_answers``): printing it in the
+    student edition under each question kills the retrieval-practice value — the student reads
+    the answer before attempting it (Part B #2). The teacher key holds the answers."""
     if not items:
         return ""
     rows = []
     for q in items:
         line = f"  \\item {tex_escape(q.get('question'))}"
         ans = q.get("answer")
-        if ans:
+        if ans and with_answers:
             line += ("\\\\\n  {\\small\\itshape\\color{inkgray}Answer: "
                      + tex_escape(ans) + "}")
         rows.append(line)
@@ -457,7 +459,7 @@ def _definitions_list(body: str) -> str:
     return "\n".join(lines)
 
 
-def _material_block(material, stats=None, unreliable=False, seed=None) -> str:
+def _material_block(material, stats=None, unreliable=False, seed=None, with_answers=False) -> str:
     """Render Subagent D's grounded learning passage (material.json sections), with
     the relevant figures and the measurements table interleaved into each section so
     the document reads like ordinary learning material rather than prose then a figure
@@ -480,7 +482,7 @@ def _material_block(material, stats=None, unreliable=False, seed=None) -> str:
     relations = _relations_block(_seed_for("relations_display"))
     worked = _worked_examples_block(_seed_for("worked_examples"))
     honesty = _honesty_block(_seed_for("measurement_honesty"))
-    cyu = _cyu_block(_seed_for("check_understanding"), _seed_for("tier_bridge"))
+    cyu = _cyu_block(_seed_for("check_understanding"), _seed_for("tier_bridge"), with_answers)
 
     ordered = [h for h in _MATERIAL_ORDER if h in sections]
     ordered += [h for h in sections if h not in _MATERIAL_ORDER]  # tolerate extras
@@ -663,7 +665,7 @@ def _build(stats, questions, *, scene, with_answers: bool, material=None,
     # so we drop the separate Key Measurements / Visual Analysis dumps. Without material,
     # fall back to the standalone data + figures sections so nothing is lost.
     seed = _load_seed()   # deterministic worked-examples / CYU / honesty ingredients
-    material_tex = _material_block(material, stats, unreliable, seed)
+    material_tex = _material_block(material, stats, unreliable, seed, with_answers)
     # The student edition of a tiered job IS the learning material: a clean, student-facing
     # lesson — no report framing, no data-quality flags, no questions (those live in the
     # teacher key / a separate worksheet). The teacher key keeps the full report.

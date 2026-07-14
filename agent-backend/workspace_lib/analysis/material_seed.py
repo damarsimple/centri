@@ -276,8 +276,7 @@ def _worked_examples(ctx):
             "formula": "laps = turns each second × seconds spent turning",
             "substitute": f"{_g(f, 2)} × {_g(turn)} s",
             "result": f"≈ {round(laps)} laps",
-            "interpret": f"The dots pile up on the circle because the {obj} goes round about "
-                         f"{round(laps)} times"
+            "interpret": f"So the {obj} goes all the way round about {round(laps)} times"
                          + (" before it stops." if ctx.get("comes_to_rest") else " as it spins."),
         })
 
@@ -389,21 +388,27 @@ def _check_understanding(ctx):
     out = {"basic": [], "intermediate": [], "advanced": []}
 
     out["basic"].append({
+        # Keep the answer QUALITATIVE: the basic relations section teaches "bigger circle -> stronger
+        # inward pull" in words only, so answering "it doubles" would test a proportionality the tier
+        # never taught (Part B #3 — assessment/instruction alignment).
         "question": f"If the {obj} sat twice as far from the centre but swept round at the same "
                     f"rate, would the inward pull be stronger, weaker, or the same?",
-        "answer": "Stronger — it doubles when the radius doubles.",
+        "answer": "Stronger — a wider circle needs a stronger inward pull to hold the same turn rate.",
     })
+    # These reference the "turns completed vs time" graph (fig_angle_points_basic), whose SHAPE
+    # shows the speed change — matching what the figure actually draws (C5/A4). The old wording
+    # cited per-second dots on the circle that the figure no longer contains.
     if mt == "decelerating":
         out["basic"].append({
-            "question": "The dots marking each second sit a little closer together near the end "
-                        "of the clip than at the start. What does that tell you?",
-            "answer": f"The {obj} covers less angle each second — it is slowing down.",
+            "question": "On the 'turns completed' graph, the line climbs steeply at first and then "
+                        "bends flatter toward the end. What does that tell you about the motion?",
+            "answer": f"The {obj} completes fewer turns each second — it is slowing down.",
         })
     elif mt == "accelerating":
         out["basic"].append({
-            "question": "The dots marking each second spread a little farther apart near the end "
-                        "of the clip. What does that tell you?",
-            "answer": f"The {obj} covers more angle each second — it is speeding up.",
+            "question": "On the 'turns completed' graph, the line climbs ever more steeply toward "
+                        "the end. What does that tell you about the motion?",
+            "answer": f"The {obj} completes more turns each second — it is speeding up.",
         })
     if isinstance(T, (int, float)):
         out["basic"].append({
