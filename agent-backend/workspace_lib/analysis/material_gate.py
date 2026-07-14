@@ -596,8 +596,49 @@ def cross_tier_issues(materials, seed, anchors, unreliable=False):
     return issues
 
 
+_NUMWORD = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+_PHASE_WORDS = ("speeding up", "slowing down", "steady")
+
+
+def annotation_issues(text: str, phases):
+    """Axis-4 render-aware annotation correctness: the prose must not claim more motion phases —
+    or a phase word — than the tier's rendered graphs actually show. ``phases`` is the ordered
+    list of phase meanings those graphs carry (render.figures._phase_sequence, significance-
+    filtered so it matches the drawn bands). This closes the C2 gap: on the flick the ω(t) figure
+    renders two bands (speeding up -> slowing down) but the prose used to assert "three distinct
+    phases: speeding up, steady, and slowing down" — a phantom "steady" the figure never draws.
+    Empty ``phases`` (uniform / oblique clip) => no check (nothing to contradict). Returns issue
+    strings."""
+    if not phases:
+        return []
+    present = {p.lower() for p in phases}
+    n = len(phases)
+    t = norm(text)
+    issues = []
+    # (a) a numeric phase-count claim that disagrees with what renders
+    for m in re.finditer(r"\b(one|two|three|four|five|six|\d+)\s+"
+                         r"(?:distinct\s+|different\s+|separate\s+)?phases?\b", t):
+        w = m.group(1)
+        claimed = _NUMWORD.get(w) or (int(w) if w.isdigit() else None)
+        if claimed is not None and claimed != n:
+            issues.append(f"prose claims {claimed} phase(s) ('{m.group(0).strip()}') but the "
+                          f"figure shows {n} ({', '.join(phases)})")
+    # (b) a phase WORD enumerated right after a "phases" mention that no rendered band carries.
+    # Only fire inside an actual enumeration — the window must also name a REAL rendered phase —
+    # so "the phases are not steady" (no listed phase) never trips it.
+    for pm in re.finditer(r"phases?\b", t):
+        window = t[pm.end(): pm.end() + 80]
+        if not any(p in window for p in present):
+            continue
+        for word in _PHASE_WORDS:
+            if word in window and word not in present:
+                issues.append(f"prose names a '{word}' phase but the figure's phases are "
+                              f"{', '.join(phases)}")
+    return list(dict.fromkeys(issues))
+
+
 # ---- live per-tier gate (used by material_tiers.py) --------------------------
-def tier_gate(obj, seed, frame=None):
+def tier_gate(obj, seed, frame=None, manifest_phases=None):
     """Return a list of issue strings for ONE generated tier (empty = passes).
 
     Mirrors the historical ``material_tiers._gate`` but sourced here so prompt and check
@@ -622,6 +663,7 @@ def tier_gate(obj, seed, frame=None):
                for u in ungrounded_numbers(text, allowed_values(seed))]
     issues += [f"wrong-duration: {w}" for w in wrong_duration_products(text, seed)]
     issues += [f"avg-period-as-peak: {w}" for w in average_period_as_peak(text, seed)]
+    issues += [f"annotation: {a}" for a in annotation_issues(text, manifest_phases or [])]
     issues += tier_compliance(tier, text, unreliable=unreliable)
     issues += motion_faithfulness(seed, text)
     issues += [f"vocab[{v['kind']}]: '{v['word']}' in {v['context']}" for v in vocab_issues(text)]

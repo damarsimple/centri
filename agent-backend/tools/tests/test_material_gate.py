@@ -275,6 +275,24 @@ def test_average_period_as_peak_flagged():
     assert not G.average_period_as_peak("at its fastest one turn every 1.1 s", steady)
 
 
+def test_annotation_issues_phase_count_and_phantom():
+    """Axis-4 render-aware annotation gate: the prose may not claim more phases — or a phase word
+    — than the figure draws; an empty phase list (uniform/oblique) disables the check."""
+    ph = ["speeding up", "slowing down"]
+    # C2 regression: three claimed, two rendered, plus a phantom "steady"
+    bad = G.annotation_issues(
+        "The graph highlights three distinct phases: speeding up, steady, and slowing down.", ph)
+    assert any("3 phase" in b for b in bad)
+    assert any("steady" in b for b in bad)
+    # correct prose passes
+    assert not G.annotation_issues("Two phases: speeding up then slowing down.", ph)
+    assert not G.annotation_issues("It speeds up, then coasts and slows down.", ph)
+    # no false positive when "steady" is not part of a phase enumeration
+    assert not G.annotation_issues("Unlike a steady spin, the motion has clear phases here.", ph)
+    # empty phases (uniform / oblique) => no check
+    assert not G.annotation_issues("three distinct phases of speeding up and steady", [])
+
+
 def test_seed_consistency_catches_broken_closure():
     # A self-consistent seed passes: v = omega*r, T = 2pi/omega, and Jensen <omega^2> >= <omega>^2.
     good = {

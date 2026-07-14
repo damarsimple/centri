@@ -694,6 +694,26 @@ def _annotation_note(tier):
             "(quote these EXACT values; introduce no other numbers):\n" + "\n".join(lines))
 
 
+def _manifest_phases(tier):
+    """The ordered phase meanings the tier's rendered graphs carry (figure_qa.json), for the
+    render-aware annotation_correctness gate — so the prose can't claim more phases than the ω(t)
+    figure actually draws (Axis 4). Empty when the manifest is absent or the tier shows no phased
+    graph (basic / uniform / oblique)."""
+    try:
+        from .render.report import TIER_ARTIFACTS
+        man = (json.loads((PLOTS / "figure_qa.json").read_text()).get("annotations")) or {}
+    except Exception:  # noqa: BLE001 — best-effort; never block generation
+        return []
+    figs = set()
+    for lst in (TIER_ARTIFACTS.get(tier) or {}).values():
+        figs.update(f for f in lst if not f.startswith("__"))
+    for fig in figs:
+        ph = (man.get(fig) or {}).get("phases")
+        if ph:
+            return [p.get("meaning", "") for p in ph]
+    return []
+
+
 def _generate(tier, facts, seed, frame, prior_issues=None):
     spec = {**TIERS[tier], "figures": TIERS[tier]["figures"] + _annotation_note(tier)}
     quality_policy = _quality_policy(seed)
@@ -761,9 +781,10 @@ def main():
     materials, gate_report, cross_regen_used = {}, {}, {}
     for tier in TIERS:
         facts = _facts(seed, tier)  # basic gets the angle milestones; others don't
+        mph = _manifest_phases(tier)  # render-aware annotation gate: phases this tier's graphs draw
         print(f".. generating {tier} (Qwen) ...", flush=True)
         obj = _generate(tier, facts, seed, frame)
-        issues = G.tier_gate(obj, seed, frame)
+        issues = G.tier_gate(obj, seed, frame, manifest_phases=mph)
         # Failure-informed best-of-N: re-roll up to twice feeding the EXACT current faults,
         # and keep a re-roll only when it has STRICTLY fewer issues. A single regen at temp
         # 0.4 often trades one violation for another ('recorded' -> 'pushes'); rejecting the
@@ -773,7 +794,7 @@ def main():
             attempt += 1
             print(f"   gate FAILED ({len(issues)}): {issues}; regen {attempt}/2 ...", flush=True)
             cand = _generate(tier, facts, seed, frame, prior_issues=issues)
-            cand_issues = G.tier_gate(cand, seed, frame)
+            cand_issues = G.tier_gate(cand, seed, frame, manifest_phases=mph)
             if len(cand_issues) < len(issues):
                 obj, issues = cand, cand_issues
         materials[tier] = obj
@@ -793,7 +814,7 @@ def main():
                 # re-roll fixes the instant without reintroducing a vocab/grounding leak.
                 prior = [c for c in cross if tier in c] + gate_report[tier]["issues"]
                 cand = _generate(tier, _facts(seed, tier), seed, frame, prior_issues=prior)
-                cand_issues = G.tier_gate(cand, seed, frame)
+                cand_issues = G.tier_gate(cand, seed, frame, manifest_phases=_manifest_phases(tier))
                 cross_regen_used[tier] = True
                 if len(cand_issues) <= len(gate_report[tier]["issues"]):
                     materials[tier] = cand
