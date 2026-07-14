@@ -29,11 +29,17 @@ FIGURES = {
 }
 
 
-def _timeline_from_csv(csv_path: Path, n: int = N_TIMELINE):
+def _timeline_from_csv(csv_path: Path, n: int = N_TIMELINE, coast_from_peak: bool = False):
     """Sample the pipeline's own per-frame kinematics over the ACTIVE window.
 
     Uses kinematics.csv's omega/v/a_c directly so the time-anchored narration
     matches every other number in the material.
+
+    A3: on an impulsive (flick) clip the active window straddles the peak, so evenly-spaced
+    samples run pre-peak -> post-peak and a decay-framed narration reads two coast-down points
+    as "climbed" (2.687 -> 4.802 skipping the 9.4 peak between them). With coast_from_peak the
+    timeline starts at the peak, so every narrated instant sits on the coast-down (one phase)
+    and the (t, omega) sequence is monotone non-increasing.
     """
     rows = []
     with open(csv_path, newline="") as fh:
@@ -51,6 +57,10 @@ def _timeline_from_csv(csv_path: Path, n: int = N_TIMELINE):
                 continue
     if len(rows) < 5:
         return []
+    if coast_from_peak:
+        pk = max(range(len(rows)), key=lambda i: rows[i]["omega_rad_s"])
+        if pk <= len(rows) - 5:          # keep >=5 coast-down rows; else leave the window as-is
+            rows = rows[pk:]
     t0, t1 = rows[0]["t_s"], rows[-1]["t_s"]
     out = []
     for k in range(n):
@@ -568,7 +578,10 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
     measurement_quality = None
     milestones = []
     if csv_path and Path(csv_path).exists():
-        timeline = _timeline_from_csv(Path(csv_path))
+        # Impulsive clips sample the coast-down only, so the advanced over-time narration is
+        # monotone and never reads a pre-peak vs post-peak pair as "climbing" (A3).
+        timeline = _timeline_from_csv(Path(csv_path),
+                                      coast_from_peak=bool(aa_out and aa_out.get("impulsive_start")))
         # Trust channel for the LLM: is per-instant omega reliable, or is the omega(t)
         # ripple a viewing-angle (oblique-capture) projection artifact? Drives the
         # hedging policy in material_tiers.py so the prose can't launder an artifact.
