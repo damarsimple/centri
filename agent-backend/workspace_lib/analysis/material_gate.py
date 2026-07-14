@@ -239,6 +239,43 @@ def wrong_duration_products(text: str, seed: dict, rel_tol=0.03):
     return list(dict.fromkeys(issues))
 
 
+def average_period_as_peak(text: str, seed: dict, window=70):
+    """A2: the clip-average period T = 2*pi/<omega> is the pace of the WHOLE spin, not of any
+    single moment. On a non-uniform clip the fastest instant turns much quicker
+    (2*pi/omega_peak — e.g. the red-phone flick peaks at ~0.67 s while T = 1.1 s). Flag prose
+    that pins the average period onto a peak/fastest moment: the average value appearing close
+    to fastest-moment wording, with no averaging qualifier nearby to disambiguate. Returns a
+    list of issue strings (empty when the peak lap barely differs from the average)."""
+    aa = seed.get("angular_acceleration") or {}
+    if aa.get("motion_type") not in ("decelerating", "accelerating"):
+        return []
+    T = next((v.get("value") for v in seed.get("variables", [])
+              if v.get("symbol") == "T"), None)
+    cands = [abs(x) for x in (aa.get("omega_initial"), aa.get("omega_final"))
+             if isinstance(x, (int, float)) and abs(x) > 1e-6]
+    if not (isinstance(T, (int, float)) and T > 0 and cands):
+        return []
+    peak_period = 6.283185307 / max(cands)
+    if peak_period >= 0.85 * T:                  # peak lap barely differs from the average
+        return []
+    t = norm(text)
+    PEAK = (r"fastest|quickest|peak|top speed|its (?:quickest|fastest)|"
+            r"right after (?:the|that) (?:flick|nudge|spin|twist|push)")
+    AVG = r"average|averaged|on average|over the whole|over the entire|\bmean\b|typical"
+    issues = []
+    for m in re.finditer(rf"({NUM})\s*(?:s\b|sec)", t):
+        val = float(m.group(1))
+        if abs(val - T) > max(0.05, 0.05 * T):   # not the average-period value
+            continue
+        ctx = t[max(0, m.start() - window):min(len(t), m.end() + window)]
+        if re.search(PEAK, ctx) and not re.search(AVG, ctx):
+            snippet = t[max(0, m.start() - 32):m.end() + 12].strip()
+            issues.append(f"the clip-average period {round(T, 2)} s is stated as a peak/fastest "
+                          f"pace ('...{snippet}...'); at its fastest a lap is ~"
+                          f"{round(peak_period, 2)} s (the average describes the whole spin)")
+    return list(dict.fromkeys(issues))
+
+
 # ---- (2) number grounding ----------------------------------------------------
 def allowed_values(seed: dict):
     vals = set()
@@ -584,6 +621,7 @@ def tier_gate(obj, seed, frame=None):
     issues += [f"ungrounded number {u['value']} in {u['context']}"
                for u in ungrounded_numbers(text, allowed_values(seed))]
     issues += [f"wrong-duration: {w}" for w in wrong_duration_products(text, seed)]
+    issues += [f"avg-period-as-peak: {w}" for w in average_period_as_peak(text, seed)]
     issues += tier_compliance(tier, text, unreliable=unreliable)
     issues += motion_faithfulness(seed, text)
     issues += [f"vocab[{v['kind']}]: '{v['word']}' in {v['context']}" for v in vocab_issues(text)]

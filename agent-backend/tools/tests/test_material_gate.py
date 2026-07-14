@@ -256,6 +256,25 @@ def test_wrong_duration_products_flags_clip_length():
     assert not G.wrong_duration_products("0.83 × 15", spins_throughout)    # clip IS the turn time
 
 
+def test_average_period_as_peak_flagged():
+    """A2 gate: the clip-average period pinned to a peak/fastest moment is flagged; the same
+    number attributed to the whole-spin average passes; and a clip whose peak lap barely
+    differs from the average never fires."""
+    seed = {"angular_acceleration": {"motion_type": "decelerating", "impulsive_start": True,
+                                      "omega_initial": 9.37, "omega_final": 2.04},
+            "variables": [{"symbol": "T", "value": 1.1}]}
+    # peak lap ~= 2pi/9.37 = 0.67 s vs average T = 1.1 s
+    assert G.average_period_as_peak(
+        "Right after that flick it reaches its fastest pace, one full circle every 1.1 s", seed)
+    assert not G.average_period_as_peak(
+        "At its fastest a lap takes 0.67 s; averaged over the whole spin about 1.1 s", seed)
+    assert not G.average_period_as_peak("It coasts at a steady rate", seed)   # no period value
+    # a near-uniform clip (peak lap ~= average) must not fire even with fastest wording
+    steady = dict(seed, angular_acceleration={"motion_type": "decelerating",
+                                              "omega_initial": 5.9, "omega_final": 5.6})
+    assert not G.average_period_as_peak("at its fastest one turn every 1.1 s", steady)
+
+
 def test_seed_consistency_catches_broken_closure():
     # A self-consistent seed passes: v = omega*r, T = 2pi/omega, and Jensen <omega^2> >= <omega>^2.
     good = {

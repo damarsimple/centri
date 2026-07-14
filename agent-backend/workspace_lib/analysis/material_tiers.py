@@ -21,7 +21,7 @@ if it still fails the file is kept but flagged in material_tiers_gate.json (proc
 flag, like the figure-verify phase — the pipeline never silently ships a bad number).
 Implements docs/difficulty-tiered-material-spec.md.
 """
-import json, os, re, sys, pathlib, urllib.request
+import json, math, os, re, sys, pathlib, urllib.request
 
 from . import material_gate as G
 from .common import dedup_display_name
@@ -398,8 +398,11 @@ FRAME_SYSTEM = (
     "'holds that pace/path' — that contradicts the data. Only a genuinely constant-rate clip "
     "may be described as steady.\n"
     "4. The ONLY numbers you may mention are: the clip length in seconds, how far out the "
-    "object sits (radius, in plain words), and how long one full turn takes. Mention no other "
-    "quantity, symbol, equation, or measurement.\n"
+    "object sits (radius, in plain words), and how long one full turn takes. If you are given "
+    "TWO lap times (a fastest one and a whole-spin average), keep them straight: the average "
+    "describes the ENTIRE spin and must never be pinned to one dramatic instant (never 'right "
+    "after the flick it turns once every <average> s' — at its fastest the lap is the shorter "
+    "fastest time). Mention no other quantity, symbol, equation, or measurement.\n"
     "5. NEVER mention filming, video, tracking, cameras, measurement, analysis, or a pipeline "
     "— write the scene ITSELF, as if you stood there watching it.\n"
     "6. Plain Unicode only — no LaTeX, no backslashes.\n"
@@ -455,8 +458,29 @@ def _frame_user(seed) -> str:
         # Round to match the value the tier bodies quote from the seed's `r` variable
         # (3 decimals), so the story and the physics never disagree (0.08 vs 0.075).
         bits.append(f"how far out it sits (radius): about {round(radius, 3)} m")
+    # A2: on a non-uniform clip omega swings, so 2*pi/<omega> (the period T = clip average) is
+    # NOT the lap time at any single dramatic moment. Handed only the average, the frame pins
+    # it onto the peak ("right after the flick it turns once every 1.1 s" — but at the peak a
+    # lap is ~0.67 s). Compute the fastest-instant period from the fit's extreme omega and hand
+    # the frame BOTH, labeled, whenever they differ meaningfully (>~15%).
+    omega_peak = None
+    if mt in ("decelerating", "accelerating"):
+        cands = [abs(x) for x in (aa.get("omega_initial"), aa.get("omega_final"))
+                 if isinstance(x, (int, float)) and abs(x) > 1e-6]
+        if cands:
+            omega_peak = max(cands)
+    peak_period = (2 * math.pi / omega_peak) if omega_peak else None
     if isinstance(period, (int, float)):
-        bits.append(f"one full turn takes: about {round(period, 2)} s")
+        if isinstance(peak_period, (int, float)) and peak_period < 0.85 * period:
+            when = ("right after the flick" if aa.get("impulsive_start")
+                    else "right as it is set going" if mt == "decelerating"
+                    else "by the end, once it has wound up to full speed")
+            bits.append(f"how long one full turn takes AT ITS FASTEST ({when}): about "
+                        f"{round(peak_period, 2)} s. Averaged over the WHOLE spin a full turn "
+                        f"takes about {round(period, 2)} s — that average is the pace of the "
+                        f"entire spin, NOT the pace at '{when}'.")
+        else:
+            bits.append(f"one full turn takes: about {round(period, 2)} s")
     if nc.get("user_text"):
         bits.append("LEARNER'S NOTE (authoritative — build the story around this):\n  "
                     + nc["user_text"])
