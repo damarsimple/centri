@@ -254,17 +254,21 @@ def _worked_examples(ctx):
             "interpret": f"Every lap the {obj} travels about {_g(circ)} m along its circle, even "
                          f"though it never gets more than {_g(r)} m from the centre.",
         })
-    if isinstance(f, (int, float)) and isinstance(dur, (int, float)):
-        laps = f * dur
+    # laps = turns/second × the time it is ACTUALLY TURNING (not the clip length — the object
+    # is at rest for part of an impulsive/decaying clip, so f×clip_len over-counts ~3× (A1)).
+    turn = ctx.get("turning_dur") or dur
+    if isinstance(f, (int, float)) and isinstance(turn, (int, float)):
+        laps = f * turn
         out["basic"].append({
-            "title": "Roughly how many laps in the whole clip?",
-            "given": f"The clip is about {_g(dur)} s long and it makes about {_g(f, 2)} turns "
+            "title": "Roughly how many laps while it is turning?",
+            "given": f"It actually turns for about {_g(turn)} s and makes about {_g(f, 2)} turns "
                      f"each second.",
-            "formula": "laps = turns each second × seconds",
-            "substitute": f"{_g(f, 2)} × {_g(dur)} s",
+            "formula": "laps = turns each second × seconds spent turning",
+            "substitute": f"{_g(f, 2)} × {_g(turn)} s",
             "result": f"≈ {round(laps)} laps",
             "interpret": f"The dots pile up on the circle because the {obj} goes round about "
-                         f"{round(laps)} times.",
+                         f"{round(laps)} times"
+                         + (" before it stops." if ctx.get("comes_to_rest") else " as it spins."),
         })
 
     # ---- intermediate (one timeline instant, so v=ωr and a_c=ω²r close exactly) ----
@@ -407,10 +411,14 @@ def _check_understanding(ctx):
         "question": "If ω doubled while r stayed the same, what would happen to a_c?",
         "answer": "It quadruples — a_c grows with the square of ω.",
     })
-    if isinstance(v, (int, float)) and isinstance(dur, (int, float)):
+    # Arc length uses the TURNING time, not the clip length: v̄ is the mean speed WHILE turning,
+    # so s = v̄·t_turning; multiplying by the whole clip (rest included) over-counts ~3× (A1).
+    turn = ctx.get("turning_dur") or dur
+    if isinstance(v, (int, float)) and isinstance(turn, (int, float)):
         out["intermediate"].append({
-            "question": f"How far does the {obj} travel along its arc during the whole {_g(dur)} s clip?",
-            "answer": f"s = v·t ≈ {_g(v)} × {_g(dur)} ≈ {_g(v*dur)} m.",
+            "question": f"How far does the {obj} travel along its arc while it is turning "
+                        f"(about {_g(turn)} s)?",
+            "answer": f"s = v·t ≈ {_g(v)} × {_g(turn)} ≈ {_g(v*turn)} m.",
         })
 
     # These use the robust quadratic-fit endpoints (omega_initial/final, alpha) and r —
@@ -610,6 +618,11 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
         "v": _absval(summ.get("mean_v")), "a_c": summ.get("mean_ac"),
         "T": pf.get("period_s"), "f": pf.get("frequency_hz"),
         "dur": duration_s, "fit_dt": fit_dt,
+        # The TURNING window (how long the object actually spun), not the clip length. On the
+        # impulsive flick it turns for ~1.9 s of a ~5.9 s clip; any rate*time product (laps,
+        # arc distance, angle swept) must use THIS, never the clip duration (A1). Falls back to
+        # the clip length for a clip that spins throughout (active window ~= duration).
+        "turning_dur": tracking.get("active_duration_s"),
         "alpha": (aa_out or {}).get("alpha_rad_s2"),
         "omega_i": (aa_out or {}).get("omega_initial"),
         "omega_f": omega_final,
@@ -628,7 +641,13 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
         "scene_title": scene_title,
         "tracked_label": stats.get("tracked_label"),
         "rotation_direction": summ.get("rotation_direction"),
+        # NOTE: `active_duration_s` here holds the CLIP length (whole clip); the ACTIVE turning
+        # window lives in `turning_duration_s`. The name is kept for back-compat with consumers
+        # that quote it as the clip length; new callers should prefer the two explicit fields.
         "active_duration_s": (stats.get("video_info", {}) or {}).get("duration_s"),
+        "turning_duration_s": tracking.get("active_duration_s"),
+        "active_start_s": tracking.get("active_start_s"),
+        "active_end_s": tracking.get("active_end_s"),
         "variables": variables,
         "relations": relations,
         "angular_acceleration": aa_out,

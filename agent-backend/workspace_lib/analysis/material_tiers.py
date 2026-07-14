@@ -168,7 +168,19 @@ def _facts(seed, tier=None):
     # object fact — the authoritative title comes from the shared frame, not here.
     lines = [f"object: {seed.get('object_name') or seed.get('scene_title')}",
              f"rotation_direction: {seed.get('rotation_direction')}",
-             f"clip_duration_s: {seed.get('active_duration_s')}", "measured variables:"]
+             f"clip_duration_s: {seed.get('active_duration_s')}"]
+    # A1: when the object is at rest for much of the clip, the rate averages (f, v, omega) are
+    # over the TURNING window only — surface it plus a hard rule so no laps/arc/angle product
+    # ever multiplies a rate by the clip length.
+    _clip, _turn = seed.get("active_duration_s"), seed.get("turning_duration_s")
+    if isinstance(_turn, (int, float)) and isinstance(_clip, (int, float)) and _turn < 0.9 * _clip:
+        lines.append(f"turning_duration_s: {round(_turn, 2)}  (it is at rest for part of the clip "
+                     f"and actually turns for only {round(_turn, 2)} s of the {round(_clip, 2)} s clip)")
+        lines.append(f"HARD RULE (duration): f, v and omega are averaged over the {round(_turn, 2)} s "
+                     "turning window, NOT the whole clip. Any laps / distance-along-arc / angle-swept "
+                     f"/ rate*time result MUST multiply by the turning time ({round(_turn, 2)} s), "
+                     "never the clip length.")
+    lines.append("measured variables:")
     for v in seed.get("variables", []):
         val = v["value"]
         val = round(val, 3) if isinstance(val, (int, float)) else val

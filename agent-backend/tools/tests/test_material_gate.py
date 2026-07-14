@@ -211,6 +211,51 @@ def test_seed_worked_examples_arithmetic_closes():
             assert abs(got - want) <= max(0.5, 0.03 * abs(want)), (tier, e["title"], got, want)
 
 
+def _a1_stats():
+    """A rest -> flick -> coast clip: it turns for only 2.0 s of a 15.0 s clip (A1)."""
+    return {
+        "object_name": "red ring", "scene_title": "red ring on a wheel",
+        "summary": {"mean_r_m": 0.2, "mean_omega": 5.0, "mean_v": 1.0, "mean_ac": 5.0,
+                    "max_ac": 8.0, "rotation_direction": "CCW"},
+        "period_and_frequency": {"period_s": 1.2, "frequency_hz": 0.83},
+        "angular_acceleration": {"motion_type": "decelerating", "alpha_rad_s2": -3.0,
+                                 "alpha_r2": 0.99, "omega_initial": 8.0, "omega_final": 2.0,
+                                 "a_t_mean_m_s2": 0.6, "fit_window_s": 2.0},
+        "stable_phase": {"stable_mean_omega": 5.0},
+        "calibration": {"r_fit_m": 0.2, "px_per_m": 1500.0, "r_fit_px": 300.0},
+        "video_info": {"duration_s": 15.0},
+        "tracking": {"active_duration_s": 2.0, "active_start_s": 1.0, "active_end_s": 3.0},
+    }
+
+
+def test_seed_rate_products_use_turning_window():
+    """A1: laps and arc-length must multiply the rate by the TURNING window (2.0 s), never the
+    clip length (15.0 s) — f x clip over-counts the laps ~7x here."""
+    from analysis import material_seed as S
+    seed = S.build_seed(_a1_stats(), None)
+    assert abs(seed["turning_duration_s"] - 2.0) < 1e-6
+    lap = next(e for e in seed["worked_examples"]["basic"] if "lap" in e["title"].lower()
+               and "one lap" not in e["title"].lower())
+    assert " 2" in lap["substitute"] and "15" not in lap["substitute"], lap["substitute"]
+    assert round(0.83 * 2.0) == _num_in(lap["result"])            # ~2 laps, not ~12
+    arc = next(q for q in seed["check_understanding"]["intermediate"]
+               if "arc" in q["question"].lower())
+    assert "15" not in arc["answer"] and "2" in arc["answer"], arc["answer"]
+
+
+def test_wrong_duration_products_flags_clip_length():
+    """A1 gate: a rate multiplied by ~clip-length is flagged; the same rate x turning window
+    passes; and a clip that spins throughout (turning ~= clip) is never flagged."""
+    seed = {"active_duration_s": 15.0, "turning_duration_s": 2.0,
+            "variables": [{"symbol": "f", "value": 0.83}, {"symbol": "v", "value": 1.0},
+                          {"symbol": "omega", "value": 5.0}]}
+    assert G.wrong_duration_products("laps = 0.83 × 15 ≈ 12", seed)        # wrong duration
+    assert G.wrong_duration_products("s = v·t ≈ 1.0 × 15 ≈ 15 m", seed)    # wrong duration
+    assert not G.wrong_duration_products("laps = 0.83 × 2 ≈ 2", seed)      # correct duration
+    spins_throughout = dict(seed, turning_duration_s=14.6)
+    assert not G.wrong_duration_products("0.83 × 15", spins_throughout)    # clip IS the turn time
+
+
 def test_seed_consistency_catches_broken_closure():
     # A self-consistent seed passes: v = omega*r, T = 2pi/omega, and Jensen <omega^2> >= <omega>^2.
     good = {

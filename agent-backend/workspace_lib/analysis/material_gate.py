@@ -196,7 +196,47 @@ def seed_consistency_issues(seed):
         if w2_measured + max(0.05, 0.02 * om * om) < om * om:
             issues.append(f"summary: mean a_c/r={round(w2_measured, 3)} < omega^2="
                           f"{round(om * om, 3)} (Jensen ⟨ω²⟩ ≥ ⟨ω⟩² violated)")
+
+    # (d) A1: no deterministic block may multiply a rate by the clip length on a rest-then-turn
+    # clip (laps/arc must use the turning window). Guards against a seed-construction regression.
+    seed_text = " ".join(f"{e.get('substitute', '')} {e.get('result', '')}"
+                         for exs in (seed.get("worked_examples") or {}).values() for e in exs)
+    seed_text += " " + " ".join(q.get("answer", "")
+                                for qs in (seed.get("check_understanding") or {}).values() for q in qs)
+    issues += [f"seed wrong-duration: {w}" for w in wrong_duration_products(seed_text, seed)]
     return issues
+
+
+# ---- (1c) wrong-duration products (A1) ---------------------------------------
+def wrong_duration_products(text: str, seed: dict, rel_tol=0.03):
+    """A1: on a clip where the object is at rest for much of the run (turning window <<
+    clip length), any rate*time product — laps = f*t, arc = v*t, angle = omega*t — must use
+    the TURNING time, not the clip length. arithmetic_claims can't catch this (0.907*5.87
+    computes fine); the error is a modelling one (wrong duration), so flag the product where a
+    rate is multiplied by a number ~= the clip length. Returns a list of issue strings."""
+    clip, turn = seed.get("active_duration_s"), seed.get("turning_duration_s")
+    if not (isinstance(clip, (int, float)) and isinstance(turn, (int, float))):
+        return []
+    if clip <= 0 or turn >= 0.9 * clip:          # spins throughout → clip length IS the turning time
+        return []
+    b = _byk(seed)
+    rates = [abs(b[k]) for k in ("f", "v", "omega") if isinstance(b.get(k), (int, float))]
+    rates += [abs(tl["omega_rad_s"]) for tl in seed.get("timeline", [])
+              if isinstance(tl.get("omega_rad_s"), (int, float))]
+    if not rates:
+        return []
+    t = _neutralize_units(norm(text))
+    MUL = r"(?:\*|times|multiplied by)"
+    issues = []
+    for m in re.finditer(rf"({NUM}){SEP}{MUL}{SEP}({NUM})", t):
+        a, c = float(m.group(1)), float(m.group(2))
+        for x, y in ((a, c), (c, a)):            # x = the rate, y = the (wrong) clip-length time
+            if (any(abs(x - r) <= max(0.02, rel_tol * r) for r in rates)
+                    and abs(y - clip) <= max(0.05, rel_tol * clip)):
+                issues.append(f"'{m.group(0).strip()}' multiplies a rate by the {round(clip, 2)} s "
+                              f"clip length, but the object turns for only {round(turn, 2)} s "
+                              f"(use the turning time)")
+    return list(dict.fromkeys(issues))
 
 
 # ---- (2) number grounding ----------------------------------------------------
@@ -226,6 +266,14 @@ def allowed_values(seed: dict):
         add(ms.get("t_s"))
         add(ms.get("angle_deg"))
     add(seed.get("active_duration_s")); add(seed.get("measured_radius_m"))
+    add(seed.get("turning_duration_s"))          # the active turning window (A1)
+    # sanction the CORRECT rate*turning products (laps, arc length) so they read as grounded
+    turn = seed.get("turning_duration_s")
+    if isinstance(turn, (int, float)):
+        b0 = _byk(seed)
+        for k in ("f", "v", "omega"):
+            if isinstance(b0.get(k), (int, float)):
+                add(abs(b0[k]) * turn)
     cn = seed.get("calibration_note") or {}
     add(cn.get("px_per_m")); add(cn.get("reference_physical_size_m"))
     # simple derived: 2pi/omega, 1/f, alpha*r, omega^2*r, omega*r per variable pairs
@@ -535,6 +583,7 @@ def tier_gate(obj, seed, frame=None):
                for c in claims if not c["ok"]]
     issues += [f"ungrounded number {u['value']} in {u['context']}"
                for u in ungrounded_numbers(text, allowed_values(seed))]
+    issues += [f"wrong-duration: {w}" for w in wrong_duration_products(text, seed)]
     issues += tier_compliance(tier, text, unreliable=unreliable)
     issues += motion_faithfulness(seed, text)
     issues += [f"vocab[{v['kind']}]: '{v['word']}' in {v['context']}" for v in vocab_issues(text)]

@@ -150,7 +150,9 @@ def build(stats, kinematics_csv=None):
         "scene_title": stats.get("scene_title"),
         "tracked_label": label,
         "rotation_direction": summ.get("rotation_direction"),
+        # active_duration_s = CLIP length; turning_duration_s = the active turning window (A1).
         "active_duration_s": (stats.get("video_info", {}) or {}).get("duration_s"),
+        "turning_duration_s": (stats.get("tracking", {}) or {}).get("active_duration_s"),
         "variables": variables,
         "relations": relations,
         "angular_acceleration": aa_out,
