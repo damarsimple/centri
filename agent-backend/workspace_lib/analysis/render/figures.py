@@ -243,6 +243,11 @@ def fig_annotated_image(stats, scene):
         # ω — curved tangential arrow along the bottom arc, direction from the sign of ω (matplotlib
         # renders the real Unicode glyph; the cv2 video overlay in annotate.py cannot — see its note).
         omega_val, _oca = canonical_omega(stats)
+        # ω and a_c are clip AVERAGES on a (de)accelerating clip, pinned here to one frozen frame;
+        # tag them "(avg)" so the still image cannot silently contradict the honesty box (on a clip
+        # where ω ran 0->9.8, an unqualified "ω 5.79" reads as an instantaneous value). r is a
+        # static geometry value, never averaged, so it carries no tag. (C3)
+        avg = " (avg)" if _oca else ""
         if omega_val is not None:
             ccw = omega_val >= 0
             ax.annotate("", xy=(cx + (0.55 if ccw else -0.55) * r_fit_px, cy + r_fit_px),
@@ -250,14 +255,15 @@ def fig_annotated_image(stats, scene):
                         arrowprops=dict(arrowstyle="-|>", color=_ANNOT_YELLOW, lw=3,
                                         connectionstyle=f"arc3,rad={0.32 if ccw else -0.32}"), zorder=5)
             _var_chip(ax, cx - 0.35 * r_fit_px, cy + r_fit_px + 0.14 * r_fit_px, "ω",
-                      _fmt(abs(omega_val), 2, "rad/s"), sym_color="#111")
+                      _fmt(abs(omega_val), 2, "rad/s") + avg, sym_color="#111")
         # a_c — inward (centripetal) arrow from a point on the upper-right of the orbit pointing
         # toward the centre (stopped short of the centre marker so it doesn't crowd the r line).
+        # Chip symbol is a_c (not a bare "a"), which is unambiguous where advanced also uses a_t (A8).
         if a_c is not None:
             sx, sy = cx + 0.64 * r_fit_px, cy - 0.64 * r_fit_px
             ax.annotate("", xy=(cx + 0.40 * r_fit_px, cy - 0.40 * r_fit_px), xytext=(sx, sy),
                         arrowprops=dict(arrowstyle="-|>", color=_ANNOT_YELLOW, lw=3), zorder=5)
-            _var_chip(ax, sx - 0.02 * r_fit_px, sy - 0.10 * r_fit_px, "a", _fmt(a_c, 2, "m/s²"))
+            _var_chip(ax, sx - 0.02 * r_fit_px, sy - 0.10 * r_fit_px, "$a_c$", _fmt(a_c, 2, "m/s²") + avg)
     ax.set_title(_title(scene, "Scene geometry"))
     ax.axis("off")
     fig.tight_layout()
@@ -322,10 +328,12 @@ def fig_annotated_image_basic(stats, scene):
     if None not in (cx, cy) and r_fit_px:
         ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color="#00E676", lw=2.5))
         ax.plot([cx], [cy], "+", color="#00E676", ms=14, mew=2)
-        # radius as a labelled arrow from the centre outward (plain words, no symbol)
-        ax.annotate("", xy=(cx + r_fit_px, cy), xytext=(cx, cy),
+        # radius as a labelled arrow from the centre outward (plain words, no symbol). Drawn to
+        # the LEFT to match the main annotated frame — pointing right lands it on the calibration
+        # ruler that often sits off to the side, drawing the eye to a prop nothing mentions (C5).
+        ax.annotate("", xy=(cx - r_fit_px, cy), xytext=(cx, cy),
                     arrowprops=dict(arrowstyle="->", color="#00E676", lw=2.2))
-        ax.text(cx + r_fit_px / 2, cy, f"radius {_fmt(cal.get('r_fit_m'), 3, 'm')}",
+        ax.text(cx - r_fit_px / 2, cy, f"radius {_fmt(cal.get('r_fit_m'), 3, 'm')}",
                 color="white", fontsize=12, va="bottom", ha="center",
                 bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
     ax.set_title(_title(scene, f"The {obj} moves in a circle"))
@@ -577,14 +585,17 @@ def _annotation_manifest(stats):
     if r_m is not None:
         img.append({"label": "radius", "symbol": "r", "value": _fmt(r_m, 3, "m"),
                     "target": "arrow from the centre to the object"})
+    # ω/a_c are clip averages on a (de)accelerating clip — tag "(avg)" to match the chip (C3),
+    # so the prose that quotes these EXACT values inherits the qualifier too.
+    avg = " (avg)" if _oca else ""
     if omega_val is not None:
         img.append({"label": "angular velocity", "symbol": "ω",
-                    "value": _fmt(abs(omega_val), 2, "rad/s"),
+                    "value": _fmt(abs(omega_val), 2, "rad/s") + avg,
                     "target": "curved tangential arrow on the orbit showing the spin direction"})
     a_c = (stats.get("summary") or {}).get("mean_ac")
     if a_c is not None:
-        img.append({"label": "centripetal acceleration", "symbol": "a",
-                    "value": _fmt(a_c, 2, "m/s²"),
+        img.append({"label": "centripetal acceleration", "symbol": "a_c",
+                    "value": _fmt(a_c, 2, "m/s²") + avg,
                     "target": "arrow pointing inward toward the centre"})
     if img:
         man["annotated_image.png"] = {
