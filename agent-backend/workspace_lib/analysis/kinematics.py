@@ -209,7 +209,12 @@ def compute(inp: Inputs, cal: Calibration, x_full, y_full) -> Kinematics:
         common.set_validation_flag("no_active_rotation")
         omega_active = omega[~np.isnan(omega)]
 
-    rotation_direction = "CCW" if float(np.nanmedian(omega_active)) > 0 else "CW"
+    # theta = arctan2(dy, dx) is measured in IMAGE/pixel coordinates, where the row index dy
+    # grows DOWNWARD. So an increasing theta (omega > 0) traces right -> bottom -> left -> top on
+    # screen — i.e. the object turns CLOCKWISE as the viewer sees it. Convert to the viewer frame
+    # HERE (the one sign flip) so every downstream string — the PDF header, the material prose,
+    # the video orbit colour — matches what plays on screen (was inverted: called a CW clip "CCW").
+    rotation_direction = "CW" if float(np.nanmedian(omega_active)) > 0 else "CCW"
 
     v_m_s = np.abs(omega) * cal.r_fit_m
     spike = 5.0 * float(np.nanmedian(np.abs(omega_active)))
