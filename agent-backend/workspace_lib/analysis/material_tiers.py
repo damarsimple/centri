@@ -100,14 +100,16 @@ TIERS = {
                      "in words that a bigger circle or a faster sweep needs a stronger inward "
                      "pull; do NOT state a centripetal-acceleration or speed NUMBER there.",
         "figures": "Three pictures: (1) a frame from the video showing the object on its "
-                   "circular path with the radius marked from the centre; (2) a picture of the "
-                   "same path with COLOURED DOTS marking where the object is after 1, 2, 3... "
-                   "seconds, each labelled with how far round it has swept (e.g. '1 s · 90° · a "
-                   "quarter turn') — narrate this as the angle growing steadily with time; and "
-                   "(3) a plot of the traced path showing every point falls on one circle. "
-                   "There is NO data table and NO graph of speed or acceleration over time for "
-                   "this reader — do not mention any table or any 'graph/plot of speed/"
-                   "acceleration over time'.",
+                   "circular path with the radius marked from the centre; (2) a simple graph of "
+                   "HOW MANY TURNS the object has completed as time passes — a line that climbs "
+                   "from zero, whose SHAPE tells the story (a straight line = a steady spin, a "
+                   "line that bends flatter = slowing down, a line that steepens = speeding up); "
+                   "narrate what THIS clip's line does (see the motion type). Do NOT describe "
+                   "dots placed on the circle or an angle that 'grows steadily' unless the motion "
+                   "is genuinely uniform. And (3) a plot of the traced path showing every point "
+                   "falls on one circle. There is NO data table and NO graph of speed or "
+                   "acceleration over time for this reader — do not mention any table or any "
+                   "'graph/plot of speed/acceleration over time'.",
         "test": "Could a learner who has never seen the equations follow every sentence, "
                 "holding one idea at a time?",
     },
@@ -212,13 +214,26 @@ def _facts(seed, tier=None):
     if cal:
         lines.append(f"calibration note: scale from a reference of "
                      f"{cal.get('reference_physical_size_m')} m; {cal.get('caveat')}")
-    # Angle-at-time milestones are the BASIC tier's ground truth ("after 1.0 s it has
-    # swept about 90°, a quarter turn"). Only the basic passage narrates them (and the
-    # WS-3 angle figure sits beside it); higher tiers work from the timeline instead.
+    # Angle-at-time milestones are the BASIC tier's ground truth ("after ~0.2 s it has swept a
+    # quarter turn, 90°"). Only the basic passage narrates them, beside the "turns completed vs
+    # time" graph. The framing is motion-aware so a decelerating clip is NOT narrated as steady:
+    # the milestones are the FAST early quarter-turns, while the graph's shape shows the whole
+    # motion slowing/speeding/holding steady (C5/A4).
     if tier == "basic" and seed.get("angle_milestones"):
-        lines.append("angle-at-time milestones (for the basic 'angle grows with time' story):")
+        mt_b = (aa or {}).get("motion_type", "uniform")
+        shape = {
+            "decelerating": "the turns-completed graph beside the passage BENDS FLATTER over "
+                            "time — narrate that it spins fast at first and then gradually slows "
+                            "down; do NOT call the turning 'steady' or 'even'",
+            "accelerating": "the turns-completed graph beside the passage STEEPENS over time — "
+                            "narrate that it starts slower and speeds up",
+        }.get(mt_b, "the turns-completed graph is a straight line — narrate a steady spin, about "
+                    "the same amount of turning each second")
+        lines.append(f"how the turning unfolds over time: {shape}.")
+        lines.append("quarter-turn crossings (these anchor 'a quarter turn = 90 degrees'; they "
+                     "fall in the fast early part of the spin, not evenly across the whole clip):")
         for ms in seed["angle_milestones"]:
-            lines.append(f"  - after {ms['t_s']} s the object has swept about "
+            lines.append(f"  - about {ms['t_s']} s after it starts, it has swept "
                          f"{ms['angle_deg']} degrees ({ms['turn']})")
     return "\n".join(lines)
 

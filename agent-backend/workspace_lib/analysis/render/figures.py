@@ -304,7 +304,7 @@ def fig_annotated_image_basic(stats, scene):
         # radius as a labelled arrow from the centre outward (plain words, no symbol)
         ax.annotate("", xy=(cx + r_fit_px, cy), xytext=(cx, cy),
                     arrowprops=dict(arrowstyle="->", color="#00E676", lw=2.2))
-        ax.text(cx + r_fit_px / 2, cy, f"radius {_fmt(cal.get('r_fit_m'), 2, 'm')}",
+        ax.text(cx + r_fit_px / 2, cy, f"radius {_fmt(cal.get('r_fit_m'), 3, 'm')}",
                 color="white", fontsize=12, va="bottom", ha="center",
                 bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
     ax.set_title(_title(scene, f"The {obj} moves in a circle"))
@@ -341,86 +341,74 @@ def fig_trajectory_basic(stats, cols, scene):
     plt.close(fig)
 
 
-# CVD-safe categorical dots for the 90/180/270/360-degree milestones, validated with the
-# dataviz palette validator (light surface: all checks pass, worst adjacent ΔE 53+). They
-# echo the tier accent colours (blue/orange/purple/green) for visual coherence.
-_MILESTONE_COLOURS = ["#1565C0", "#EF6C00", "#8E24AA", "#2E7D32"]
+def _nice_step(raw):
+    """Round a raw axis step up to a friendly value, so time markers land on 0.25/0.5/1 s
+    boundaries rather than 0.32 s."""
+    for s in (0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 5.0):
+        if raw <= s:
+            return s
+    return 10.0
 
 
 def fig_angle_points_basic(stats, cols, scene, unreliable=False):
-    """Basic-tier "the angle grows with time" picture: the traced circular path (faint) with
-    a coloured, directly-labelled dot at each 90/180/270/360-degree milestone ("1.0 s · 90°
-    · a quarter turn"), a start marker and a sweep-direction arc. Reuses the basic-trajectory
-    coordinate math and imports ``angle_milestones`` from ``..material_seed`` so the dots and
-    the numbers the prose narrates come from ONE computation and cannot disagree.
+    """Basic-tier "how the turning changes over time" picture: TURNS COMPLETED vs time.
 
-    On an oblique clip the seed already drops the quarter-turn milestones (projection-
-    distorted), so only the robust 180°/360° dots are drawn."""
-    from ..material_seed import angle_milestones
-    cal = stats["calibration"]
-    cx, cy = cal.get("cx_px"), cal.get("cy_px")
-    ppm = cal.get("px_per_m") or 1.0
-    r_fit_m = cal.get("r_fit_m")
-    x_px, y_px, t, active = (cols.get("x_px"), cols.get("y_px"),
-                             cols.get("time_s"), cols.get("active"))
-    m = np.isfinite(x_px) & np.isfinite(y_px) & np.isfinite(t)
+    The cumulative swept angle (in whole turns) climbs from zero, and the SHAPE of that line
+    is the story a single frozen frame cannot tell — a straight line is a steady spin, a line
+    that bends flatter is slowing down, a line that steepens is speeding up (C5). This replaces
+    the earlier spatial quarter-turn milestone dots, which could only ever show the FAST first
+    turn (on the red-phone flick all four quarter-turns land in the first ~0.8 s, reading as
+    steady) and so could not meet the basic objective "see that it is gradually slowing down".
+    Uses the cumulative unwrapped angle from kinematics.csv, so the numbers cannot disagree
+    with the rest of the material; ``unreliable`` (oblique capture) needs no special handling
+    here because the cumulative angle is robust to the per-instant projection ripple."""
+    t = np.asarray(cols.get("time_s"), float)
+    th = np.asarray(cols.get("theta_rad"), float)
+    active = cols.get("active")
+    m = np.isfinite(t) & np.isfinite(th)
     if active is not None:
-        m = m & (active >= 0.5)
-    xm, ym, tm = (x_px[m] - cx) / ppm, (y_px[m] - cy) / ppm, t[m]
-    t0 = tm[0] if len(tm) else 0.0
-    milestones = angle_milestones(DATA / "kinematics.csv", unreliable=unreliable)
+        m = m & (np.asarray(active, float) >= 0.5)
+    t, th = t[m], th[m]
+    if len(t) < 5:                    # too little motion to draw a curve — report skips a missing file
+        return
+    ts = t - t[0]
+    # "Turns completed" is inherently cumulative and monotone (you cannot un-complete a turn);
+    # running-max over the |swept angle| erases tiny back-and-forth jitter without inventing motion.
+    turns = np.maximum.accumulate(np.abs(th - th[0])) / (2 * np.pi)
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.plot(xm, ym, color="#B0BEC5", lw=1.0, alpha=0.75, zorder=1)  # faint full path
-    if r_fit_m:
-        ax.add_patch(plt.Circle((0, 0), r_fit_m, fill=False, ls="--",
-                                 color="#90A4AE", lw=1.2, zorder=0))
-    ax.plot([0], [0], "+", color="#455A64", ms=12, mew=2, zorder=2)
-    if len(xm):
-        ax.scatter([xm[0]], [ym[0]], s=70, facecolor="white",
-                   edgecolor="#455A64", lw=1.8, zorder=4)
-        ax.annotate("start", (xm[0], ym[0]), textcoords="offset points",
-                    xytext=(6, -12), fontsize=9, color="#455A64")
-    for i, ms in enumerate(milestones):
-        if not len(tm):
-            break
-        j = int(np.argmin(np.abs((tm - t0) - ms["t_s"])))
-        c = _MILESTONE_COLOURS[i % len(_MILESTONE_COLOURS)]
-        ax.scatter([xm[j]], [ym[j]], s=120, color=c, edgecolor="white", lw=1.8, zorder=5)
-        # Steer each label toward the centre so boxes stay inside the frame.
-        dx, dy = (-11 if xm[j] > 0 else 11), (-11 if ym[j] > 0 else 11)
-        ax.annotate(f"{ms['t_s']:.1f} s · {ms['angle_deg']}° · {ms['turn']}",
-                    (xm[j], ym[j]), textcoords="offset points", xytext=(dx, dy),
-                    ha="right" if dx < 0 else "left",
-                    va="top" if dy < 0 else "bottom",
-                    fontsize=9, color=c, fontweight="bold", zorder=6,
-                    bbox=dict(fc="white", ec=c, alpha=0.9,
-                              boxstyle="round,pad=0.25"))
-        if i == 0:  # arc arrow from start toward the first milestone = sweep direction
-            ax.annotate("", xy=(xm[j], ym[j]), xytext=(xm[0], ym[0]),
-                        zorder=3, arrowprops=dict(
-                            arrowstyle="-|>", color="#607D8B", lw=1.6,
-                            connectionstyle="arc3,rad=0.3", shrinkA=8, shrinkB=10))
-    # Degrees-per-second: turn the angular velocity into the plain "how fast the angle grows"
-    # number the basic tier reasons with. Derived from canonical_omega (the ONE angular velocity
-    # every surface quotes) so it can never disagree with the milestones above or the prose.
-    # Only drawn for uniform motion — for a (de)accelerating clip the angle does NOT grow at a
-    # constant rate, so a single "°/second" would contradict the evenly-spaced milestone dots.
-    omega_val, oca = canonical_omega(stats)
-    if omega_val is not None and not oca:
-        dps = omega_val * 180.0 / np.pi
-        ax.text(0.5, 0.015, f"the angle grows about {dps:.0f}° every second",
-                transform=ax.transAxes, ha="center", va="bottom", fontsize=9.5,
-                color="#37474F", fontweight="bold",
+    mt = (stats.get("angular_acceleration") or {}).get("motion_type", "uniform")
+    fig, ax = plt.subplots(figsize=(6.4, 4.6))
+    ax.plot(ts, turns, color="#1565C0", lw=2.6, zorder=2)
+    # A handful of evenly-time-spaced markers (~6 across the window) so the reader can compare
+    # how many turns accrue in equal slices of time — the rise per slice shrinks as it slows.
+    span = float(ts[-1]) if ts[-1] > 0 else 1.0
+    step = _nice_step(span / 6.0)
+    for mk in np.arange(0.0, span + 1e-9, step):
+        j = int(np.argmin(np.abs(ts - mk)))
+        ax.scatter([ts[j]], [turns[j]], s=66, color="#EF6C00",
+                   edgecolor="white", lw=1.4, zorder=4)
+    ax.scatter([ts[0]], [turns[0]], s=66, color="#EF6C00", edgecolor="white", lw=1.4, zorder=4)
+    ymax = float(turns[-1]) or 1.0
+    ax.set_xlim(-0.02 * span, 1.04 * span)
+    ax.set_ylim(-0.17 * ymax, 1.06 * ymax)  # reserve a clean band below the curve for the note
+    ax.set_yticks([y for y in ax.get_yticks() if y >= -1e-9])  # no negative "turns completed" ticks
+    ax.set_xlabel("time since it started turning (s)")
+    ax.set_ylabel("turns completed")
+    ax.grid(alpha=0.3, zorder=0)
+    # Motion-aware one-line reading, printed ON the figure so the picture and the caption can
+    # never disagree (A4: the old caption asserted "grows steadily with time" on a decel clip).
+    note = {
+        "decelerating": "the line climbs steeply, then bends flatter — fewer turns each "
+                        "second, so it is slowing down",
+        "accelerating": "the line climbs ever more steeply — more turns each second, so it "
+                        "is speeding up",
+        "uniform": "the line is straight — the same number of turns each second, a steady spin",
+    }.get(mt, "")
+    if note:
+        ax.text(0.5, 0.03, note, transform=ax.transAxes, ha="center", va="bottom",
+                fontsize=9.5, color="#37474F", fontweight="bold", wrap=True,
                 bbox=dict(fc="white", ec="#90A4AE", alpha=0.92, boxstyle="round,pad=0.3"))
-    lim = 1.45 * (r_fit_m or (np.nanmax(np.abs(np.concatenate([xm, ym]))) if len(xm) else 1))
-    ax.set_xlim(-lim, lim)
-    ax.set_ylim(-lim, lim)
-    ax.set_aspect("equal", "box")
-    ax.set_xlabel("distance across (m)")
-    ax.set_ylabel("distance up/down (m)")
-    ax.set_title(_title(scene, "The angle grows with time"))
-    ax.invert_yaxis()
+    ax.set_title(_title(scene, "How many turns as time passes"))
     fig.tight_layout()
     fig.savefig(PLOTS / "angle_points_basic.png")
     plt.close(fig)
@@ -591,15 +579,20 @@ def _annotation_manifest(stats):
             "annotations": [{"label": "how far out it sits", "value": _fmt(r_m, 3, "m"),
                              "target": "arrow from the centre outward"}]}
 
-    # Angle milestones live in the seed (not stats); include them if the seed is present.
+    # The basic "turns completed vs time" curve. Described qualitatively (no numbers to quote)
+    # so its narration is driven by the grounded motion type, and by the SHAPE the render draws:
+    # bending flatter = slowing, steepening = speeding up, straight = steady (C5/A4). Gated on a
+    # turning window being present (angle milestones exist), matching when the figure is drawn.
     try:
         seed = json.loads((DATA / "material_seed.json").read_text())
-        ms = seed.get("angle_milestones") or []
-        if ms:
+        if seed.get("angle_milestones"):
+            shape = {"decelerating": "the line bends flatter over time, so it is slowing down",
+                     "accelerating": "the line steepens over time, so it is speeding up"}.get(
+                         (seed.get("angular_acceleration") or {}).get("motion_type"),
+                         "a straight line, so it turns at a steady rate")
             man["angle_points_basic.png"] = {
-                "shows": "the path with a coloured dot at each 90-degree milestone, labelled by time and turn",
-                "annotations": [{"label": f"{m.get('t_s')} s", "value": f"{m.get('angle_deg')}°",
-                                 "note": m.get("turn")} for m in ms]}
+                "shows": "a graph of how many turns the object has completed as time passes; "
+                         + shape}
     except Exception:  # noqa: BLE001 — the manifest is best-effort provenance, never fatal
         pass
 

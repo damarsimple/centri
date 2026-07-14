@@ -61,9 +61,10 @@ FIG_META = {
                                         "circular path, with the radius marked from the centre."),
     "trajectory_basic.png": (0.55, "The path the object traced — every tracked point falls on "
                                    "one circle."),
-    "angle_points_basic.png": (0.6, "Where the object is after each second: coloured dots mark "
-                                    "how far round it has swept (90° is a quarter turn, 180° "
-                                    "half a turn), so the angle grows steadily with time."),
+    "angle_points_basic.png": (0.62, "How many turns the object has completed as time passes. "
+                                     "The shape of the line tells the story: a straight line is a "
+                                     "steady spin, a line that bends flatter is slowing down, one "
+                                     "that steepens is speeding up."),
     "trajectory.png":  (0.55, "The tracked path in video space with the fitted circular orbit."),
     "omega_t.png":     (0.78, "Angular velocity $\\omega$ vs.\\ time, phase regions shaded."),
     "ac_t.png":        (0.78, "Centripetal acceleration $a_c$ vs.\\ time."),
