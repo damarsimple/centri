@@ -492,21 +492,20 @@ def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
 
 
 def fig_annotated_table(stats, scene):
-    s, pf = stats["summary"], stats["period_and_frequency"]
-    cal, st = stats["calibration"], stats["stable_phase"]
+    # Mirror the student-facing typeset Table 1: the same six quantities, clip-average labelled
+    # to match the honesty box, no internal-only rows (std radius, max/stable a_c, the mean-vs-
+    # fitted radius pair) and unit "m/s²" not "m/s^2" (C4 — this artifact used to leak pipeline
+    # vocabulary and a "Stable centripetal accel." 8.55 the student's table never shows).
+    s, pf, cal = stats["summary"], stats["period_and_frequency"], stats["calibration"]
     omega_val, omega_is_clip_avg = canonical_omega(stats)
+    avg = " (clip avg)" if omega_is_clip_avg else ""
     rows = [
-        ("Mean radius", _fmt(s.get("mean_r_m"), 3), "m"),
-        ("Std radius", _fmt(s.get("std_r_m"), 3), "m"),
-        ("Angular velocity (clip avg)" if omega_is_clip_avg else "Stable angular velocity",
-         _fmt(omega_val, 2), "rad/s"),
-        ("Mean centripetal accel.", _fmt(s.get("mean_ac"), 2), "m/s^2"),
-        ("Max centripetal accel.", _fmt(s.get("max_ac"), 2), "m/s^2"),
-        ("Stable centripetal accel.", _fmt(st.get("stable_mean_ac"), 2), "m/s^2"),
-        ("Mean tangential speed", _fmt(s.get("mean_v"), 2), "m/s"),
+        ("Radius", _fmt(cal.get("r_fit_m") or s.get("mean_r_m"), 3), "m"),
+        ("Angular velocity" + avg, _fmt(omega_val, 2), "rad/s"),
+        ("Centripetal acceleration" + avg, _fmt(s.get("mean_ac"), 2), "m/s²"),
+        ("Tangential speed", _fmt(s.get("mean_v"), 2), "m/s"),
         ("Period", _fmt(pf.get("period_s"), 2), "s"),
         ("Frequency", _fmt(pf.get("frequency_hz"), 2), "Hz"),
-        ("Fitted radius", _fmt(cal.get("r_fit_m"), 3), "m"),
     ]
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.axis("off")
