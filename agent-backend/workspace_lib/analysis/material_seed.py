@@ -416,6 +416,18 @@ def _check_understanding(ctx):
                         f"number mean?",
             "answer": f"One complete lap takes about {_g(T)} s.",
         })
+    # THE circular-motion misconception (Part B #5): learners expect a released object to fly
+    # radially OUTWARD ("centrifugal throw"). It actually continues along the tangent — the
+    # direction it was already moving — the inward pull merely stops. A conceptual item, no
+    # numbers, so it fits the basic tier and confronts the misconception head-on.
+    out["basic"].append({
+        "question": f"Suppose the {obj} suddenly came loose while spinning. Which way would it "
+                    f"head off — straight outward from the centre, or straight ahead in the "
+                    f"direction it was already moving?",
+        "answer": f"Straight ahead, along the direction it was already moving (the tangent). "
+                  f"Nothing flings it outward — the inward pull simply stops, so it carries on "
+                  f"in a straight line.",
+    })
 
     if isinstance(f, (int, float)) and isinstance(T, (int, float)):
         out["intermediate"].append({

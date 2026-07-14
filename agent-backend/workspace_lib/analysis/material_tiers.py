@@ -165,6 +165,15 @@ TIERS = {
 
 
 # ----------------------------------------------------------------------------- prompt
+def _sig(x, n=3):
+    """Round x to n significant figures. Unlike round(x, 3) (3 DECIMALS), this caps a value like
+    1.102 at 1.10 and 5.686 at 5.69 while keeping 0.148 as 0.148 — the readability rounding the
+    basic tier wants (A8) without dropping the radius below the 0.148 the figures label."""
+    if not isinstance(x, (int, float)) or x == 0:
+        return x
+    return round(x, n - 1 - math.floor(math.log10(abs(x))))
+
+
 def _facts(seed, tier=None):
     # Use the plain object name (never the "<X> on <X>" composite scene title) for the
     # object fact — the authoritative title comes from the shared frame, not here.
@@ -185,7 +194,10 @@ def _facts(seed, tier=None):
     lines.append("measured variables:")
     for v in seed.get("variables", []):
         val = v["value"]
-        val = round(val, 3) if isinstance(val, (int, float)) else val
+        # Basic caps values at 3 significant figures for readability (1.102 -> 1.10); higher
+        # tiers keep 3 decimals for the arithmetic-closure worked examples (A8).
+        if isinstance(val, (int, float)):
+            val = _sig(val, 3) if tier == "basic" else round(val, 3)
         lines.append(f"  - {v['name']} ({v['symbol']}) = {val} {v['unit']}  [{v['definition']}]")
     if seed.get("relations"):
         lines.append("formula relations (ground truth):")
