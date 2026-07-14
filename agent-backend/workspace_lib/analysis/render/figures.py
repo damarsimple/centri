@@ -184,41 +184,61 @@ def _first_frame():
     return None
 
 
+_ANNOT_YELLOW = "#FFD600"       # value/vector colour (matches the P-MAGIC app annotation)
+_ANNOT_GREEN = "#00E676"        # fitted-orbit colour
+
+
+def _var_chip(ax, x, y, symbol, value, sym_color="#C62828"):
+    """One variable annotation in the P-MAGIC style: the SYMBOL in a white rounded chip, then its
+    VALUE+unit in a yellow rounded chip just to the right. (r, a → red symbol; ω → dark.)"""
+    ax.text(x, y, symbol, color=sym_color, fontsize=13, fontweight="bold", va="center", ha="center",
+            bbox=dict(boxstyle="round,pad=0.32", fc="white", ec="#222", lw=1.3), zorder=7)
+    ax.annotate(value, (x, y), textcoords="offset points", xytext=(22, 0),
+                color="black", fontsize=11, fontweight="bold", va="center", ha="left",
+                bbox=dict(boxstyle="round,pad=0.32", fc=_ANNOT_YELLOW, ec="#222", lw=1.0), zorder=7)
+
+
 def fig_annotated_image(stats, scene):
-    """First cropped frame with the fitted orbit + centre overlaid (cropped space)."""
+    """First cropped frame with the fitted orbit + the three centripetal-motion variables
+    annotated in the P-MAGIC app style (green orbit; yellow radius line, tangential ω arrow, and
+    inward centripetal-acceleration arrow; each with a symbol chip + a yellow value chip)."""
     cal = stats["calibration"]
     cx, cy = cal.get("cx_px"), cal.get("cy_px")
     r_fit_px = cal.get("r_fit_px")
+    r_m = cal.get("r_fit_m")
+    a_c = (stats.get("summary") or {}).get("mean_ac")
     frame = _first_frame()
     fig, ax = plt.subplots(figsize=(6, 6))
     if frame is not None:
         ax.imshow(frame)
     if None not in (cx, cy) and r_fit_px:
-        ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color="#00E676", lw=2.5))
-        ax.plot([cx], [cy], "+", color="#00E676", ms=14, mew=2)
-        ax.annotate(f"r = {_fmt(cal.get('r_fit_m'), 3, 'm')}",
-                    (cx + r_fit_px, cy), color="#00E676", fontsize=11,
-                    va="center", ha="left",
-                    bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
-        # Angular velocity as a tangential arrow at the top of the orbit, labelled with the REAL
-        # ω glyph — matplotlib renders Unicode; the cv2 video overlay in annotate.py cannot (see
-        # its comment). Direction from the sign of ω (rotation_direction is not in stats).
+        ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color=_ANNOT_GREEN, lw=3))
+        ax.plot([cx], [cy], "+", color=_ANNOT_GREEN, ms=14, mew=2.5)
+        # r — yellow radius line from the centre out to the left edge of the orbit.
+        ax.annotate("", xy=(cx - r_fit_px, cy), xytext=(cx, cy),
+                    arrowprops=dict(arrowstyle="-", color=_ANNOT_YELLOW, lw=3), zorder=5)
+        if r_m is not None:
+            _var_chip(ax, cx - 0.66 * r_fit_px, cy + 0.05 * r_fit_px, "r", _fmt(r_m, 3, "m"))
+        # ω — curved tangential arrow along the bottom arc, direction from the sign of ω (matplotlib
+        # renders the real Unicode glyph; the cv2 video overlay in annotate.py cannot — see its note).
         omega_val, _oca = canonical_omega(stats)
         if omega_val is not None:
             ccw = omega_val >= 0
-            top = (cx, cy - r_fit_px)  # image y grows downward → this is the top of the circle
-            tipx = cx - 0.45 * r_fit_px if ccw else cx + 0.45 * r_fit_px
-            ax.annotate("", xy=(tipx, cy - r_fit_px), xytext=top,
-                        arrowprops=dict(arrowstyle="-|>", color="#FB8C00", lw=2.4,
-                                        connectionstyle=f"arc3,rad={-0.3 if ccw else 0.3}"))
-            ax.annotate(f"ω = {_fmt(abs(omega_val), 2, 'rad/s')}", top,
-                        textcoords="offset points", xytext=(0, 10),
-                        color="#FB8C00", fontsize=11, va="bottom", ha="center",
-                        bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
+            ax.annotate("", xy=(cx + (0.55 if ccw else -0.55) * r_fit_px, cy + r_fit_px),
+                        xytext=(cx + (-0.55 if ccw else 0.55) * r_fit_px, cy + r_fit_px),
+                        arrowprops=dict(arrowstyle="-|>", color=_ANNOT_YELLOW, lw=3,
+                                        connectionstyle=f"arc3,rad={0.32 if ccw else -0.32}"), zorder=5)
+            _var_chip(ax, cx - 0.35 * r_fit_px, cy + r_fit_px + 0.14 * r_fit_px, "ω",
+                      _fmt(abs(omega_val), 2, "rad/s"), sym_color="#111")
+        # a_c — inward (centripetal) arrow from a point on the upper-right of the orbit pointing
+        # toward the centre (stopped short of the centre marker so it doesn't crowd the r line).
+        if a_c is not None:
+            sx, sy = cx + 0.64 * r_fit_px, cy - 0.64 * r_fit_px
+            ax.annotate("", xy=(cx + 0.40 * r_fit_px, cy - 0.40 * r_fit_px), xytext=(sx, sy),
+                        arrowprops=dict(arrowstyle="-|>", color=_ANNOT_YELLOW, lw=3), zorder=5)
+            _var_chip(ax, sx - 0.02 * r_fit_px, sy - 0.10 * r_fit_px, "a", _fmt(a_c, 2, "m/s²"))
     ax.set_title(_title(scene, "Scene geometry"))
-    ax.set_xlabel("x (px, cropped)")
-    ax.set_ylabel("y (px, cropped)")
-    ax.grid(False)
+    ax.axis("off")
     fig.tight_layout()
     fig.savefig(PLOTS / "annotated_image.png")
     plt.close(fig)
@@ -555,9 +575,15 @@ def _annotation_manifest(stats):
         img.append({"label": "angular velocity", "symbol": "ω",
                     "value": _fmt(abs(omega_val), 2, "rad/s"),
                     "target": "curved tangential arrow on the orbit showing the spin direction"})
+    a_c = (stats.get("summary") or {}).get("mean_ac")
+    if a_c is not None:
+        img.append({"label": "centripetal acceleration", "symbol": "a",
+                    "value": _fmt(a_c, 2, "m/s²"),
+                    "target": "arrow pointing inward toward the centre"})
     if img:
         man["annotated_image.png"] = {
-            "shows": "photo of the object with the fitted circle, radius and angular velocity marked",
+            "shows": "photo of the object with the fitted circle, and the radius, angular velocity "
+                     "and centripetal acceleration marked",
             "annotations": img}
     if r_m is not None:
         man["annotated_image_basic.png"] = {
