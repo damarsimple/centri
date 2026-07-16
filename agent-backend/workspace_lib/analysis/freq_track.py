@@ -35,6 +35,34 @@ import cv2
 import numpy as np
 
 
+def _peak_hz_parabolic(sp: np.ndarray, freqs: np.ndarray, band: np.ndarray) -> float:
+    """Sub-bin frequency of the spectral peak inside ``band``.
+
+    Taking the raw ``argmax`` bin quantises the recovered frequency to the FFT bin
+    spacing Δf = fps/window (≈0.4 Hz for a 2.5 s window). On the blade-pass line that
+    surfaces as a non-physical STAIRCASE in ω(t): steps of 2π·Δf/n_blades (≈0.5 rad/s
+    for a 5-blade fan), which reads as the fan holding constant speed then jumping — a
+    real rotor never does that. A 3-point parabolic fit around the peak recovers the
+    true sub-bin location, so a smoothly-varying rotor comes out smooth. Falls back to
+    the bin centre at a band edge or a degenerate (flat/reversed) parabola.
+    """
+    band_idx = np.flatnonzero(band)
+    if band_idx.size == 0:
+        return 0.0
+    k = int(band_idx[np.argmax(sp[band])])          # absolute peak-bin index
+    if k <= 0 or k >= sp.size - 1:
+        return float(freqs[k])
+    a, b, c = float(sp[k - 1]), float(sp[k]), float(sp[k + 1])
+    denom = a - 2.0 * b + c
+    if denom == 0.0:
+        return float(freqs[k])
+    delta = 0.5 * (a - c) / denom                    # in (-0.5, 0.5) for a true peak
+    if not -0.5 <= delta <= 0.5:
+        return float(freqs[k])
+    df = float(freqs[1] - freqs[0])
+    return float(freqs[k] + delta * df)
+
+
 def analyze(
     video_path: str,
     hub_px,
@@ -88,11 +116,12 @@ def analyze(
     for k in range(len(pts)):
         s = series[k] - series[k].mean()
         sp = np.abs(np.fft.rfft(s * win))
-        peaks.append(float(freqs[band][np.argmax(sp[band])]))
+        peaks.append(_peak_hz_parabolic(sp, freqs, band))
         stack += sp[band]
     peaks = np.asarray(peaks)
     f_b = float(np.median(peaks))
-    f_b_stack = float(freqs[band][np.argmax(stack)])
+    stack_full = np.zeros_like(freqs); stack_full[band] = stack   # back onto full grid
+    f_b_stack = _peak_hz_parabolic(stack_full, freqs, band)
     spread = float(np.std(peaks))                       # Hz agreement across probes
     f_rot = f_b / max(1, n_blades)
     omega = 2 * math.pi * f_rot
@@ -173,7 +202,7 @@ def analyze_windowed(video_path, hub_px, ring_radius_px, n_blades, n_probes=12,
         for k in range(seg.shape[0]):
             s = seg[k] - seg[k].mean()
             sp = np.abs(np.fft.rfft(s * win))
-            peaks.append(freqs[band][np.argmax(sp[band])])
+            peaks.append(_peak_hz_parabolic(sp, freqs, band))
         peaks = np.asarray(peaks)
         f_b = float(np.median(peaks))
         t_c = (s0 + wlen / 2) / fps
