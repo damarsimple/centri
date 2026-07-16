@@ -1,12 +1,12 @@
 {
   "tracked_object": { "visual_cues": ["fan blade"] },
-  "reference_geometry": { "label": "fan blade", "physical_size": 0.6 },
+  "reference_geometry": { "label": "blade-tip orbit", "physical_size": 0.635 },
   "rotation_center_frac": [0.5271, 0.4444],
   "tracking_mode": "frequency",
   "tracking_config": {
     "n_blades": 5,
     "ring_radius": 180,
-    "orbit_radius_px": 255,
+    "orbit_radius_px": 355,
     "n_probes": 12,
     "window_s": 2.5,
     "hop_s": 0.5
