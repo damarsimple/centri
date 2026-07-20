@@ -1,2 +1,6 @@
 workspaces
+# Archived job workspaces (`workspaces-archive/<date>/`). The `workspaces` rule above does NOT
+# cover this — gitignore matches whole path components, so it matches `workspaces` exactly and
+# never `workspaces-archive`.
+workspaces-archive
 .env
