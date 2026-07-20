@@ -33,6 +33,7 @@ SECTIONS = ["Scenario", "The variables we measured", "How the variables are rela
 # TIER_ARTIFACTS in render/report.py so the prose only describes plots the tier's PDF shows.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "workspace_lib"))
 from analysis.material_tiers import TIERS  # noqa: E402
+from analysis.material_gate import tier_gate  # noqa: E402 — deterministic per-tier verdict
 
 
 def _facts(seed):
@@ -136,11 +137,49 @@ def _parse_json(text):
     return json.loads(text[a:b + 1])
 
 
+def _generate_tier(tier, system, user):
+    """One draft for a tier: call Qwen, parse, stamp the requested tier."""
+    obj = _parse_json(_call_qwen(system, user))
+    obj["tier"] = tier  # trust our request over the model's self-label
+    return obj
+
+
+def _select_candidate(tier, system, user, seed, k):
+    """Generate-K-gate-select (Utami SocioMathLLM pattern): draft K, run each through the
+    deterministic tier_gate, keep the cleanest. Plays to the 35B's strength (drafting) and
+    around its weakness (self-correction) — see IKA_DISSERTATION_TAKEAWAYS.md §2.
+
+    Returns (best_obj, candidate_log). Tie-break is deterministic: fewest gate issues, then
+    earliest draft index — so the choice is reproducible given the same K drafts.
+    """
+    cands = []
+    for i in range(k):
+        try:
+            obj = _generate_tier(tier, system, user)
+        except Exception as e:  # noqa: BLE001 — a bad draft shouldn't sink the whole tier
+            print(f"   draft {i + 1}/{k}: FAILED ({e})", flush=True)
+            continue
+        issues = tier_gate(obj, seed)
+        cands.append((len(issues), i, obj, issues))
+        print(f"   draft {i + 1}/{k}: {len(issues)} gate issue(s)"
+              + (f" -> {issues[0]}" if issues else " -> clean"), flush=True)
+    if not cands:
+        raise RuntimeError(f"all {k} drafts failed for tier {tier}")
+    cands.sort(key=lambda c: (c[0], c[1]))  # fewest issues, then earliest draft
+    best_n, best_i, best_obj, best_issues = cands[0]
+    log = [{"draft": i, "n_issues": n, "issues": iss} for n, i, _, iss in sorted(cands, key=lambda c: c[1])]
+    print(f"   selected draft {best_i + 1} ({best_n} issue(s))", flush=True)
+    return best_obj, log
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("seed")
     ap.add_argument("--tiers", nargs="+", default=list(TIERS), choices=list(TIERS))
     ap.add_argument("--outdir", default=None)
+    ap.add_argument("--candidates", type=int, default=1, metavar="K",
+                    help="generate K drafts per tier and gate-select the cleanest (K=1 = "
+                         "current single-draft behaviour, unchanged).")
     args = ap.parse_args()
 
     sp = pathlib.Path(args.seed)
@@ -158,13 +197,20 @@ def main():
         user = ("Ground-truth measurements for this clip:\n\n" + facts +
                 f"\n\nWrite the {tier.upper()} passage now, following every rule and using "
                 "the exact five section headers as JSON keys.")
-        print(f".. generating {tier} (Qwen) ...", flush=True)
-        obj = _parse_json(_call_qwen(system, user))
+        if args.candidates > 1:
+            print(f".. generating {tier} — {args.candidates} candidates (Qwen) ...", flush=True)
+            obj, cand_log = _select_candidate(tier, system, user, seed, args.candidates)
+        else:
+            print(f".. generating {tier} (Qwen) ...", flush=True)
+            obj, cand_log = _parse_json(_call_qwen(system, user)), None
+            obj["tier"] = tier  # trust our request over the model's self-label
         obj.setdefault("object_name", seed.get("object_name"))
         obj.setdefault("scene_title", seed.get("scene_title"))
-        obj["tier"] = tier  # trust our request over the model's self-label
         out_p = outdir / f"material.{tier}.json"
         out_p.write_text(json.dumps(obj, indent=2, ensure_ascii=False))
+        if cand_log is not None:
+            (outdir / f"material.{tier}.candidates.json").write_text(
+                json.dumps(cand_log, indent=2, ensure_ascii=False))
         secs = obj.get("sections", {})
         miss = [h for h in SECTIONS if h not in secs]
         print(f"OK {out_p.name}: {len(secs)} sections, bloom={obj.get('bloom_objective')}, "

@@ -3,29 +3,35 @@
 
 BERTScore measures surface relevance to a reference; the grounding gate measures arithmetic/
 tier/vocab correctness. Neither rates whether the passage is a GOOD lesson. This tool asks the
-lab Qwen to score each generated material on the rubric adapted verbatim from Utami (2025)
-Tables 8–9 (see docs/eval-rubric-ika.md), plus a Centri physics/tier extension block, so our
-numbers sit directly beside the parent line's published ones.
+lab Qwen to score each generated passage on the reconciled rubric drawn from Utami (2025) +
+P-MAGIC (2026) — see docs/eval-framework.md and docs/eval-rubric-ika.md — so our numbers sit
+directly beside the parent lines' published ones.
 
-Rubric (per material, 1–5). Grouped into three axes:
-  Axis 1 — Authenticity & linguistic (Utami Table 8, verbatim):
-    motivating_context           — a meaningful, compelling purpose.
-    language_clarity             — language/terminology accessible to the target reading level.
-    solution_steps               — requires more than one step to reach a solution.
-    solution_strategy_variety    — supports multiple strategies to reach a solution.
-    cognitive_demand             — an appropriate level of cognitive challenge.
-  Axis 2 — Mathematical (Utami Table 9, verbatim):
-    answerability                — at least one valid solution; necessary info, no ambiguity.
-    structure_clarity            — logical flow linking given info to the required solution.
-    multiple_strategies          — allows multiple solving methods (creativity / math thinking).
-  Axis 3 — Centri physics/tier extension (ours, on top of hers):
-    difficulty_fit               — depth matches the asserted tier (basic/intermediate/advanced).
-    concept_accuracy             — physics correct, no misconceptions, relations right.
-    grounding_accuracy           — numbers/figures consistent with the measured seed values.
-plus achieved_bloom              — the Bloom level the passage actually reaches (Remember…Create).
+This is the TEXT judge: it scores the three text-readable axes (1–3). Axis 4 (multimodal) needs
+the figures, so it is scored by the vision MLLM-judge + the human panel (the MULTIMODAL rows are
+exported here for build_rater_sheet.py). video_recognition_quality is INSTRUMENTED
+(deterministic CV-vs-ground-truth + the gate's measurement_quality), not rated by an LLM.
 
-Utami's Table 10 (socialization) is intentionally NOT adopted — it is her Study-4 contribution,
-outside Centri's lane (see docs/eval-rubric-ika.md, decision #5).
+Rubric (per passage, 1–5):
+  Axis 1 — Linguistic / authenticity (Utami Table 8 + P-MAGIC linguistic):
+    motivating_context   — a meaningful, compelling purpose.
+    language_clarity     — language/terminology accessible to the target reading level.
+    cognitive_demand     — an appropriate level of cognitive challenge.
+    fluency              — grammatically correct, reads naturally.
+    completeness         — includes the necessary context/conditions/detail.
+  Axis 2 — Structural / comprehension (Utami Table 9 structure + P-MAGIC physics-aspect):
+    comprehension        — understandable at the target reading level; a learner can follow it.
+    structure_clarity    — logical flow linking the given information to the ideas.
+    concept_accuracy     — physics correct, no misconceptions, relations right.
+    realistic            — scenario/quantities physically plausible, tied to a real situation.
+    variable_name_consistency — symbols/notation used consistently and to standard (ω, a_c…).
+  Axis 3 — Physics / tier (ours; text-readable subset):
+    difficulty_fit       — depth matches the asserted tier (basic/intermediate/advanced).
+    grounding_accuracy   — numbers/figures consistent with the measured seed values.
+plus achieved_bloom      — the Bloom level the passage actually reaches (Remember…Create).
+
+Problem-only rows (answerability, solution-steps/strategies, multiple-strategies) are DROPPED —
+our unit is exposition, not a task. Utami's Table 10 (socialization) stays out of scope.
 
 Usage (run where PI_INFERENCE_URL is reachable, e.g. the worker or the lab machine):
   python tools/run_llm_judge.py \
@@ -40,38 +46,50 @@ BASE = os.environ.get("PI_INFERENCE_URL", "http://192.168.1.205:8083") + "/v1/ch
 KEY = os.environ.get("PI_INFERENCE_API_KEY", "hwanglabyoungdumbandbreak")
 MODEL = os.environ.get("PI_JUDGE_MODEL", os.environ.get("PI_MATERIAL_MODEL", "Qwen3.6-35B"))
 
-# Axes and their criteria, adapted from Utami (2025) Tables 8–9 + our physics/tier extension.
-# docs/eval-rubric-ika.md is the shared source of truth (also drives build_rater_sheet.py).
+# Reconciled axes (Utami 2025 + P-MAGIC 2026). docs/eval-rubric-ika.md is the shared source of
+# truth (also drives build_rater_sheet.py). The TEXT judge scores these three axes.
 AXES = {
-    "authenticity_linguistic": [
-        "motivating_context", "language_clarity", "solution_steps",
-        "solution_strategy_variety", "cognitive_demand"],
-    "mathematical": [
-        "answerability", "structure_clarity", "multiple_strategies"],
+    "linguistic": [
+        "motivating_context", "language_clarity", "cognitive_demand", "fluency", "completeness"],
+    "structural": [
+        "comprehension", "structure_clarity", "concept_accuracy", "realistic",
+        "variable_name_consistency"],
     "physics_tier": [
-        "difficulty_fit", "concept_accuracy", "grounding_accuracy"],
+        "difficulty_fit", "grounding_accuracy"],
 }
 CRITERIA = [c for axis in AXES.values() for c in axis]
+
+# Axis 4 — multimodal (P-MAGIC Table 2 + our annotation row). Needs the FIGURES, so it is scored
+# by the vision MLLM-judge + the human panel, not this text judge; exported for build_rater_sheet.
+MULTIMODAL = [
+    "image_precision", "image_relevancy",
+    "graph_accuracy_labeling", "graph_scale_proportions", "graph_sense_physical", "graph_relevancy",
+    "table_labels_scales", "table_proportional_reasoning", "table_physics_connection", "table_relevancy",
+    "annotation_correctness",
+]
+# Instrumented (deterministic), NOT LLM-rated: video_recognition_quality (CV vs ground truth).
 BLOOM = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"]
 
 _RUBRIC_LINES = (
-    "Axis 1 — Authenticity & linguistic (Utami 2025, Table 8):\n"
+    "Axis 1 — Linguistic / authenticity:\n"
     "- motivating_context: presents a meaningful and compelling purpose.\n"
     "- language_clarity: language/terminology accessible to the target reading level.\n"
-    "- solution_steps: requires more than one step to arrive at a solution.\n"
-    "- solution_strategy_variety: supports multiple strategies to arrive at a solution.\n"
     "- cognitive_demand: an appropriate level of cognitive challenge.\n"
-    "Axis 2 — Mathematical (Utami 2025, Table 9):\n"
-    "- answerability: has at least one valid solution; necessary information provided without "
-    "ambiguity; no redundant/misleading data unless intentional.\n"
-    "- structure_clarity: logical flow lets the learner see the relationship between the given "
-    "information and the required solution.\n"
-    "- multiple_strategies: allows multiple solving methods, encouraging creativity.\n"
-    "Axis 3 — Centri physics/tier extension:\n"
+    "- fluency: grammatically correct and reads naturally.\n"
+    "- completeness: includes the necessary context, conditions, and detail.\n"
+    "Axis 2 — Structural / comprehension:\n"
+    "- comprehension: understandable at the target reading level; a learner can follow it.\n"
+    "- structure_clarity: logical flow lets the learner see how the given information and the "
+    "ideas relate.\n"
+    "- concept_accuracy: the physics is correct — no misconceptions, relations right.\n"
+    "- realistic: the scenario and quantities are physically plausible and tied to a real "
+    "situation.\n"
+    "- variable_name_consistency: symbols/notation used consistently and to standard "
+    "(ω for angular velocity, a_c, …).\n"
+    "Axis 3 — Physics / tier:\n"
     "- difficulty_fit: the depth matches the asserted tier ({level}). basic = no equations, one "
     "idea at a time; intermediate = coordinates a few relations with numbers; advanced = "
     "integrates change-over-time, limits, proportionality.\n"
-    "- concept_accuracy: the physics is correct — no misconceptions, relations right.\n"
     "- grounding_accuracy: numbers and described figures are internally consistent and match the "
     "measured values.\n"
 )
@@ -126,7 +144,8 @@ def judge_one(mat, seed=None, measured_ei=None):
                 f"{measured_ei} (distinct quantities + relations). Use it to sanity-check "
                 f"difficulty_fit: higher EI should accompany a higher tier.")
     user = f"Asserted difficulty level: {level}\n\nPassage:\n{passage}{ctx}"
-    res = _parse(_call(SYSTEM.format(level=level), user))
+    # NB: .replace not .format — SYSTEM contains literal JSON braces the format parser would choke on.
+    res = _parse(_call(SYSTEM.replace("{level}", str(level)), user))
     res["_level"] = level
     return res
 
@@ -169,9 +188,10 @@ def main():
         print(f"{r['_file']:28s} " + " ".join(f"{c[:4]}={r.get(c)}" for c in CRITERIA)
               + f"  bloom={r.get('achieved_bloom')}")
 
-    L = ["# LLM-as-judge — Centri learning material (rubric 1–5, Utami 2025 Tables 8–9 + tiers)\n",
-         f"Model: `{MODEL}`. Rubric: docs/eval-rubric-ika.md.",
-         "Axes: authenticity/linguistic (Table 8), mathematical (Table 9), Centri physics/tier.\n",
+    L = ["# LLM-as-judge — Centri learning material (text axes 1–3, 1–5; reconciled Utami+P-MAGIC)\n",
+         f"Model: `{MODEL}`. Rubric: docs/eval-framework.md + docs/eval-rubric-ika.md.",
+         "Text axes: linguistic, structural/comprehension, physics/tier. "
+         "(Axis 4 multimodal = vision judge + humans.)\n",
          "| Material | Level | " + " | ".join(CRITERIA) + " | Bloom | Rationale |",
          "|---|---|" + "|".join(["---"] * len(CRITERIA)) + "|---|---|"]
     for r in rows:
@@ -196,7 +216,8 @@ def main():
 
     out = pathlib.Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(L) + "\n")
-    json.dump({"model": MODEL, "criteria": CRITERIA, "axes": AXES, "rows": rows},
+    json.dump({"model": MODEL, "criteria": CRITERIA, "axes": AXES,
+               "multimodal_axis": MULTIMODAL, "rows": rows},
               open(out.with_suffix(".json"), "w"), indent=2)
     print(f"\nreport -> {out}  ({len(rows)} materials judged)")
 
