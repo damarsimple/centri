@@ -488,9 +488,12 @@ def _honesty(ctx):
     calibration), deepening with tier per Part B.2."""
     obj, mt, unreliable = ctx["obj"], ctx["motion"], ctx["unreliable"]
     trend = {"decelerating": "slowing down", "accelerating": "speeding up"}.get(mt)
-    oblique = (" The clip was filmed at a slight angle, so the exact turn rate at any single "
-               "instant is hard to pin down; only the whole-clip trend is reliable."
-               if unreliable else "")
+    # Plain-language, not capture jargon: "filmed" is on the student-facing vocabulary
+    # blocklist (material_gate.TRACKING_VOCAB), so wording the caveat that way asks the
+    # writer for a sentence its own gate then rejects.
+    oblique = (" The circle is seen at a slight slant rather than face-on, so the exact turn "
+               "rate at any single instant is hard to pin down; only the whole-clip trend is "
+               "reliable." if unreliable else "")
     basic = ("A note on honesty: the numbers here are summaries over the whole clip." +
              (f" Because the {obj} is {trend}, its speed at any one instant differs from the "
               f"average, but the average is still a faithful picture of the motion." if trend else "")

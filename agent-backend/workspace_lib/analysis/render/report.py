@@ -176,8 +176,14 @@ def tex_escape(s) -> str:
     return res
 
 
-def num(x, prec=2):
-    """Plain number string, or 'N/A' when missing — never 'None'/'nan'."""
+def num(x, prec=2, sig=3):
+    """Plain number string, or 'N/A' when missing — never 'None'/'nan'.
+
+    A fixed decimal count destroys small values: the fan's tangential acceleration
+    0.0365 renders as "0.04" — one significant figure, which neither matches the
+    worked example the seed builds from the same number nor closes its own
+    a_t = alpha*r. When rounding to ``prec`` decimals would leave fewer than two
+    significant figures, fall back to ``sig`` of them (the seed's own precision)."""
     if x is None:
         return "N/A"
     try:
@@ -186,6 +192,8 @@ def num(x, prec=2):
         return "N/A"
     if xf != xf or xf in (float("inf"), float("-inf")):
         return "N/A"
+    if xf and math.floor(math.log10(abs(xf))) + prec + 1 < 2:
+        return f"{xf:.{sig}g}"
     return f"{xf:.{prec}f}"
 
 

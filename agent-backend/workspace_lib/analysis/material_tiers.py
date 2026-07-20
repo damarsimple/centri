@@ -99,7 +99,7 @@ TIERS = {
                      "'How the variables are related' section MUST stay QUALITATIVE — explain "
                      "in words that a bigger circle or a faster sweep needs a stronger inward "
                      "pull; do NOT state a centripetal-acceleration or speed NUMBER there.",
-        "figures": "Three pictures: (1) a frame from the video showing the object on its "
+        "figures": "Three pictures: (1) a still of the object on its "
                    "circular path with the radius marked from the centre; (2) a simple graph of "
                    "HOW MANY TURNS the object has completed as time passes — a line that climbs "
                    "from zero, whose SHAPE tells the story (a straight line = a steady spin, a "
@@ -130,7 +130,7 @@ TIERS = {
                      "of context is fine), NO angular-acceleration value or timeline, NO "
                      "scale/calibration-caveat discussion, NO tangential-speed derivation as a "
                      "core relation.",
-        "figures": "An annotated frame with the radius, a short data table of the core "
+        "figures": "A marked-up still with the radius, a short data table of the core "
                    "measurements (radius, angular velocity, centripetal acceleration, period, "
                    "frequency), one graph of the turn-rate (angular velocity) over time, and "
                    "the traced circular path. Do not mention tangential-speed graphs, "
@@ -154,7 +154,7 @@ TIERS = {
                      "change in ω moves a_c much more). Restating the intermediate relation set "
                      "alone, without α, the time evolution, and the ω² sensitivity, is a "
                      "FAILURE at this tier.",
-        "figures": "An annotated frame, the full measurements table (including angular "
+        "figures": "A marked-up still, the full measurements table (including angular "
                    "acceleration and the calibration), graphs of angular velocity and "
                    "centripetal acceleration over time, and the traced circular path. (There "
                    "is no combined summary panel — do not mention one.)",
@@ -179,7 +179,7 @@ def _facts(seed, tier=None):
     # object fact — the authoritative title comes from the shared frame, not here.
     lines = [f"object: {seed.get('object_name') or seed.get('scene_title')}",
              f"rotation_direction: {seed.get('rotation_direction')}",
-             f"clip_duration_s: {seed.get('active_duration_s')}"]
+             f"clip_duration_s: {_sig(seed.get('active_duration_s'), 3)}"]
     # A1: when the object is at rest for much of the clip, the rate averages (f, v, omega) are
     # over the TURNING window only — surface it plus a hard rule so no laps/arc/angle product
     # ever multiplies a rate by the clip length.
@@ -432,6 +432,9 @@ FRAME_SYSTEM = (
     "fastest time). Mention no other quantity, symbol, equation, or measurement.\n"
     "5. NEVER mention filming, video, tracking, cameras, measurement, analysis, or a pipeline "
     "— write the scene ITSELF, as if you stood there watching it.\n"
+    "5b. This is a KINEMATICS story: describe HOW the object moves, never WHY. Do NOT use any "
+    "of these words: " + G.DYNAMICS_VOCAB_HUMAN + ". A spin that winds down simply slows, "
+    "coasts, or fades — it does not lose energy or meet friction.\n"
     "6. Plain Unicode only — no LaTeX, no backslashes.\n"
     "Return ONLY a JSON object: {\"scene_title\": \"...\", \"scenario_story\": \"...\", "
     "\"who\": \"...\", \"where\": \"...\"}. scene_title is a short human title naming the real "
@@ -462,7 +465,7 @@ def _frame_user(seed) -> str:
         bits.append(f"what it is part of / mounted on (the REAL setting — build the scene on "
                     f"this; never swap it for a generic table, board, or turntable): {mounted_on}")
     bits += [f"rotation direction: {seed.get('rotation_direction')}",
-             f"clip length: {seed.get('active_duration_s')} s"]
+             f"clip length: {_sig(seed.get('active_duration_s'), 3)} s"]
     # The frame must know if the spin is winding down / up, so the opening story doesn't
     # call a decelerating motion "steady" or "smooth and uninterrupted" (A1).
     aa = seed.get("angular_acceleration") or {}
@@ -543,19 +546,40 @@ def _generate_frame(seed) -> dict:
     """One shared narrative frame per job (5W+1H story + authoritative scene title). Built
     from the authentic object name and any learner/VLM context, so the three tiers can no
     longer each invent a generic 'Decelerating Circular Motion on a Turntable' title. Any
-    failure (network, parse) falls back to a deterministic second-person template."""
-    try:
-        frame = _parse_json(_call_qwen(FRAME_SYSTEM, _frame_user(seed), temperature=0.7))
-        title = dedup_display_name(frame.get("scene_title")) or (seed.get("scene_title") or "")
-        story = (frame.get("scenario_story") or "").strip()
-        if not story:
-            raise ValueError("empty scenario_story")
-        return {"scene_title": title, "scenario_story": story,
-                "who": (frame.get("who") or "").strip(),
-                "where": (frame.get("where") or "").strip()}
-    except Exception as e:  # noqa: BLE001 — proceed-but-flag; never block the pipeline
-        print(f"   frame generation failed ({e}); using deterministic fallback", flush=True)
-        return _frame_fallback(seed)
+    failure (network, parse) falls back to a deterministic second-person template.
+
+    The story is graded even though nothing grades it directly: every tier MUST open by
+    retelling it, so a banned word in the story ("feeling the quiet fade of its energy")
+    becomes a gate failure in all three at once. Screen it here — one retry naming the
+    offending words, then the deterministic fallback, which is banned-word-free by
+    construction."""
+    user = _frame_user(seed)
+    for attempt in (1, 2):
+        try:
+            frame = _parse_json(_call_qwen(FRAME_SYSTEM, user, temperature=0.7))
+            title = dedup_display_name(frame.get("scene_title")) or (seed.get("scene_title") or "")
+            story = (frame.get("scenario_story") or "").strip()
+            if not story:
+                raise ValueError("empty scenario_story")
+            bad = G.vocab_issues(story)
+            if bad:
+                words = sorted({b["word"] for b in bad})
+                if attempt == 1:
+                    print(f"   frame uses banned vocabulary {words}; regenerating", flush=True)
+                    user = (_frame_user(seed) + "\n\nYour previous story used these BANNED "
+                            f"words: {', '.join(words)}. Rewrite it without them (and without "
+                            "any other word from the banned lists), keeping the same scene.")
+                    continue
+                print(f"   frame still uses banned vocabulary {words}; using deterministic "
+                      "fallback", flush=True)
+                return _frame_fallback(seed)
+            return {"scene_title": title, "scenario_story": story,
+                    "who": (frame.get("who") or "").strip(),
+                    "where": (frame.get("where") or "").strip()}
+        except Exception as e:  # noqa: BLE001 — proceed-but-flag; never block the pipeline
+            print(f"   frame generation failed ({e}); using deterministic fallback", flush=True)
+            return _frame_fallback(seed)
+    return _frame_fallback(seed)
 
 
 def _anchor_policy(tier, seed) -> str:
@@ -607,9 +631,10 @@ def _quality_policy(seed) -> str:
         "the values as clip averages, without asserting the identity closes to an exact number. "
         "In 'What the video shows over time' and 'Reading the figures', include ONE plain "
         "sentence that the "
-        "per-instant angular velocity is not reliably recoverable because the orbit was filmed "
-        "at an oblique angle, and describe any time graph only at that level — never reading its "
-        "wiggles as real physics."
+        "per-instant angular velocity is not reliably recoverable because the circle is seen at "
+        "a slant rather than face-on (say it that way — 'filmed', 'capture' and 'frame' are on "
+        "the banned vocabulary list in rule 8), and describe any time graph only at that level "
+        "— never reading its wiggles as real physics."
     )
 
 

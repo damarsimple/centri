@@ -111,13 +111,13 @@ def build_quality_block(sig, stats):
     }
     if unreliable:
         block["guidance"]=(
-            "The orbit is filmed obliquely (image path is an ellipse, axis ratio "
+            "The orbit is seen at a slant, not face-on (image path is an ellipse, axis ratio "
             f"{sig.get('orbit_axis_ratio')}); {int(100*sig.get('omega_phaselocked_fraction',0))}% of the "
             "per-instant angular-velocity variation is locked to orbital phase, i.e. a "
             "viewing-angle projection artifact, NOT real motion. Report only the time-AVERAGE "
             "quantities and the qualitative fact of rotation. Do NOT narrate the timeline or "
             "claim the object speeds up/slows down during a revolution. State one honest "
-            "sentence that per-instant angular velocity is not reliably recoverable from this capture."
+            "sentence that per-instant angular velocity is not reliably recoverable from this clip."
         )
     else:
         block["guidance"]="Per-instant angular velocity is reliable; narrate the timeline normally."

@@ -327,6 +327,53 @@ def test_period_identity_checked_when_unreliable():
     assert any("2pi / 7.813" in i and "arithmetic" in i for i in issues), issues
 
 
+def test_tier_spec_never_hands_the_writer_banned_vocabulary():
+    """What a tier is TOLD to write must survive the gate that grades it.
+
+    The spec used to describe the advanced tier's picture as "an annotated frame" and the
+    oblique-clip caveat as "the orbit was filmed at an oblique angle" — both built out of
+    words on TRACKING_VOCAB, so the writer dutifully echoed them and failed its own gate on
+    the roundabout clip. Any wording the prompt asks for has to be sayable."""
+    from analysis import material_tiers as T
+    from analysis import quality_signals as Q
+    for tier, spec in T.TIERS.items():
+        for field in ("seed_fields", "forbidden", "figures"):
+            hits = G._vocab_scan(G._TRACKING_RE, spec[field], "tracking")
+            assert not hits, f"{tier}.{field} asks for banned vocabulary: {hits}"
+    unreliable = T._quality_policy({"measurement_quality": {"reliable": False,
+                                                            "guidance": Q.__doc__ or ""}})
+    assert unreliable, "oblique policy should be non-empty"
+    # The instruction body may NAME a banned word to forbid it (rule 8 does), but the
+    # sentence it asks for must not be built from one: check the phrasing it dictates.
+    dictated = unreliable.split("include ONE plain sentence that the", 1)[-1].split("(say it")[0]
+    hits = G._vocab_scan(G._TRACKING_RE, dictated, "tracking")
+    assert not hits, f"oblique caveat dictates banned vocabulary: {hits}"
+
+
+def test_squared_units_are_not_read_as_division():
+    """"3.85 rad^2/s^2" is a unit, not "3.85 squared divided by 2" (= 7.41). The fan clip's
+    correct a_c substitution, written as an arrow chain, was flagged on that misreading."""
+    ok = ("ω = 1.962 rad/s → (squared) → 3.85 rad²/s² → (× r = 0.317 m) → "
+          "a_c = 1.22 m/s², which matches the measured value.")
+    assert all(c["ok"] for c in G.arithmetic_claims(ok)), G.arithmetic_claims(ok)
+    # the same notation with a wrong product must still fail
+    bad = "ω = 2.0 rad/s → (squared) → 4.0 rad²/s² → (× r = 0.5 m) → a_c = 9.9 m/s²"
+    assert any(not c["ok"] for c in G.arithmetic_claims(bad)), G.arithmetic_claims(bad)
+
+
+def test_frame_fallback_story_is_sayable_by_every_tier():
+    """All three tiers must open by retelling the shared story, so the story is held to the
+    same vocabulary they are graded on. The deterministic fallback is the floor: it has to be
+    clean for every motion type, or a network blip poisons all three tiers at once."""
+    from analysis import material_tiers as T
+    for mt in ("decelerating", "accelerating", "uniform"):
+        for rest in (True, False):
+            seed = {"object_name": "the black handle", "scene_title": "Spinning Black Handle",
+                    "angular_acceleration": {"motion_type": mt}, "comes_to_rest": rest}
+            story = T._frame_fallback(seed)["scenario_story"]
+            assert not G.vocab_issues(story), f"{mt}/{rest}: {G.vocab_issues(story)}"
+
+
 def run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

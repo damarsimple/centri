@@ -56,6 +56,10 @@ def _f(x):
 # ---- (1) arithmetic closure --------------------------------------------------
 def _neutralize_units(t: str) -> str:
     """Stop unit slashes (rad/s, m/s, m/s^2) from looking like numeric division."""
+    # A SQUARED unit pair first: in "3.85 rad^2/s^2" the two exponents read as
+    # "3.85 squared, divided by 2" (= 7.41), which flagged a correct a_c = omega^2*r
+    # substitution written as an arrow chain.
+    t = re.sub(r"(rad|deg|km|cm|mm|m)\s*\^?\s*2\s*/\s*s\s*\^?\s*2", r"\1_s", t)
     t = re.sub(r"(rad|km|cm|mm|deg|m)\s*/\s*s(\s*\^?\s*2)?", r"\1_s", t)
     t = re.sub(r"(?<=[a-zA-Z])\s*/\s*s\b", "_s", t)
     return t
