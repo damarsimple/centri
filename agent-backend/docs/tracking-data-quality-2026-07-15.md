@@ -5,6 +5,12 @@ off the cached tracks and the real frames. This is the evidence base the per-tem
 `templates/base-template-*/hints.md` files cite. **Everything here was measured or tested; two
 of the starting hypotheses did not survive and are recorded as such.**
 
+> **Paper-style writeup (updated 2026-07-18):** `technical-report/centri-video-data-quality.tex`
+> (29 pp, compiles clean). Now carries a **per-phenomenon common structure** — Scene → Context
+> handed to the agent (sidecar + hints) → How it is calculated (technique + formulas, each on its
+> own line) → an annotated **data-point frame** → Found → Verdict (GOLD/SILVER tier) — with a
+> **formula-on-frame** annotated figure for every phenomenon. Committed 2026-07-20 (`e0a20d0`).
+
 ## Per-template signature
 
 Measured off `analysis_output/data/api_cache.json` (and the video for the visual checks):
