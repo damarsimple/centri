@@ -1,5 +1,8 @@
+import os
+import re
 import time
 import uuid
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from typing import Optional
@@ -28,6 +31,27 @@ from .limiter import limiter, RATE_LIMIT
 
 router = APIRouter()
 
+_JOB_NAME_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _make_job_id(job_name: Optional[str]) -> str:
+    """Job id — a caller-supplied readable slug when given, else a uuid4.
+
+    A workspace directory is named `job_<id>`, so a readable id turns
+    `workspaces/job_2f8e…` into `workspaces/job_turntable-1`, which is what makes a batch of
+    template runs reviewable at all. Sanitised to `[a-z0-9-]` (it lands in a path and in redis
+    keys) and de-duplicated with a numeric suffix so re-running a template never overwrites the
+    previous run's artifacts."""
+    slug = _JOB_NAME_RE.sub("-", (job_name or "").strip().lower()).strip("-")[:60]
+    if not slug:
+        return str(uuid.uuid4())
+    root = Path(os.environ.get("WORKSPACE_DIR", "./workspaces"))
+    candidate, n = slug, 1
+    while (root / f"job_{candidate}").exists():
+        n += 1
+        candidate = f"{slug}-{n}"
+    return candidate
+
 MAX_VIDEO_SIZE = 500 * 1024 * 1024
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"}
 MAX_IMAGE_SIZE = 25 * 1024 * 1024
@@ -40,12 +64,13 @@ async def analyze(
     video: UploadFile = File(...),
     sidecar: Optional[str] = Form(None),
     template: Optional[str] = Form(None),
+    job_name: Optional[str] = Form(None),
     _: None = Depends(verify_api_key),
 ):
     if video.content_type and video.content_type not in ALLOWED_VIDEO_TYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported video type: {video.content_type}")
 
-    job_id = str(uuid.uuid4())
+    job_id = _make_job_id(job_name)
 
     try:
         workspace = ws.create_workspace(job_id, template)
