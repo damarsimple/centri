@@ -369,19 +369,29 @@ def fig_annotated_image(stats, scene, cols=None):
         if a_c is not None:
             calls.append((ac_sym, _QUANTITY_NAMES["a_c"], _fmt(a_c, 2, "m/s²") + avg, base["ac"]))
 
-        # ω — a SMALL curved arc just outside the orbit at the object, curling the way it spins.
-        # This is the angular quantity: it is about the turning, not about a direction of travel,
-        # which is why it is a separate mark from v (reference diagram).
-        d = 0.30
-        a0, a1 = th0 - s * d, th0 + s * d
-        rr = 1.16 * r_fit_px
+        # ω — a SMALL curved arc curling the way it spins. This is the angular quantity: it is about
+        # the turning, not about a direction of travel, which is why it is a separate mark from v
+        # (reference diagram). Preferred spot is just OUTSIDE the orbit at the object; when the
+        # object sits near the frame edge that lands off the photo entirely, floating on the margin
+        # and colliding with the callouts, so it falls back to a small arc about the centre — on the
+        # opposite side from the r arrow, hence clear of both r and the (radial) a_c arrow. Same
+        # rule as the video overlay, so the two artifacts agree on where ω lives.
+        d, rr = 0.30, 1.16 * r_fit_px
+        w_sym = (cx + 1.40 * r_fit_px * math.cos(th0), cy + 1.40 * r_fit_px * math.sin(th0))
+        pad = 0.06 * max(W, H)
+        if not (pad <= w_sym[0] <= W - pad and pad <= w_sym[1] <= H - pad):
+            th0_w = math.atan2(-ry, -rx)
+            d, rr = 0.9, 0.32 * r_fit_px
+            w_sym = (cx - rx * 0.52 * r_fit_px, cy - ry * 0.52 * r_fit_px)
+        else:
+            th0_w = th0
+        a0, a1 = th0_w - s * d, th0_w + s * d
         ax.annotate("", xy=(cx + rr * math.cos(a1), cy + rr * math.sin(a1)),
                     xytext=(cx + rr * math.cos(a0), cy + rr * math.sin(a0)),
                     arrowprops=dict(arrowstyle="-|>,head_width=0.3,head_length=0.55", color=pal["w"],
                                     lw=2.8, shrinkA=0, shrinkB=0,
                                     connectionstyle=f"arc3,rad={-0.35 * s}",
                                     path_effects=_halo(4.5, pal["w"])), zorder=5)
-        w_sym = (cx + 1.40 * r_fit_px * math.cos(th0), cy + 1.40 * r_fit_px * math.sin(th0))
         _symbol(ax, w_sym, "ω", pal["w"])
         if omega_val is not None:
             calls.append((w_sym, _QUANTITY_NAMES["ω"],
