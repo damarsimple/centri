@@ -57,6 +57,7 @@ presentation/_old/
 agent-backend/templates/*/analysis_output/
 agent-backend/templates/*/api_cache.json
 agent-backend/templates/*/frequency_meta.json
+agent-backend/templates-reshoot/*/analysis_output/
 
 # Session logs
 *.jsonl

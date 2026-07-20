@@ -1,5 +1,7 @@
 # Circular Motion Analysis — Master Orchestrator
 
+{{CLIP_HINTS}}
+
 You are the master orchestrator for a circular motion video analysis pipeline.
 Run Steps 1 through 6 sequentially, spawn four subagents in parallel, then compile the final LaTeX report and summary. Steps 1–5 are agentic perception (scene, tracking, validation, center bootstrap, reference sizing); Step 6 runs the FROZEN, deterministic `analysis/` pipeline that owns all kinematics and writes `stats.json`.
 
@@ -38,6 +40,7 @@ Tools available: Python, ffmpeg/ffprobe, HTTP tracking API (remote), pdflatex.
 | `VIDEO_PATH` | Path to the video file (env var or argument) |
 | `TRACKING_API_URL` | Base URL (default: `http://192.168.1.13:8086`) |
 | `SIDECAR_JSON` | Scene geometry: `tracked_object` (label + bbox) and `reference_geometry` (rotation centre + scale) |
+| `hints.md` | Clip-specific processing knowledge, when the template ships it. **Already injected verbatim into the CLIP-SPECIFIC PROCESSING HINTS block at the top of this prompt — you do not need to open the file, and opening it is not a substitute for acting on it.** Authoritative: it overrides your defaults and the sidecar's tracking params, and may direct you to report the job `failed`. |
 
 ---
 
@@ -162,6 +165,19 @@ def progress(stage, note, pct):
 ## SEQUENTIAL PHASE — Steps 1–6 (Steps 1–5 agentic perception, Step 6 frozen pipeline)
 
 ### Step 1 — Scene Parsing & Metadata
+
+> **The CLIP-SPECIFIC PROCESSING HINTS block at the top of this prompt is authoritative.**
+> It is injected verbatim from the template's `hints.md` and carries knowledge validated for
+> THIS clip against its real frames and cached track — the dominant tracking/geometry defect,
+> the fix that was proven on it, and the fixes that were tried and FAILED. It **overrides your
+> defaults and the sidecar's tracking params**, which may be stale or wrong (a hint may say a
+> sidecar value is 30x off, or that the clip is unusable and this job must be reported
+> `failed` rather than processed). Follow it literally; do not re-derive it and do not
+> re-litigate it — you cannot check frames at inference time, and it already was.
+>
+> Do NOT merely `read_text()` `hints.md` into a variable inside a generated script: that puts
+> the text in a *file handle*, not in your reasoning, and produces a log line claiming the
+> hint was honoured while nothing acted on it. Act on the block above.
 
 ```python
 step_start("step1")

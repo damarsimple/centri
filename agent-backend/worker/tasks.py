@@ -35,11 +35,35 @@ def _finalize_events(events_path: Path) -> None:
         pass
 
 
+def _inject_clip_hints(prompt: str, workspace: Path) -> str:
+    """Substitute the template's `hints.md` into the orchestrator prompt.
+
+    Injected here, not read by the agent, for the same reason `material_tiers.py` injects
+    `material_hints.md`: guidance the model never sees cannot steer it. An earlier attempt
+    had the agent `read_text()` hints.md inside a generated step script — that put the text
+    in a file handle and emitted a log line saying the hint was authoritative while the model
+    had not seen a word of it. Deterministic substitution is the only version that works.
+    """
+    hints_path = workspace / "hints.md"
+    if not hints_path.exists():
+        return prompt.replace("{{CLIP_HINTS}}", "")
+    body = hints_path.read_text().strip()
+    block = (
+        "## CLIP-SPECIFIC PROCESSING HINTS — AUTHORITATIVE, READ FIRST\n\n"
+        "Validated for THIS clip against its real frames and cached track. Overrides your\n"
+        "defaults AND the sidecar's tracking params. Follow it literally; do not re-derive\n"
+        "it. If it says the clip is unusable, report the job `failed` — do not process it.\n\n"
+        f"{body}\n\n---"
+    )
+    return prompt.replace("{{CLIP_HINTS}}", block)
+
+
 @celery_app.task(bind=True)
 def run_pi_analysis(self, job_id: str):
     workspace_dir = Path(os.environ.get("WORKSPACE_DIR", "./workspaces"))
     workspace = workspace_dir / f"job_{job_id}"
     prompt = Path(os.environ.get("PROMPT_FILE", "./prompts/orchestrator.txt")).read_text().strip()
+    prompt = _inject_clip_hints(prompt, workspace)
     model = os.environ.get("PI_MODEL", "llama.cpp-lab2/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf")
     timeout_s = int(os.environ.get("PI_TIMEOUT_SECONDS", 5400))
 
