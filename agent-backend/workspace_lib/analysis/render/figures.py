@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import subprocess
 import textwrap
 from pathlib import Path
@@ -30,6 +31,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..common import canonical_omega, dedup_display_name
+from . import palette as _PAL
 
 DATA = Path("analysis_output/data")
 PLOTS = Path("analysis_output/plots")
@@ -50,7 +52,11 @@ PHASE_COLOURS = {
     "INACTIVE": "#9E9E9E",
     "IDLE": "#9E9E9E",
 }
-PHASE_WORDS = {"INCREASE": "speeding up", "STABLE": "steady", "DECREASE": "slowing down"}
+# Band text on the shaded graphs. These describe the PLOTTED QUANTITY (a_c is increasing, ω is
+# increasing), not the object — which is why they are not "speeding up"/"slowing down": that
+# wording reads as a claim about the motion and is wrong on an a_c axis. The motion wording still
+# exists, in `_phase_sequence` below, for the prose.
+PHASE_WORDS = {"INCREASE": "increasing", "STABLE": "steady", "DECREASE": "decreasing"}
 TRACE = {  # per-series colour
     "omega": "#FB8C00",
     "ac": "#E53935",
@@ -172,9 +178,11 @@ def _shade_phases(ax, t, labels):
         if word and width >= 0.06 * total:             # wide enough that a (short) label reads
             cx = (t0 + t1) / 2
             row = (row + 1) % len(rows_y) if last_cx is not None and (cx - last_cx) < 0.2 * total else 0
+            # Word in BLACK on a white chip, with the band's colour kept as the chip border: the
+            # coloured text was the weakest-contrast element on the figure.
             ax.text(cx, rows_y[row], word, transform=trans, ha="center", va="top",
-                    fontsize=8, color=c, fontweight="bold",
-                    bbox=dict(fc="white", ec=c, alpha=0.8, boxstyle="round,pad=0.2"))
+                    fontsize=8, color="black", fontweight="bold",
+                    bbox=dict(fc="white", ec=c, alpha=0.9, boxstyle="round,pad=0.25"))
             last_cx = cx
 
 
@@ -205,66 +213,185 @@ def _first_frame():
     return None
 
 
-_ANNOT_YELLOW = "#FFD600"       # value/vector colour (matches the P-MAGIC app annotation)
-_ANNOT_GREEN = "#00E676"        # fitted-orbit colour
+# Plain-language name for each symbol, as the app words them ("kecepatan linier" = linear speed —
+# NOT "tangential velocity", which is our jargon, not the students').
+_QUANTITY_NAMES = {"r": "RADIUS", "v": "LINEAR SPEED",
+                   "ω": "ANGULAR SPEED", "a_c": "CENTRIPETAL ACCELERATION"}
 
 
-def _var_chip(ax, x, y, symbol, value, sym_color="#C62828"):
-    """One variable annotation in the P-MAGIC style: the SYMBOL in a white rounded chip, then its
-    VALUE+unit in a yellow rounded chip just to the right. (r, a → red symbol; ω → dark.)"""
-    ax.text(x, y, symbol, color=sym_color, fontsize=13, fontweight="bold", va="center", ha="center",
-            bbox=dict(boxstyle="round,pad=0.32", fc="white", ec="#222", lw=1.3), zorder=7)
-    ax.annotate(value, (x, y), textcoords="offset points", xytext=(22, 0),
-                color="black", fontsize=11, fontweight="bold", va="center", ha="left",
-                bbox=dict(boxstyle="round,pad=0.32", fc=_ANNOT_YELLOW, ec="#222", lw=1.0), zorder=7)
+def _halo(lw=3.0, color=None):
+    """Outline behind a coloured mark so it stays legible over any photo. The outline takes the
+    opposite lightness pole from the mark: a light mark on a white halo is no more readable than
+    no halo at all, and the palette adapts marks to be light over dark footage."""
+    import matplotlib.patheffects as pe
+    fg = "white" if color is None else _PAL.to_hex(_PAL.casing(_hex_bgr(color)))
+    return [pe.withStroke(linewidth=lw, foreground=fg)]
 
 
-def fig_annotated_image(stats, scene):
-    """First cropped frame with the fitted orbit + the three centripetal-motion variables
-    annotated in the P-MAGIC app style (green orbit; yellow radius line, tangential ω arrow, and
-    inward centripetal-acceleration arrow; each with a symbol chip + a yellow value chip)."""
+def _hex_bgr(h):
+    h = h.lstrip("#")
+    return (int(h[4:6], 16), int(h[2:4], 16), int(h[0:2], 16))
+
+
+def _symbol(ax, xy, text, color, fontsize=17):
+    """The bare SYMBOL, drawn beside its arrow (never on it) in the arrow's own colour."""
+    ax.text(xy[0], xy[1], text, color=color, fontsize=fontsize, fontweight="bold",
+            va="center", ha="center", zorder=8, path_effects=_halo(3.5, color))
+
+
+def _place_callouts(ax, items, W, H):
+    """Park each quantity's name+value in the margin BESIDE the photo, joined to its symbol by a
+    thin leader line — the P-MAGIC diagram's convention. Keeping the descriptive text off the frame
+    is what fixes the old chips-on-top-of-the-arrow overlap: nothing but a thin arrow and a
+    one-glyph symbol is ever drawn over the footage.
+
+    Each callout goes in the margin NEARER its own symbol and the boxes on a side are stacked in
+    the symbols' own top-to-bottom order, so a leader line never crosses the frame or another
+    callout. `items` = [(anchor_xy, name, value, colour), ...]."""
+    sides = {"left": [], "right": []}
+    for it in items:
+        sides["left" if it[0][0] < 0.5 * W else "right"].append(it)
+    for side, group in sides.items():
+        group.sort(key=lambda it: it[0][1])
+        slots = {1: [0.5], 2: [0.26, 0.74], 3: [0.16, 0.5, 0.84],
+                 4: [0.12, 0.38, 0.64, 0.9]}.get(len(group), [])
+        x = (-0.04 * W) if side == "left" else (1.04 * W)
+        for (xy, name, value, color), y_frac in zip(group, slots):
+            ax.annotate(f"{name}\n{value}" if value else name, xy=xy, xycoords="data",
+                        xytext=(x, y_frac * H), textcoords="data",
+                        ha="right" if side == "left" else "left", va="center",
+                        fontsize=9.5, color="#212121", linespacing=1.5, zorder=9,
+                        bbox=dict(boxstyle="round,pad=0.4", fc="white", ec=color, lw=1.6),
+                        arrowprops=dict(arrowstyle="-", color="#78909C", lw=1.1,
+                                        shrinkA=3, shrinkB=9,
+                                        connectionstyle="arc3,rad=%.2f" %
+                                        (0.14 if side == "left" else -0.14)))
+
+
+def fig_annotated_image(stats, scene, cols=None):
+    """First cropped frame with the fitted orbit and the four circular-motion quantities marked in
+    the convention of the P-MAGIC teaching diagram (`image_rotating.png`): every quantity gets its
+    own coloured arrow, the SYMBOL sits beside the arrow, and the descriptive name + value live in a
+    boxed callout in the margin, joined by a leader line.
+
+    Linear speed v (straight tangent) and angular speed ω (small curved arc) are DIFFERENT arrows —
+    the earlier single "curved tangential ω arrow" conflated the two, which is exactly what the
+    reference diagram separates. All four arrows spring from one point: the object's real position
+    in the first frame, so the picture reads as "this object, here, right now"."""
     cal = stats["calibration"]
     cx, cy = cal.get("cx_px"), cal.get("cy_px")
     r_fit_px = cal.get("r_fit_px")
     r_m = cal.get("r_fit_m")
-    a_c = (stats.get("summary") or {}).get("mean_ac")
+    summ = stats.get("summary") or {}
+    a_c, v_m_s = summ.get("mean_ac"), summ.get("mean_v")
     frame = _first_frame()
-    fig, ax = plt.subplots(figsize=(6, 6))
+    H, W = (frame.shape[0], frame.shape[1]) if frame is not None else (1000, 1000)
+    # Colours adapted to this clip's footage, from the same module and the same frames the video
+    # overlay uses — so the still and the video show one palette, not two (see render.palette).
+    # Callout boxes sit on the white margin, not on the photo, so their borders keep the CANONICAL
+    # hue — the adapted colour is tuned for legibility against the footage and can be too light to
+    # read on white. Same hue either way, so the callout still reads as belonging to its symbol.
+    base = {k: _PAL.to_hex(v) for k, v in _PAL.BASE.items()}
+    pal = {k: _PAL.to_hex(v) for k, v in _PAL.clip_palette(
+        _cropped_video(), (cols or {}).get("theta_rad", []), cx, cy, r_fit_px).items()} \
+        if (None not in (cx, cy) and r_fit_px) else {k: _PAL.to_hex(v) for k, v in
+                                                    dict(_PAL.BASE, centre=_PAL.CENTRE).items()}
+    # Margins left and right of the photo, where the callouts live (reference layout).
+    g = 0.44 * W
+    fig, ax = plt.subplots(figsize=(min(13.0, 6.0 * (W + 2 * g) / H), 6.0))
     if frame is not None:
         ax.imshow(frame)
     if None not in (cx, cy) and r_fit_px:
-        ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color=_ANNOT_GREEN, lw=3))
-        ax.plot([cx], [cy], "+", color=_ANNOT_GREEN, ms=14, mew=2.5)
-        # r — yellow radius line from the centre out to the left edge of the orbit.
-        ax.annotate("", xy=(cx - r_fit_px, cy), xytext=(cx, cy),
-                    arrowprops=dict(arrowstyle="-", color=_ANNOT_YELLOW, lw=3), zorder=5)
-        if r_m is not None:
-            _var_chip(ax, cx - 0.66 * r_fit_px, cy + 0.05 * r_fit_px, "r", _fmt(r_m, 3, "m"))
-        # ω — curved tangential arrow along the bottom arc, direction from the sign of ω (matplotlib
-        # renders the real Unicode glyph; the cv2 video overlay in annotate.py cannot — see its note).
-        omega_val, _oca = canonical_omega(stats)
         # ω and a_c are clip AVERAGES on a (de)accelerating clip, pinned here to one frozen frame;
         # tag them "(avg)" so the still image cannot silently contradict the honesty box (on a clip
         # where ω ran 0->9.8, an unqualified "ω 5.79" reads as an instantaneous value). r is a
         # static geometry value, never averaged, so it carries no tag. (C3)
+        omega_val, _oca = canonical_omega(stats)
         avg = " (avg)" if _oca else ""
-        if omega_val is not None:
-            ccw = omega_val >= 0
-            ax.annotate("", xy=(cx + (0.55 if ccw else -0.55) * r_fit_px, cy + r_fit_px),
-                        xytext=(cx + (-0.55 if ccw else 0.55) * r_fit_px, cy + r_fit_px),
-                        arrowprops=dict(arrowstyle="-|>", color=_ANNOT_YELLOW, lw=3,
-                                        connectionstyle=f"arc3,rad={0.32 if ccw else -0.32}"), zorder=5)
-            _var_chip(ax, cx - 0.35 * r_fit_px, cy + r_fit_px + 0.14 * r_fit_px, "ω",
-                      _fmt(abs(omega_val), 2, "rad/s") + avg, sym_color="#111")
-        # a_c — inward (centripetal) arrow from a point on the upper-right of the orbit pointing
-        # toward the centre (stopped short of the centre marker so it doesn't crowd the r line).
-        # Chip symbol is a_c (not a bare "a"), which is unambiguous where advanced also uses a_t (A8).
+
+        # The object's own position in this frame — the anchor every vector springs from. Falls
+        # back to the upper-right of the orbit when the track has no finite first sample.
+        th0 = -math.pi / 4
+        if cols is not None:
+            xs, ys = cols.get("x_px"), cols.get("y_px")
+            if xs is not None and ys is not None:
+                ok = np.isfinite(xs) & np.isfinite(ys)
+                if ok.any():
+                    j = int(np.argmax(ok))
+                    th0 = math.atan2(ys[j] - cy, xs[j] - cx)
+        px_, py_ = cx + r_fit_px * math.cos(th0), cy + r_fit_px * math.sin(th0)
+        ux, uy = math.cos(th0), math.sin(th0)          # outward radial unit vector
+        ccw = (omega_val or 0) >= 0
+        s = 1.0 if ccw else -1.0
+        tx, ty = -uy * s, ux * s                        # unit vector along the motion
+
+        ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color=pal["orbit"], lw=2.6,
+                                path_effects=_halo(4.5, pal["orbit"])))
+        ax.plot([cx], [cy], "+", color=pal["orbit"], ms=15, mew=2.5,
+                path_effects=_halo(4.5, pal["orbit"]))
+        ax.plot([px_], [py_], "o", color="#1565C0", ms=8, mec="white", mew=1.6, zorder=6)
+
+        calls = []   # (symbol anchor, name, value, colour) → margin callouts, placed at the end
+
+        # r — double-headed arrow from the centre, drawn PERPENDICULAR to the object's radius so it
+        # can never lie under the a_c arrow (which runs along that radius).
+        rx, ry = -uy, ux
+        if ry < 0:                                      # prefer the downward side, as in the reference
+            rx, ry = -rx, -ry
+        ax.annotate("", xy=(cx + rx * r_fit_px, cy + ry * r_fit_px), xytext=(cx, cy),
+                    arrowprops=dict(arrowstyle="<|-|>", color=pal["r"], lw=2.6,
+                                    shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["r"])), zorder=5)
+        r_sym = (cx + rx * 0.52 * r_fit_px + ry * 0.15 * r_fit_px,
+                 cy + ry * 0.52 * r_fit_px - rx * 0.15 * r_fit_px)
+        _symbol(ax, r_sym, "r", pal["r"])
+        if r_m is not None:
+            calls.append((r_sym, _QUANTITY_NAMES["r"], _fmt(r_m, 3, "m"), base["r"]))
+
+        # v — straight tangent arrow at the object, pointing the way it travels.
+        vlen = 0.78 * r_fit_px
+        ax.annotate("", xy=(px_ + tx * vlen, py_ + ty * vlen), xytext=(px_, py_),
+                    arrowprops=dict(arrowstyle="-|>,head_width=0.32,head_length=0.6", color=pal["v"],
+                                    lw=2.8, shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["v"])), zorder=5)
+        v_sym = (px_ + tx * 0.70 * vlen + ux * 0.24 * r_fit_px,
+                 py_ + ty * 0.70 * vlen + uy * 0.24 * r_fit_px)
+        _symbol(ax, v_sym, "v", pal["v"])
+        if v_m_s is not None:
+            calls.append((v_sym, _QUANTITY_NAMES["v"], _fmt(v_m_s, 2, "m/s") + avg, base["v"]))
+
+        # a_c — straight arrow from the object toward the centre (stopped short of the centre mark).
+        ax.annotate("", xy=(px_ - ux * 0.62 * r_fit_px, py_ - uy * 0.62 * r_fit_px),
+                    xytext=(px_, py_),
+                    arrowprops=dict(arrowstyle="-|>,head_width=0.32,head_length=0.6", color=pal["ac"],
+                                    lw=2.8, shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["ac"])), zorder=5)
+        ac_sym = (px_ - ux * 0.36 * r_fit_px + tx * 0.24 * r_fit_px,
+                  py_ - uy * 0.36 * r_fit_px + ty * 0.24 * r_fit_px)
+        _symbol(ax, ac_sym, "$a_c$", pal["ac"])
         if a_c is not None:
-            sx, sy = cx + 0.64 * r_fit_px, cy - 0.64 * r_fit_px
-            ax.annotate("", xy=(cx + 0.40 * r_fit_px, cy - 0.40 * r_fit_px), xytext=(sx, sy),
-                        arrowprops=dict(arrowstyle="-|>", color=_ANNOT_YELLOW, lw=3), zorder=5)
-            _var_chip(ax, sx - 0.02 * r_fit_px, sy - 0.10 * r_fit_px, "$a_c$", _fmt(a_c, 2, "m/s²") + avg)
-    ax.set_title(_title(scene, "Scene geometry"))
+            calls.append((ac_sym, _QUANTITY_NAMES["a_c"], _fmt(a_c, 2, "m/s²") + avg, base["ac"]))
+
+        # ω — a SMALL curved arc just outside the orbit at the object, curling the way it spins.
+        # This is the angular quantity: it is about the turning, not about a direction of travel,
+        # which is why it is a separate mark from v (reference diagram).
+        d = 0.30
+        a0, a1 = th0 - s * d, th0 + s * d
+        rr = 1.16 * r_fit_px
+        ax.annotate("", xy=(cx + rr * math.cos(a1), cy + rr * math.sin(a1)),
+                    xytext=(cx + rr * math.cos(a0), cy + rr * math.sin(a0)),
+                    arrowprops=dict(arrowstyle="-|>,head_width=0.3,head_length=0.55", color=pal["w"],
+                                    lw=2.8, shrinkA=0, shrinkB=0,
+                                    connectionstyle=f"arc3,rad={-0.35 * s}",
+                                    path_effects=_halo(4.5, pal["w"])), zorder=5)
+        w_sym = (cx + 1.40 * r_fit_px * math.cos(th0), cy + 1.40 * r_fit_px * math.sin(th0))
+        _symbol(ax, w_sym, "ω", pal["w"])
+        if omega_val is not None:
+            calls.append((w_sym, _QUANTITY_NAMES["ω"],
+                          _fmt(abs(omega_val), 2, "rad/s") + avg, base["w"]))
+
+        _place_callouts(ax, calls, W, H)
+    ax.set_xlim(-g, W + g)
+    ax.set_ylim(H, 0)
+    ax.set_aspect("equal")
+    ax.set_title(_title(scene, "Scene geometry", width=52))
     ax.axis("off")
     fig.tight_layout()
     fig.savefig(PLOTS / "annotated_image.png")
@@ -566,7 +693,12 @@ def _phase_sequence(stats):
         if not _phase_significant((e - s) / fps):       # skip a 1-2 frame despeckle sliver
             continue                                     # (so prose can't claim a phantom "steady")
         if not seq or seq[-1]["label"] != L.lower():
-            seq.append({"label": L.lower(), "meaning": friendly.get(L, L.lower())})
+            # `meaning` describes the MOTION (what the prose talks about); `figure_word` is what the
+            # band literally prints, which describes the plotted QUANTITY. Recording both keeps the
+            # Axis-4 judge from reading "speeding up" in the prose vs "increasing" on the figure as
+            # a contradiction.
+            seq.append({"label": L.lower(), "meaning": friendly.get(L, L.lower()),
+                        "figure_word": PHASE_WORDS.get(L, L.lower())})
     return seq
 
 
@@ -583,23 +715,28 @@ def _annotation_manifest(stats):
     img = []
     if r_m is not None:
         img.append({"label": "radius", "symbol": "r", "value": _fmt(r_m, 3, "m"),
-                    "target": "arrow from the centre to the object"})
-    # ω/a_c are clip averages on a (de)accelerating clip — tag "(avg)" to match the chip (C3),
+                    "target": "double-headed arrow from the centre out to the circular path"})
+    # ω/a_c/v are clip averages on a (de)accelerating clip — tag "(avg)" to match the callout (C3),
     # so the prose that quotes these EXACT values inherits the qualifier too.
     avg = " (avg)" if _oca else ""
+    v_m_s = (stats.get("summary") or {}).get("mean_v")
+    if v_m_s is not None:
+        img.append({"label": "linear speed", "symbol": "v", "value": _fmt(v_m_s, 2, "m/s") + avg,
+                    "target": "straight arrow at the object, along the direction it travels"})
     if omega_val is not None:
-        img.append({"label": "angular velocity", "symbol": "ω",
+        img.append({"label": "angular speed", "symbol": "ω",
                     "value": _fmt(abs(omega_val), 2, "rad/s") + avg,
-                    "target": "curved tangential arrow on the orbit showing the spin direction"})
+                    "target": "small curved arrow showing which way it turns"})
     a_c = (stats.get("summary") or {}).get("mean_ac")
     if a_c is not None:
         img.append({"label": "centripetal acceleration", "symbol": "a_c",
                     "value": _fmt(a_c, 2, "m/s²") + avg,
-                    "target": "arrow pointing inward toward the centre"})
+                    "target": "straight arrow from the object pointing inward toward the centre"})
     if img:
         man["annotated_image.png"] = {
-            "shows": "photo of the object with the fitted circle, and the radius, angular velocity "
-                     "and centripetal acceleration marked",
+            "shows": "photo of the object with the fitted circle, and the radius, linear speed, "
+                     "angular speed and centripetal acceleration marked — each with its symbol "
+                     "beside its arrow and its name and value in a callout in the margin",
             "annotations": img}
     if r_m is not None:
         man["annotated_image_basic.png"] = {
@@ -677,7 +814,7 @@ def main() -> int:
     ac_hline = s.get("mean_ac") if _omega_is_clip_avg else st.get("stable_mean_ac")
     ac_hline_lbl = "clip average" if _omega_is_clip_avg else "stable mean"
 
-    fig_annotated_image(stats, scene)
+    fig_annotated_image(stats, scene, cols)
     fig_annotated_image_basic(stats, scene)  # simplified frame for the basic tier
     traj_x, traj_y = fig_trajectory(stats, cols, scene)
     fig_trajectory_basic(stats, cols, scene)  # single-colour path for the basic tier

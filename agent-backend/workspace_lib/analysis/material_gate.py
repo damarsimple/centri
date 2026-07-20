@@ -597,7 +597,14 @@ def cross_tier_issues(materials, seed, anchors, unreliable=False):
 
 
 _NUMWORD = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
-_PHASE_WORDS = ("speeding up", "slowing down", "steady")
+_PHASE_WORDS = ("speeding up", "slowing down", "steady", "increasing", "decreasing")
+# The shaded graphs label their bands by the plotted QUANTITY ("increasing"/"decreasing"), while
+# the prose talks about the MOTION ("speeding up"/"slowing down"). Same phase, two vocabularies —
+# fold them together so prose written in either one is checked, and neither is flagged as naming a
+# phase the figure does not draw.
+_PHASE_SYNONYM = {"speeding up": "speeding up", "increasing": "speeding up",
+                  "slowing down": "slowing down", "decreasing": "slowing down",
+                  "steady": "steady"}
 
 
 def annotation_issues(text: str, phases):
@@ -611,7 +618,7 @@ def annotation_issues(text: str, phases):
     strings."""
     if not phases:
         return []
-    present = {p.lower() for p in phases}
+    present = {_PHASE_SYNONYM.get(p.lower(), p.lower()) for p in phases}
     n = len(phases)
     t = norm(text)
     issues = []
@@ -626,12 +633,15 @@ def annotation_issues(text: str, phases):
     # (b) a phase WORD enumerated right after a "phases" mention that no rendered band carries.
     # Only fire inside an actual enumeration — the window must also name a REAL rendered phase —
     # so "the phases are not steady" (no listed phase) never trips it.
+    # Either vocabulary counts as "naming a rendered phase" here, so prose that follows the
+    # figure's wording still opens the check rather than silently skipping it.
+    present_surface = {w for w, canon in _PHASE_SYNONYM.items() if canon in present}
     for pm in re.finditer(r"phases?\b", t):
         window = t[pm.end(): pm.end() + 80]
-        if not any(p in window for p in present):
+        if not any(p in window for p in present_surface):
             continue
         for word in _PHASE_WORDS:
-            if word in window and word not in present:
+            if word in window and _PHASE_SYNONYM.get(word, word) not in present:
                 issues.append(f"prose names a '{word}' phase but the figure's phases are "
                               f"{', '.join(phases)}")
     return list(dict.fromkeys(issues))
