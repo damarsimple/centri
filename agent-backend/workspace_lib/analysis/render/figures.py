@@ -743,10 +743,14 @@ def _annotation_manifest(stats):
                     "value": _fmt(a_c, 2, "m/s²") + avg,
                     "target": "straight arrow from the object pointing inward toward the centre"})
     if img:
+        # Says WHAT is marked, not HOW it is drawn. The layout detail lives in each annotation's
+        # `target` (where the Axis-4 judge needs it); spelling it out here put the drawing mechanics
+        # in front of the material writer, which came back as "each annotated with its symbol" —
+        # and `annotate` is banned student-facing vocabulary, so the tier gate rejected it.
         man["annotated_image.png"] = {
             "shows": "photo of the object with the fitted circle, and the radius, linear speed, "
-                     "angular speed and centripetal acceleration marked — each with its symbol "
-                     "beside its arrow and its name and value in a callout in the margin",
+                     "angular speed and centripetal acceleration each marked with its symbol "
+                     "and value",
             "annotations": img}
     if r_m is not None:
         man["annotated_image_basic.png"] = {
