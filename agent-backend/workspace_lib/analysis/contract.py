@@ -11,6 +11,7 @@ same `pipeline_inputs.json` -> byte-identical `stats.json`.
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,15 @@ import numpy as np
 from . import common
 
 INPUTS_PATH = Path("analysis_output/data/pipeline_inputs.json")
+
+# Where to look for the clip the trajectory was measured from, relative to the job root.
+# Only used to read frame timestamps; nothing here decodes pixels.
+_VIDEO_CANDIDATES = ("input_video.mp4", "analysis_output/roi/cropped.mp4")
+
+# A frame interval this much longer than the median means the camera dropped a frame.
+# Phone captures are nominally constant-rate, so a genuine drop stands out as a clean
+# integer multiple; 1.5x separates it from timestamp jitter without catching rounding.
+_DROP_RATIO = 1.5
 
 # Required top-level keys; the run aborts loudly if any are missing rather than
 # silently inventing values (the old failure mode).
@@ -106,6 +116,63 @@ def _radius_cv(x, y, cx, cy) -> float:
     return float(r.std() / m) if m > 1e-9 else float("nan")
 
 
+def _frame_timestamps(video: Path) -> np.ndarray | None:
+    """Presentation timestamps of every frame, or None if they cannot be read.
+
+    Read from the container, so this reports what the CAMERA did, independently of
+    how any tracker decoded the file."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "frame=pts_time", "-of", "csv=p=0", str(video)],
+            capture_output=True, text=True, timeout=120, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    t = [s.rstrip(",") for s in out.split() if s.rstrip(",")]
+    try:
+        ts = np.array([float(v) for v in t], dtype=float)
+    except ValueError:
+        return None
+    return ts if ts.size >= 8 else None
+
+
+def duplicated_frame_indices(video: Path, n_frames: int) -> list[int]:
+    """Indices in the EXTRACTED frame sequence that are duplicates of their predecessor.
+
+    A camera that drops a frame leaves a hole in an otherwise constant-rate timeline.
+    Frame extraction runs at a constant rate, so ffmpeg fills each hole by repeating the
+    previous frame — turntable-3 has one such hole and yields 351 images from 350 real
+    frames. The repeat is a perfectly good image, so trackers report it faithfully: the
+    object does not move. Downstream, with time assumed uniform, that reads as the object
+    momentarily stopping and then making up the distance, i.e. as an acceleration no
+    coasting body can produce. This is what put a phantom speed-up in turntable-3's v(t).
+
+    Detecting it from timestamps rather than from the trajectory matters: a frozen
+    position is also what a genuinely stationary object looks like, and every clip here
+    ends with the object at rest.
+    """
+    ts = _frame_timestamps(video)
+    if ts is None:
+        return []
+    d = np.diff(ts)
+    if d.size < 4:
+        return []
+    med = float(np.median(d))
+    if not (med > 0):
+        return []
+    dup: list[int] = []
+    # Walk the real frames, tracking where each lands once the holes are filled.
+    offset = 0
+    for i, gap in enumerate(d):
+        extra = int(round(gap / med)) - 1
+        if gap > _DROP_RATIO * med and extra > 0:
+            # Frame i is repeated `extra` times to fill the hole after it; those
+            # repeats occupy the next `extra` slots of the extracted sequence.
+            dup.extend(range(i + 1 + offset, i + 1 + offset + extra))
+            offset += extra
+    return [k for k in dup if 0 <= k < n_frames]
+
+
 def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
     if not path.exists():
         raise ContractError(
@@ -191,6 +258,29 @@ def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
             f"coordinate_space must be one of {sorted(_DISPLAY_SPACES | _CROPPED_SPACES)}, "
             f"got {data['coordinate_space']!r}"
         )
+
+    # Frames the camera never captured. Blank them so the trajectory carries no
+    # position the camera did not measure; the short-gap fill in kinematics
+    # interpolates across them, which is the honest reading — the object was
+    # somewhere between its neighbours, and we do not know where.
+    for cand in _VIDEO_CANDIDATES:
+        video = Path(cand)
+        if not video.exists():
+            continue
+        dup = duplicated_frame_indices(video, len(x_px))
+        if dup:
+            x_px = x_px.copy()
+            y_px = y_px.copy()
+            x_px[dup] = np.nan
+            y_px[dup] = np.nan
+            common.set_validation_flag("dropped_source_frames")
+            common.log(
+                f"[contract] {video.name}: the camera dropped {len(dup)} frame(s); "
+                f"extraction filled the hole(s) by repeating the previous image at "
+                f"index {dup if len(dup) <= 6 else str(dup[:6]) + '...'}. Blanked, so "
+                f"a repeated image cannot read as the object standing still."
+            )
+        break
 
     tracked_label = str(data["tracked_label"])
     ref_label = str(data["ref_label"])
