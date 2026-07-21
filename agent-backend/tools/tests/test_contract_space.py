@@ -120,6 +120,40 @@ def test_ellipse_fit_degrades_to_a_circle():
     assert common.fit_orbit_ellipse([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) is None
 
 
+# ── worked-example arithmetic must close on the figures it PRINTS ────────────────
+def test_worked_example_products_close_on_printed_values():
+    """roundabout-4046 printed 'laps = 1.2 x 15 s ... = 19 laps'. 1.2 x 15 is 18: the seed
+    displayed rounded factors but computed from f=1.2479, t=14.998 (=18.7 -> 19). A student
+    multiplying what is on the page gets a different number from the page. Only fires when
+    the two roundings straddle .5, which is why a whole sweep missed it."""
+    import re
+    from analysis import material_seed as MS
+    # Driven through the real build_seed, on a real stats.json, so the ctx is the one
+    # production uses rather than a hand-built stand-in that drifts from it.
+    base = json.loads((Path(__file__).resolve().parents[2] / "workspaces-archive"
+                       / "pre-coordfix-20260721-145038" / "job_roundabout-4046"
+                       / "analysis_output" / "data" / "stats.json").read_text())
+    # the exact 4046 period that failed (f = 1.2479 -> 18.72 laps, printed factors give 18),
+    # plus neighbours either side of the .5 boundary the bug hides behind
+    for period in (0.8014, 0.8133, 1.0724, 0.2806, 1.0583):
+        st = json.loads(json.dumps(base))
+        st["period_and_frequency"]["period_s"] = period
+        st["period_and_frequency"]["frequency_hz"] = 1.0 / period
+        seed = MS.build_seed(st, csv_path=None)
+        exs = seed["worked_examples"]["basic"]
+        assert exs, "basic tier must produce worked examples"
+        for ex in exs:
+            nums = [float(x) for x in re.findall(r"[0-9]*\.?[0-9]+", ex["substitute"])]
+            got = float(re.findall(r"[0-9]*\.?[0-9]+", ex["result"])[0])
+            prod = 1.0
+            for n in nums:
+                prod *= n
+            # the printed result must be the printed factors, at the precision shown
+            assert abs(prod - got) < 0.5 + 0.01 * abs(got), (
+                f"period={period}: '{ex['substitute']}' -> {prod:.4f} "
+                f"but printed '{ex['result']}'")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

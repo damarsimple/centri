@@ -182,6 +182,20 @@ def _g(x, sig=3):
     return f"{x:.{sig}g}"
 
 
+def _shown(x, sig=3):
+    """The value a reader actually SEES, as a number.
+
+    A worked example has to close on the figures it prints: a student multiplying
+    "1.2 × 15 s" must get the number on the result line. Computing from the full-precision
+    value instead lets the two disagree whenever the rounding falls the other way — on
+    roundabout-4046, f = 1.2479 and t = 14.998 give 18.7 → "≈ 19 laps" under a substitution
+    line that reads 1.2 × 15 = 18. It fires only near a .5 boundary, which is how it
+    survived a whole sweep. Round-tripping through `_g` makes display and arithmetic the
+    same number by construction.
+    """
+    return float(_g(x, sig))
+
+
 def _objectives(ctx):
     """Per-tier 'After this material you can…' objectives (CLT depth ladder, Part B.2)."""
     obj = ctx["obj"]
@@ -254,7 +268,10 @@ def _worked_examples(ctx):
 
     # ---- basic (symbol-free) ----
     if isinstance(r, (int, float)):
-        circ = 2 * math.pi * r
+        # 3.14 and the rounded radius, because that is what the substitution line shows the
+        # student to multiply. Using math.pi and full-precision r here would be more accurate
+        # and less honest — the printed arithmetic has to be the arithmetic we did.
+        circ = 2 * 3.14 * _shown(r)
         out["basic"].append({
             "title": "How far does it travel in one lap?",
             "given": f"It sits about {_g(r)} m out from the centre.",
@@ -268,7 +285,7 @@ def _worked_examples(ctx):
     # is at rest for part of an impulsive/decaying clip, so f×clip_len over-counts ~3× (A1)).
     turn = ctx.get("turning_dur") or dur
     if isinstance(f, (int, float)) and isinstance(turn, (int, float)):
-        laps = f * turn
+        laps = _shown(f, 2) * _shown(turn)
         out["basic"].append({
             "title": "Roughly how many laps while it is turning?",
             "given": f"It actually turns for about {_g(turn)} s and makes about {_g(f, 2)} turns "
