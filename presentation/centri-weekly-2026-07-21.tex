@@ -1,0 +1,320 @@
+% Centri — Weekly progress (week ending 2026-07-21)
+% Standalone deck: every slide readable cold, no narration needed.
+% Compile: pdflatex -interaction=nonstopmode centri-weekly-2026-07-21.tex  (run twice)
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{metropolis}
+\metroset{sectionpage=progressbar, subsectionpage=none, numbering=fraction, progressbar=frametitle}
+
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+\usepackage[most]{tcolorbox}
+
+% ---- palette (shared with the other Centri decks) ------------------------
+\definecolor{cMeas}{HTML}{1F6FB2}
+\definecolor{cPed}{HTML}{B5651D}
+\definecolor{cApp}{HTML}{2E7D32}
+\definecolor{cInfra}{HTML}{5E35B1}
+\definecolor{cAccent}{HTML}{C62828}
+\definecolor{cGrey}{HTML}{616161}
+\setbeamercolor{frametitle}{bg=cMeas}
+\setbeamercolor{progress bar}{fg=cAccent}
+
+\newcommand{\ok}{{\color{cApp}\textbf{\checkmark}}}
+\newcommand{\nope}{{\color{cGrey}--}}
+\newcommand{\todo}{{\scriptsize\color{cAccent}\textbf{[to fill in]}}}
+% one-line, self-contained takeaway centred under the slide body
+\newcommand{\takeaway}[1]{\vfill{\footnotesize\itshape\color{cGrey}#1\par}}
+
+\title{Centri --- Measurements That Can Be Trusted}
+\subtitle{Video-generated tiered physics material, with every number checked against the video it came from}
+\author{Damar Albaribin}
+\institute{MSc Thesis --- advisor: Prof.\ Wu-Yuin Hwang}
+\date{Week ending 2026-07-21}
+
+\begin{document}
+\maketitle
+
+% =========================================================================
+\begin{frame}{What Centri produces, and where the risk sits}
+\small
+\textbf{Centri} takes an ordinary phone video of an object spinning in a circle and, using
+computer-vision tracking (\emph{no} phone sensors), turns it into physics learning material at
+\textbf{three levels} --- basic, intermediate, advanced --- with \textbf{annotated figures}: the
+tracked frame, the motion graphs, a data table.
+\vspace{0.4em}
+
+\textbf{P-MAGIC} is the sibling app: same three-level multimodal material, but measured from a
+phone's motion \emph{sensors}. Ten physics teachers rated its material \textbf{8.2--8.6\,/\,10}.
+A sensor reports the motion directly. \textbf{A video does not} --- every quantity must first be
+recovered from pixels, and that recovery can be wrong in ways the finished material cannot show.
+\vspace{0.4em}
+
+\begin{tcolorbox}[colback=cMeas!6,colframe=cMeas,boxsep=2pt,left=6pt,right=6pt,top=3pt,bottom=3pt]
+\small So the material is only as good as the measurement underneath it. Centri now
+\textbf{corrects for the angle the video was shot from}, \textbf{checks each measurement against
+the video it came from}, and \textbf{shows the measurement in the figures} rather than an idealised
+drawing of it.
+\end{tcolorbox}
+\takeaway{The three slides that follow are those three claims, each with the evidence that supports it.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The camera angle is corrected before anything is measured}
+\scriptsize
+A circle filmed from off to one side photographs as an \textbf{oval}, with its near side looking
+bigger than its far side, so an object going round at a \emph{steady} rate appears to speed up and
+slow down once per lap. No smoothing can remove that: it repeats identically every lap, exactly as a
+real rhythm would.
+\vspace{1pt}
+\begin{center}
+\includegraphics[width=0.985\textwidth]{rect4046_slide.png}
+\end{center}
+\vspace{1pt}
+One fact of perspective undoes it: a circle's \textbf{true centre} and the \textbf{centre of the oval
+you see} coincide only when the camera looks straight on, so their separation measures the slant ---
+with no camera calibration and nothing known about the room.
+\takeaway{It changes where \emph{within} a lap the object is judged to be, not how many laps happened
+--- the average turn rate moves 0.1\%.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The same video, measured two ways}
+\scriptsize
+Both pictures are real output from the same 15-second clip of a playground wheel. The difference is
+entirely in how the measurement was made --- naively on the left, corrected on the right.
+\vspace{2pt}
+\begin{columns}[T]
+\begin{column}{0.30\textwidth}
+\centering
+\includegraphics[width=0.80\textwidth]{wheel_naive_crop.png}\\[1pt]
+{\scriptsize\textbf{\color{cAccent}Measured naively.} The blue dot, meant to mark the handle,
+floats clear of it; the ring is a circle on a path that is not one.}
+\end{column}
+\begin{column}{0.30\textwidth}
+\centering
+\includegraphics[width=0.80\textwidth]{wheel_corrected_crop.png}\\[1pt]
+{\scriptsize\textbf{\color{cApp}Measured correctly.} The dot sits on the handle,
+and the ring follows the oval the wheel really traces.}
+\end{column}
+\begin{column}{0.38\textwidth}
+\vspace{6pt}
+\renewcommand{\arraystretch}{1.26}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+& \color{cAccent}naive & \color{cApp}correct \\
+\midrule
+radius (m)              & 0.281 & \textbf{0.260} \\
+turn rate (rad/s)       & 7.88 & \textbf{7.80} \\
+inward accel.\ (m/s\textsuperscript{2}) & 22.8 & \textbf{16.0} \\
+largest accel.          & 235.5 & \textbf{23.0} \\
+radius wobble (m)       & 0.114 & \textbf{0.009} \\
+one lap (s)             & 1.07 & \textbf{0.81} \\
+\bottomrule
+\end{tabular}
+\end{column}
+\end{columns}
+\takeaway{The left column is not noisy, it is \emph{confidently wrong} --- its lap time contradicts its
+own turn rate (7.88\,rad/s means 0.80\,s, not 1.07\,s). No finished worksheet would reveal that, which
+is why the checks run on the measurement rather than on the prose.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Each measurement is checked against the video it came from}
+\small
+Four automatic checks, each rejecting one specific way a plausible-looking number can be wrong.
+They cost nothing, need no AI model, and run before any material is written.
+\vspace{0.3em}
+\scriptsize
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}p{5.0cm}p{7.6cm}@{}}
+\toprule
+\textbf{The check} & \textbf{The mistake it refuses to ship} \\
+\midrule
+the object's path and the centre it turns about are measured on the \textbf{same picture} &
+the two arriving from differently cropped copies of the frame --- which reads as a genuinely
+wobbly wheel, so the warnings blame the physics instead of the arithmetic \\
+the slant correction is applied \textbf{only where a slant was measured} &
+``correcting'' a video already shot straight on, which would fit the correction to noise and
+inject an error rather than remove one \\
+the figures plot \textbf{measured positions} &
+a marker drawn where the idealised circle says the object should be, rather than where it
+actually was \\
+worked examples \textbf{close on their own printed numbers} &
+a worked example whose stated answer is not what its own printed multiplication gives \\
+\bottomrule
+\end{tabular}
+\takeaway{Each check earns its place by having caught a real error on real footage --- the first two
+found faults that had already passed a full review and reached a previous deck.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The evidence set: seven clips, four phenomena}
+\scriptsize
+Every clip Centri is willing to teach from, and what is actually \emph{measured} in each. A clip
+earns a place here only when its numbers can be defended, not when the footage looks good.
+\vspace{3pt}
+\renewcommand{\arraystretch}{1.35}
+\begin{center}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+& \textbf{position of the} & \textbf{real-world} & \textbf{slant} & \textbf{material passed} \\
+& \textbf{object, every frame} & \textbf{size} & \textbf{correction} & \textbf{every check} \\
+\midrule
+playground wheel & \ok & \ok & \ok\ {\color{cGrey}applied} & \ok \\
+turntable {\color{cGrey}\,(3 clips)} & \ok & \ok & \nope\ {\color{cGrey}shot straight on} & \ok \\
+computer fan & \ok & \ok & \nope\ {\color{cGrey}shot straight on} & \ok \\
+ceiling fan {\color{cGrey}\,(2 clips)} & \nope\ {\color{cGrey}rate only} & \ok\ {\color{cGrey}tape-measured} & \nope\ {\color{cGrey}shot straight on} & \ok \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{4pt}
+{\scriptsize The ceiling fan is the one exception, and it is labelled as such wherever it is used:
+a spinning blade has no fixed point to follow, so its \emph{rate} and \emph{size} are measured but
+its path is reconstructed from the rate. Its speed and acceleration are sound; its drawn circle is
+a model, not a photograph of the motion.}
+\takeaway{Exactly one clip needs the slant correction --- the one that was actually filmed at a slant.
+The others are left untouched, and record why.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{What the learner actually receives}
+\scriptsize
+Real output from the same run --- the figures that go into the student worksheet alongside the prose.
+\vspace{3pt}
+\begin{columns}[T]
+\begin{column}{0.52\textwidth}
+\centering
+\includegraphics[width=\textwidth]{wheel_graph.png}\\[2pt]
+{\scriptsize\textbf{Turn rate over time.} The shaded band names the motion phase the graph actually
+draws --- here a single long \emph{slowing down} --- and the dashed line is the clip average, so a
+frozen average is never mistaken for an instant reading.}
+\end{column}
+\begin{column}{0.44\textwidth}
+\vspace{4pt}
+{\scriptsize The remaining ripple in this line is \emph{real}: the handle is a solid knob roughly
+110 pixels across, and its centre in the picture genuinely shifts as different faces of it come into
+view. That is the subject of the next slide.}
+\vspace{6pt}
+
+{\scriptsize Every value that reaches the worksheet is one of these measured quantities, tagged
+\emph{(avg)} whenever it is a whole-clip average:}
+\vspace{3pt}
+
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{measurement} & \textbf{value} & \\
+\midrule
+radius & 0.260 & m \\
+turn rate {\color{cGrey}(avg)} & 7.80 & rad/s \\
+inward acceleration {\color{cGrey}(avg)} & 16.05 & m/s\textsuperscript{2} \\
+speed along the path & 2.03 & m/s \\
+time for one lap & 0.81 & s \\
+laps per second & 1.23 & Hz \\
+\bottomrule
+\end{tabular}
+\end{column}
+\end{columns}
+\takeaway{Three levels of worksheet are written from these same six numbers, so the basic and advanced
+versions can differ in demand without ever disagreeing on fact.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{What limits accuracy now is the sticker, not the geometry}
+\small
+With the camera angle corrected, the remaining scatter was measured to find out what is still in
+the way. The answer is not the geometry.
+\vspace{0.4em}
+\scriptsize
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}p{6.4cm}rp{5.6cm}@{}}
+\toprule
+\textbf{What was measured} & & \textbf{What it means} \\
+\midrule
+how much of the leftover error repeats each lap &
+\textbf{1.3\%} & a wrong shape model would show up here. Nothing left to model. \\
+how much the tracked handle's \emph{apparent size} changes as it goes round &
+\textbf{75--82\%} & we see different faces of a solid knob at different distances \\
+leftover scatter, against the size of the handle itself &
+\textbf{$\approx$15\%} & ``where exactly is the handle?'' has no better answer than this \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+\small The object being followed is a \emph{lump}, not a point, so its centre in the picture shifts
+as it turns. A better shape model cannot fix that --- but a \textbf{small, flat, high-contrast
+sticker} can, and that is a change to how clips are filmed, not to the software. The same fix
+already rescued two earlier clips.
+\takeaway{Worth knowing before building anything more elaborate: the next real gain comes from the
+camera work, not from more mathematics.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Planned: filming the ceiling fan with sensors running}
+\small
+The open question this project has not yet answered directly: \textbf{does a video measurement agree
+with a sensor measurement of the same motion?} Every comparison so far is against a different setup
+on a different day.
+\vspace{0.3em}
+
+\begin{tcolorbox}[colback=cPed!6,colframe=cPed,boxsep=1pt,left=6pt,right=6pt,top=2pt,bottom=2pt]
+\small \textbf{The plan.} Film the ceiling fan while a phone strapped to the blade records its own
+motion sensors. One motion, two independent instruments, same moment --- so the two turn-rate curves
+can be laid on top of each other.
+\end{tcolorbox}
+\vspace{0.3em}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}p{5.3cm}p{5.6cm}c@{}}
+\toprule
+\textbf{To settle} & \textbf{Why it matters} & \textbf{result} \\
+\midrule
+how closely the two agree on turn rate & the headline number for the video-vs-sensor claim & \todo \\
+whether the video keeps up during speed-up & the hardest part of the motion to catch & \todo \\
+what the phone's own mass does to the fan & the instrument changes what it measures & \todo \\
+which one is better on real-world size & the video needs a ruler; the sensor does not & \todo \\
+\bottomrule
+\end{tabular}
+\takeaway{This is the measurement that would let Centri claim video is a valid substitute for sensors,
+rather than merely a convenient one.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Also planned, and open decisions}
+\small
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\textbf{\color{cMeas}Measurement}
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{Re-film the park exercise wheel} --- the best motion in the collection (27 turns,
+        the only one that coasts fully to rest) but nothing can currently follow it. Needs one strip
+        of bright tape on a handle. \todo
+  \item \textbf{A ruler in every scene.} Real-world size is the one quantity a video cannot get on
+        its own, and it is the weakest link in two clips. \todo
+  \item \textbf{One unexplained clip} (bicycle wheel) --- a repeating wobble that is \emph{not} the
+        camera angle. Cause unknown. \todo
+\end{itemize}
+\end{column}
+\begin{column}{0.5\textwidth}
+\textbf{\color{cPed}Teaching}
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{Ask before showing?} A ``what do you predict?'' box before the measurement is
+        revealed. \todo
+  \item \textbf{A compare-two task?} P-MAGIC has students compare two experiments; from one video
+        we cannot --- pair two clips, or compare two phases of one? \todo
+  \item \textbf{Teacher ratings.} Give the rating sheets to real teachers and check how well their
+        scores agree with the automatic ones --- the step that turns these results from preliminary
+        into publishable. \todo
+\end{itemize}
+\end{column}
+\end{columns}
+\takeaway{Placeholder slide --- each item above needs a decision or a number before it can be
+presented as a result.}
+\end{frame}
+
+\end{document}

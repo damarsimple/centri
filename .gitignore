@@ -44,6 +44,10 @@ presentation/**
 !presentation/**/
 !presentation/**/*.tex
 !presentation/**/*.md
+# ...and the scripts that BUILD the figures. The technical report's generators were
+# one-offs that got lost, leaving its PNGs as the only copy and forcing them past the
+# repo-wide *.png rule. Keeping the generator means a figure can be rebuilt from a run.
+!presentation/**/*.py
 presentation/_backup_*/
 presentation/_old/
 
