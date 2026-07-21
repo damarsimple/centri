@@ -24,7 +24,8 @@ import numpy as np
 AXIS_RATIO_OBLIQUE   = 1.08   # image orbit ellipticity consistent with a tilted circle
 PHASELOCK_UNRELIABLE = 0.60   # majority of detrended-omega variance explained by orbit phase
 RIPPLE_CV_UNRELIABLE = 0.08   # and the ripple is a material fraction of the mean
-AXIS_UNRELIABLE      = 1.08   # AND the orbit is visibly elliptical (the artifact's cause)
+AXIS_UNRELIABLE      = 1.08   # orbit visibly elliptical (kept: reported, no longer a gate)
+MIN_REVS_FOR_PHASELOCK = 2.0  # below this the phase-lock statistic cannot convict OR clear
 
 def _load(csv_path):
     t,x,y,om,rpx=[],[],[],[],[]
@@ -73,18 +74,39 @@ def compute(csv_path, stats):
     ripple_cv=float(np.std(resid)/abs(mean_w)) if mean_w else 0.0
     axis_ratio=_axis_ratio(x,y)
 
+    # How many revolutions the phase-lock statistic actually had to work with. Below ~2 it
+    # fits four harmonics to about 1.5 cycles and means nothing either way — it can neither
+    # convict a clip nor clear one.
+    n_revs=float(np.ptp(phi)/(2*math.pi))
+
     flags=[]
     if axis_ratio>AXIS_RATIO_OBLIQUE: flags.append("oblique_capture")
-    # Conjunction: elliptical orbit AND phase-locked ripple AND material amplitude.
-    unreliable = (axis_ratio>=AXIS_UNRELIABLE and phaselock>=PHASELOCK_UNRELIABLE
+
+    # A phase-locked ripple of material amplitude is not trustworthy per-instant, WHATEVER
+    # its cause. This used to also require an elliptical orbit, on the reasoning that oblique
+    # capture is what produces the ripple — true of the clip it was derived from, and an
+    # assumption everywhere else: it silently cleared any phase-locked ripple on a round
+    # orbit. turntable-3 is round to an axis ratio of 1.002 and still carries a ripple that
+    # survives every explanation we can test (not the marker centroid, since the object's own
+    # orientation shows it too; not motion blur, since its imaged size is constant; not the
+    # centre, since the radius holds to 2 px; not a torque, since the amplitude scales with
+    # omega rather than against it). Being unable to name the cause is not evidence of health.
+    unreliable = (phaselock>=PHASELOCK_UNRELIABLE and ripple_cv>=RIPPLE_CV_UNRELIABLE)
+
+    # Distinct from "known bad": too short to assess. Claiming reliability here asserts
+    # something the data cannot support.
+    unverified = (not unreliable and n_revs<MIN_REVS_FOR_PHASELOCK
                   and ripple_cv>=RIPPLE_CV_UNRELIABLE)
+
     if unreliable: flags.append("per_instant_omega_unreliable")
+    if unverified: flags.append("per_instant_omega_unverified")
     out.update(
         orbit_axis_ratio=round(axis_ratio,3),
         omega_ripple_cv=round(ripple_cv,3),
         omega_phaselocked_fraction=round(phaselock,3),
+        n_revolutions=round(n_revs,2),
         implied_tilt_deg=round(math.degrees(math.acos(min(1.0,1.0/axis_ratio))),1),
-        reliable=not unreliable,
+        reliable=not (unreliable or unverified),
         flags=flags,
     )
     return out
@@ -93,31 +115,55 @@ def build_quality_block(sig, stats):
     """Machine-readable trust channel injected into the seed for the agent."""
     aa=stats.get("angular_acceleration",{}) or {}
     mt=aa.get("motion_type")
-    unreliable="per_instant_omega_unreliable" in sig.get("flags",[])
+    flags=sig.get("flags",[])
+    unreliable="per_instant_omega_unreliable" in flags
+    unverified="per_instant_omega_unverified" in flags
+    suppress = unreliable or unverified
     usable=["mean angular velocity (time-average)","period T","frequency f","mean centripetal acceleration"]
     do_not=[]
-    if mt in ("accelerating","decelerating") and not unreliable:
+    if mt in ("accelerating","decelerating") and not suppress:
         usable.append(f"the overall {mt} trend of omega over the clip (angular acceleration)")
-    if unreliable:
+    if suppress:
         do_not=["per-instant / timeline omega values","the shape of the omega(t) curve",
                 "any claim that the object speeds up and slows down within each revolution"]
     block={
-        "reliable": not unreliable,
-        "flags": sig.get("flags",[]),
+        "reliable": not suppress,
+        "flags": flags,
         "orbit_axis_ratio": sig.get("orbit_axis_ratio"),
         "omega_phaselocked_fraction": sig.get("omega_phaselocked_fraction"),
+        "n_revolutions": sig.get("n_revolutions"),
         "usable_quantities": usable,
         "do_not_claim": do_not,
     }
+    pct=int(100*(sig.get("omega_phaselocked_fraction") or 0))
     if unreliable:
+        # Name the cause only when the geometry supports it. An elliptical image orbit is
+        # evidence of oblique capture; a round one is not, and the ripple still disqualifies
+        # per-instant claims — we simply cannot say why.
+        oblique = (sig.get("orbit_axis_ratio") or 1.0) >= AXIS_UNRELIABLE
+        cause=("The orbit is seen at a slant, not face-on (image path is an ellipse, axis ratio "
+               f"{sig.get('orbit_axis_ratio')}), and {pct}% of the per-instant angular-velocity "
+               "variation is locked to orbital phase — a viewing-angle projection artifact, NOT "
+               "real motion.") if oblique else (
+               f"{pct}% of the per-instant angular-velocity variation repeats with orbital "
+               "position rather than with time. Motion of the object itself cannot do that, so "
+               "this is a measurement artifact; its cause on this clip is not identified.")
         block["guidance"]=(
-            "The orbit is seen at a slant, not face-on (image path is an ellipse, axis ratio "
-            f"{sig.get('orbit_axis_ratio')}); {int(100*sig.get('omega_phaselocked_fraction',0))}% of the "
-            "per-instant angular-velocity variation is locked to orbital phase, i.e. a "
-            "viewing-angle projection artifact, NOT real motion. Report only the time-AVERAGE "
-            "quantities and the qualitative fact of rotation. Do NOT narrate the timeline or "
-            "claim the object speeds up/slows down during a revolution. State one honest "
-            "sentence that per-instant angular velocity is not reliably recoverable from this clip."
+            cause+" Report only the time-AVERAGE quantities and the qualitative fact of "
+            "rotation. Do NOT narrate the timeline or claim the object speeds up/slows down "
+            "during a revolution. State one honest sentence that per-instant angular velocity "
+            "is not reliably recoverable from this clip."
+        )
+    elif unverified:
+        block["guidance"]=(
+            f"This clip covers only {sig.get('n_revolutions')} revolutions, too few to establish "
+            "whether the variation in per-instant angular velocity repeats with orbital position "
+            "(an artifact) or with time (real motion) — the test needs at least "
+            f"{MIN_REVS_FOR_PHASELOCK:g}. The variation is not small "
+            f"({int(100*(sig.get('omega_ripple_cv') or 0))}% of the mean), so it cannot be "
+            "dismissed either. Report the time-AVERAGE quantities and the qualitative fact of "
+            "rotation; do NOT narrate the timeline. This is a limit of the recording, not a "
+            "finding about the motion."
         )
     else:
         block["guidance"]="Per-instant angular velocity is reliable; narrate the timeline normally."
