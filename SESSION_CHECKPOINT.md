@@ -1,16 +1,138 @@
-# Session Checkpoint — 2026-07-15 (video DATA QUALITY: tracking + projective artifacts)
+# Session Checkpoint — 2026-07-21 (4046's "perspective" was mostly a 232 px COORDINATE BUG)
 
 Single source of truth to resume after a context reset. **Compacted 2026-07-15** — completed work
 was removed; it lives in `git log -p SESSION_CHECKPOINT.md` (full pre-compact text at `HEAD`),
 the memory files (`~/.claude/projects/-home-damar-centri/memory/centri-*.md`), and the docs cited
 below. Keep this file short: current state, open work, ops crib — not a diary.
 
-## 00. RESUME HERE — 2026-07-16 (fan scale MEASURED → v/a_c gold; ω(t) staircase fixed; 1 ruler left)
+## 00. RESUME HERE — 2026-07-21 (the 4046 coordinate bug; annotation now draws the measurement)
+
+Damar looked at `job_roundabout-4046/analysis_output/plots/annotated_image.png` and asked whether
+the naive circular projection was only cosmetic or also in the data. **Both — and underneath it
+sat a bigger, unrelated defect.** Commit **`d825e61`**. Memory: [[centri-coordinate-space-guard]].
+
+**THE COORDINATE BUG (dominant).** The agent tracked on the CROPPED video but detected the axle on
+the FULL frame, then declared the pair `coordinate_space: "display"`. `contract.load_inputs`
+subtracted the crop offset from both ⇒ **trajectory and centre 232 px apart**. Verified by
+overlaying both candidates on a real frame: the stored point sits on the handle, the used point
+floats in mid-air. Nothing downstream could see it — the orbit read as real-but-eccentric, and the
+flags that fired (`radius_unstable`, `omega_spike`, `ransac_fit_rejected`) blamed the physics.
+Hit `job_roundabout-4046`, `-r3`, and **`-r4`** (the run 07-20 called "the one to show"); the other
+9 jobs were clean.
+
+| | before | after |
+|---|---|---|
+| std_r | 0.114 m | 0.035 m |
+| std_ω | 4.47 | 1.16 |
+| max a_c | 235.5 | 31.2 |
+| r_fit | 0.281 m | 0.254 m |
+| mean a_c | 22.78 | 15.83 |
+| period vs 2π/ω | 1.072 vs 0.798 ✗ | 0.808 vs 0.804 ✓ |
+
+**THE GUARD.** A trajectory and a centre in the same space trace a steady radius, so the two
+readings are separable with no scene knowledge: `contract` compares radius CV both ways and keeps
+the self-consistent one, raising `trajectory_space_mismatch`. 4046 = 0.437 vs 0.144; every other
+clip's declared reading already wins ⇒ inert (9 jobs load byte-identically; replayed sample shows
+**0 numeric diffs**, flags identical). Tests `tools/tests/test_contract_space.py` (6); suite 42.
+**Root cause is the AGENT seam** — `prompts/orchestrator.txt:31` makes `pipeline_inputs.json` the
+one place in full-frame space while all else is cropped, and the example at :910 pairs
+`center_cx_full` with a `traj_x` taken from the cropped video. The guard is a net, not a cure.
+
+**ANNOTATION DREW THE MODEL, NOT THE MEASUREMENT.** Both renderers re-projected the marker onto the
+fitted circle (`cx + r_fit*cos θ`) — mean **186 px / max 430** off the handle on 4046 — and drew the
+orbit as a circle though a circle filmed off-axis images as an ellipse. Now they plot the measured
+`x_px,y_px` and trace a least-squares ellipse (`common.fit_orbit_ellipse`; **drawing only**, every
+number still from the circle fit). Fitted ellipticity: 4046 **0.890** (tilt 27°), computerfan-4029
+and turntable 0.967, **fan-4028 1.000 — its orbit is SYNTHESIZED** (frequency mode, radius CV
+0.0001), so its circle cannot be tightened from the track. Measuring 4028's true swept extent from
+the footage is so far unreliable (328–348 px by sweep-energy vs 404–520 px by darkness, both
+contaminated by the ceiling lights) — and that measurement IS the independent scale cross-check
+OPEN 0 wants.
+
+**PROJECTION — FIXED, Damar chose "give rectification a home" (commit `dc9a36d`).** New
+**`analysis/rectify.py`**: uncalibrated vanishing-line construction (the polar of the imaged hub
+w.r.t. the fitted orbit conic is the plane's line at infinity → map it to infinity → stretch the
+ellipse to a circle). `geometry.calibrate` runs it **before any radius or angle is measured**,
+gated on a new **optional `hub_px`** in the contract AND on a 20 px hub-offset floor (corpus
+0.7–8.8 px; 4046 85.6; parkwheel 60–73 — so rectifying the near-affine clips would fit `l` to noise).
+
+| 4046, through the real pipeline | before | after |
+|---|---|---|
+| ripple CV | 0.096 | **0.033** |
+| phase-lock | 0.884 | **0.065** |
+| 2/rev amplitude | 0.996 | **0.079** |
+| radial residual | 5.22% | **3.42%** |
+| mean \|ω\| | 7.8077 | 7.7999 (**0.10%**) |
+
+Angle redistributed within a revolution, revolution count untouched — the check that separates this
+from smoothing. Using the ellipse CENTRE instead of the axle is **worse** (0.163): no
+centre-shifting shortcut exists, and `rectify` now refuses that input rather than silently
+no-op'ing. **`r_fit_m` 0.254 → 0.260** — the rectified plane is pinned to the imaged ellipse's
+MAJOR semi-axis (the direction perspective never shortened) so `px_per_m` keeps its meaning; the
+conservative alternative (preserve the median radius, so only ω(t) moves) is a one-line change.
+**`per_instant_omega_unreliable` no longer applies to 4046 once rectified.**
+
+**THE DEADLOCK WAS BROKEN BY INVERSION.** The hints used to hand the agent a rectification recipe
+*with code*; it built its own `rectify.py` and blew the **1024 MB runaway guard** twice
+(`roundabout-4046-coordfix` at 244 s; `-r2` on 07-20), each time leaving a **garbage contract**
+(x range 0.0–0.1, y ≈ 232 constant, mean ω 0.0). On the one run that finished (07-20) it wrote
+`rectified_trajectory.json` and shipped the RAW track anyway, because the contract had nowhere to
+put the other one. Now the agent's whole part is **detect the axle, pass `hub_px`** — stated in
+`prompts/orchestrator.txt` (new FROZEN rule) and rewritten into the 4046 hints.
+
+**NaN TRAP (nearly shipped):** `writer.py` dumps with `allow_nan=False`, and a *skipped*
+rectification leaves every diagnostic NaN ⇒ `stats.json` truncated mid-write. Caught only by
+re-running the clips the change was meant NOT to touch (Damar's "randomly sample existing jobs").
+Fixed in `Rectification.as_dict()`, with a test. **Regression proof:** turntable-2/-3,
+fan-4027-r3, fan-4028, computerfan-4029 all **0 numeric diffs + identical flags**, each now
+recording *why* rectification was skipped. Tests **50** (`test_rectify.py` 8: uniform-rate recovery
+through a known homography to machine precision, sign-of-ω preservation, ellipse-centre refusal,
+JSON-safety).
+
+**Old runs archived** to `agent-backend/workspaces-archive/pre-coordfix-20260721-145038/` (all 12).
+
+### WHAT TO TRY NEXT — the limit is now the MARKER, not the projection model
+
+Damar asked whether to model the 3D path / camera angle, since fitting a circle-or-ellipse to a
+scene that "isn't a flat surface" feels wrong. **Measured on 4046 after rectification, it is not
+the geometry that limits us:**
+- radial residual **16.67 px (3.42%)**, of which only **1.3% is phase-locked** — a wrong surface
+  model would show up exactly there as a stubborn 1/rev or 2/rev term. Harmonics are 0.45 / 0.45 /
+  2.57 px. **No hidden geometry left to model.**
+- but the tracked handle images as a **108 × 119 px blob whose apparent size is 75–82%
+  phase-locked** (width ±19 px, area CV 0.227) — we see different faces of a 3D knob as it turns.
+- so the 16.7 px scatter is **~15% of the marker's own size**: "where is the handle?" is genuinely
+  ill-defined for an extended body, and **a 3D path model, curved-surface fit or better conic would
+  not move it.** The fix is at CAPTURE — a small, flat, high-contrast marker, the same lesson the
+  red marker taught on both fans and the green tape specced for parkwheel.
+- loose thread: largest surviving harmonic is **3/rev at 2.57 px on a 3-SPOKE wheel** — smells like
+  the tracker being tugged as a spoke passes behind the knob. Tiny; do not chase unless 4046
+  misbehaves again.
+
+**3D IS recoverable if we ever want it** (tested, not implemented): the orbit's vanishing line meets
+the imaged circle at that plane's circular points, which must also lie on the image of the absolute
+conic ⇒ with square pixels + centred principal point, one unknown. On 4046 that gives **f ≈ 1116 px,
+FOV 51.6°, plane normal [-0.016,-0.460,0.888], plane-vs-image angle 27.4°** — independently
+confirming the planar route's **27.1°**. It buys **nothing for ω** (planar rectification already
+recovers in-plane angle up to a similarity, and ω is similarity-invariant). It would pay for
+**SCALE** (a reference at a different depth/orientation than the orbit → the fan's 2× coin flip,
+the bicycle's 12% conflict) and for **FIGURES** (draw the tilted orbit in 3D, render a synthetic
+face-on view — a multimodal-annotation artifact). Ill-conditioned on near-circular ellipses, so only
+4046 and parkwheel qualify; two-fold mirror ambiguity; f 1116 vs an expected 1300–1700 means it is
+approximate, not calibration-grade.
+
+**CHEAP TEST FOR THE BICYCLE (OPEN 2).** Its unexplained 0.72 phase-lock: check whether it lives in
+the RADIAL RESIDUAL (⇒ a geometry problem, worth the 3D tooling) or tracks the MARKER'S APPARENT
+SIZE (⇒ the same extended-object limit, and no modelling will fix it). Same few lines as above.
+
+## 00a. 2026-07-20 (annotation reworked to the P-MAGIC convention; all 7 golden clips re-run e2e; tech report COMMITTED)
 
 Prof steered off pedagogy back to **data quality** (P-MAGIC's ω curve is a clean line, ours is
 jagged). Full evidence + every number: **`agent-backend/docs/tracking-data-quality-2026-07-15.md`**.
-Paper-style writeup: **`technical-report/centri-video-data-quality.tex`** (19 pp, compiles clean,
-10 figures in `technical-report/figures/`). Per-clip guidance: **`agent-backend/templates/*/hints.md`**
+Paper-style writeup: **`technical-report/centri-video-data-quality.tex`** (**29 pp**, compiles
+clean twice; per-phenomenon common structure + formula-on-frame figures — **COMMITTED `e0a20d0`**,
+figures force-added past the repo-wide `*.png` rule because their one-off generators are gone).
+Per-clip guidance: **`agent-backend/templates/*/hints.md`**
 (all 10). Archived clip + re-shoot spec: **`agent-backend/templates-reshoot/README.md`**.
 Memory: [[centri-tracking-data-quality]] (+ correction to [[centri-detection-prompt-wording]]).
 
@@ -33,37 +155,123 @@ tilt.** 4046 = 85.6px; every other clip 0.7–8.8px. Rectifying the others does 
 An earlier "perspective is systematic" claim is **RETRACTED** (classifier read the A1/A2 ratio
 without checking phase-lock).
 
-**DONE 07-16 — fan scale + ω(t) staircase (commit on `feat/video-annotation-phase-labeller`):**
-- **Ruler:** hub→blade-tip = **63.5 cm (25″)**, blade = 20″. Blade tip = 355 px (sd 0.5) →
-  **px_per_m = 559** (retires the provisional 0.6 m = 425 guess). Sidecars 4027/4028 now
-  `orbit_radius_px 355` / `physical_size 0.635`; `reference.label` = "blade-tip orbit".
-- **Report radius = BLADE TIP** (student-natural max; ω rigid-body so v_tip=ω·r_tip is exact,
-  not extrapolation — in freq mode ω comes from the blade-pass FFT, not the marker). Peaks:
-  4027 v≈2.68 m/s / a_c≈**11.3 m/s² (1.15 g)**; 4028 v≈7.36 / a_c≈**85.2 (8.69 g)**. The marker
-  itself orbits at ~49 cm (inboard); the optional `tracking_mode: color` flip is NOT needed for v/a_c.
-- **ω(t) staircase KILLED** — was FFT-bin quantization (steps of 2π·(1/2.5s)/5 ≈ 0.5 rad/s), a
-  method artifact (only freq-mode; 4029/flick per-frame come out smooth). Fix =
-  `freq_track._peak_hz_parabolic` sub-bin peak interp. Confirmed via real `analysis.run`
-  (px_per_m 559, r 0.635) + tests 33/33. Figs: `docs/figures/{ac_t_fans,omega_method_compare}.png`.
-  (Vinsa/student-POV: a staircase reads as "constant speed then jumps" — confusing; smoothed.)
+**DONE 07-16 (pointer only — full detail in [[centri-tracking-data-quality]] + `git show 6605c11
+58dd3c6`):** ruler gives hub→blade-tip **63.5 cm** = 355 px ⇒ **px_per_m 559**, so the fans' v/a_c
+are reported AT THE BLADE TIP (4027 a_c≈11.3 m/s²; 4028 ≈85.2) and the clips are **SILVER**; the
+ω(t) **staircase was FFT-bin quantization**, killed by sub-bin parabolic peak interp in
+`freq_track._peak_hz_parabolic` (only `frequency` mode ever showed it).
+
+**DONE 07-18 → COMMITTED 07-20 `e0a20d0` — technical report** (29 pp): per-phenomenon common
+structure (Scene → context handed to the agent → how it is calculated, formulas each on their own
+line → annotated data-point frame → Found → GOLD/SILVER/OPEN/REJECTED verdict), §2.3 formulas
+(Eqs 1–7), and a formula-on-frame figure for every phenomenon. The tex + the 15 figures it uses are
+tracked (force-added past the `*.png` rule — the one-off generator scripts are gone, so the PNGs are
+the only copy); `fig-track-4048` / `fig-track-bicycle` are unused and stay untracked; the built PDF
+is ignored like `paper/*.pdf`.
+
+**DONE 07-20 — annotation reworked to the P-MAGIC convention + first full 7-clip sweep:**
+- **`1040ad2`** — both annotation artifacts follow the diagram students are taught with (the
+  P-MAGIC app's angular-motion intro): **v and ω are SEPARATE marks** (straight tangent arrow vs
+  small curved arc — the old single curved arrow labelled ω conflated a linear and an angular
+  quantity), symbols sit BESIDE their arrow never on it, names+values move to **margin callouts**
+  with leader lines that never cross, app wording ("linear speed"), and **real math symbols** on
+  the video via matplotlib mathtext (cv2's Hershey fonts are ASCII-only, so `a_c` used to draw as
+  three literal characters). Two bugs fell out: arrow lengths were pinned to a literal 60 px while
+  every other overlay dimension scaled with the frame; ω's mark could land outside the image.
+- **`2474a8c`** — optional `job_name` on `POST /analyze` ⇒ `workspaces/job_turntable-1` instead of
+  `job_2f8e…`, which is what makes a batch of template runs reviewable at all.
+- **`78d1b64`** — ω arc/symbol fall back to a small arc about the centre when the preferred
+  1.16r/1.40r spot leaves the frame (found on 4046, whose handle rides the rim).
+- **`dc6ef2f`** — the `annotated_image` manifest entry said how the figure is DRAWN; the material
+  writer copied it and tripped its own `annotate` vocabulary gate. Now says WHAT is marked; the
+  layout detail still reaches the Axis-4 judge via each entry's `target`.
+- **7-clip sweep** (`workspaces/job_{roundabout-4046,turntable-1/2/3,computerfan-4029,fan-4027,
+  fan-4028}`) — full 3-tier material + PDFs for every trusted clip. **5/7 gate-clean**; the two
+  failures are fixed below.
+
+**DONE 07-20 (later) — the two sweep failures were OUR spec contradicting OUR gate:**
+- **fan-4027 advanced arithmetic** (`0.057 × 0.635 → 0.0362`, stated `0.04`): the measurements
+  table formatted with a fixed 2 decimals, so a_t = 0.0365 printed as **"0.04" — one significant
+  figure**, disagreeing with the seed's own worked example (0.0575 × 0.635 = 0.0365) and closing
+  no identity. `render/report.py:num()` now falls back to 3 **significant** figures when the
+  fixed-decimal rendering would leave fewer than two. Table now reads α 0.0575 / a_t 0.0365.
+- **4046 `filmed` / `annotated frame`**: the spec ASKED for words its own gate bans —
+  `material_tiers._quality_policy` dictated "the orbit was filmed at an oblique angle" and the tier
+  specs described the picture as "an annotated frame", while `material_gate.TRACKING_VOCAB` bans
+  `film(ed)`, `annotate`, `frame`. Reworded to "seen at a slant rather than face-on" / "a marked-up
+  still" (also in `quality_signals` guidance, which is pasted into the prompt verbatim).
+- **the shared story poisons every tier at once**: `_generate_frame` was ungraded, but all three
+  tiers MUST open by retelling it — so its "feeling the quiet fade of its **energy**" failed basic
+  AND advanced on the same run. FRAME_SYSTEM now carries rule 5b (the dynamics blocklist, rendered
+  from `G.DYNAMICS_VOCAB_HUMAN` so prompt and check cannot drift) and `_generate_frame` screens the
+  story, retries once naming the offending words, then falls back to the deterministic template.
+- **a squared UNIT read as division** — `"3.85 rad²/s²"` parsed as "3.85 squared ÷ 2" (= 7.41),
+  so a CORRECT a_c substitution written as an arrow chain (`ω = 1.962 → squared → 3.85 rad²/s² →
+  (× r = 0.317) → a_c = 1.22`) was flagged. `material_gate._neutralize_units` now collapses a
+  squared unit pair before the division patterns run. A wrong product in the same notation still
+  fails.
+- **the raw duration leaked into the story** — "Over the next **14.998317 seconds**" (and
+  "77.415 seconds" on the fan). Both prompt sites (`_facts`, `_frame_user`) now pass
+  `_sig(active_duration_s, 3)` ⇒ "15.0 s", well inside the gate's 2% grounding tolerance.
+- **Regression tests** (`tools/tests/test_material_gate.py`, now **36/36**): what a tier is TOLD to
+  write must survive the gate that grades it; the fallback story must be clean for every motion
+  type; a squared unit is not division. Each was verified to FAIL on the old code, not vacuously
+  pass.
+- **VERIFIED LIVE** by replaying the deterministic tail (see §4) on the two trusted workspaces:
+  - **`job_roundabout-4046-r4` — gate `all_passed: true`** (basic/int/adv + cross-tier + seed all
+    clean), story reads "Over the 15.0 s clip". This is the run to show.
+  - **`job_fan-4027-r3`** — advanced PASSES and its table now reads **α 0.0575 / a_t 0.0365**
+    (was 0.06 / 0.04) at r 0.635 m, story "77.4 seconds". Basic + intermediate failed on the
+    KNOWN stochastic leaks ('tracked'; "steady rhythm" on a speeding-up clip) after exhausting
+    both regenerations — 35B sampling, not a spec contradiction.
+  The per-tier leaks the gate caught and fixed by regeneration ('recording', 'annotate', a stray
+  `=`) are the loop working as designed, not deterministic defects.
+
+**RULE (Damar, 07-21): `templates/` is GOLD ONLY.** A clip earns a place there once its per-frame
+trajectory is measured AND verified on real frames — not on promise. Anything else waits in
+`templates-reshoot/` (inert: `app/workspace.py` resolves templates by name under `templates/`).
+First case: **`base-template-parkwheel-4091`** — park exercise wheel, 27.4 rev, the corpus's only
+coast-to-REST, and parked anyway because nothing tracks it (SAM3 empty on 6 cues; colour locks onto
+the rig's own red base at "100% coverage, zero rotation"; frequency returns a flat ω contradicting
+the visible slow-down) and its hub offset is 60–73 px = real perspective. Evidence + re-shoot spec:
+`templates-reshoot/README.md`. Fix = one strip of bright-green tape on ONE knob + a tape measure on
+the rim. **By this rule `templates/base-template-fan-doll` (detection returns nothing) and probably
+`base-template-bicycle` (OPEN) should move too — ASK first, they are live templates.**
+See [[centri-templates-gold-only]].
 
 **OPEN (needs Damar, do NOT guess):**
+0. **NEW 07-20 — the fan's measured scale is a coin flip across runs.** `freq_track` sizes the
+   synthesized bbox at `orbit_radius_px` (355 px) so the generic Step-5 sizing pairs it with
+   `physical_size = 0.635 m` (the ruler-measured hub→blade-tip RADIUS) ⇒ px_per_m 559. But the
+   contract field is *named* `diameter_px`, so the agent "corrects" it: this morning's run wrote
+   710 px **and** doubled the metres to 1.27 (⇒ 559 ✓); the afternoon re-run wrote 710 px and left
+   0.635 (⇒ **1118, every SI value halved** — r 0.317 m, a_c 1.83 not 3.66). Nothing catches it:
+   both are internally consistent as far as the pipeline can see. Stop-gap shipped = a calibration
+   section in `templates/base-template-fan-402{7,8}/hints.md` (hints DO reach Steps 1–5). **Real
+   fix needs a decision:** rename/duplicate the contract field as `reference.radius_px` +
+   `radius_m`, or have `geometry.calibrate` cross-check px_per_m against the fitted orbit radius
+   whenever `ref_label == tracked_label` (true in frequency mode by construction) and flag a 2×.
+   Until then a fan re-run can silently halve the SILVER-tier scale claim.
 1. **Ruler on the phone body** (NOT the 5.5" screen diagonal) + confirm the wheel → settles
    bicycle's 12% scale cross-check (phone→tire gives 58.6cm vs a real 66–70cm wheel ⇒ one
    reference is wrong; suspect the spokes clip the phone's mask).
 2. **bicycle stays OPEN** — phase-lock 0.72 that is NOT perspective (4.9px), NOT occlusion
    (area-vs-phase R²=0.07), gravity has right sign but wrong phase (138° off). Cause unknown.
-3. **Decide:** implement rectification in `geometry.py` gated on a new `hub_px` field in
-   `pipeline_inputs.json` (agent detects the axle in Step 5). A hint CANNOT do this — `analysis/`
-   is FROZEN by the orchestrator's hard rules, and an e2e proved the agent correctly refuses.
-   **Rectifying 4046 WILL move its golden numbers** (the old ones were wrong).
+3. ~~**Decide:** implement rectification in `geometry.py` gated on a new `hub_px` field.~~
+   **DONE 07-21 (`dc9a36d`)** — Damar chose "give rectification a home"; see §00. Follow-ups:
+   (a) **parkwheel-4091** is the second clip with real perspective (hub offset 60–73 px) and would
+   now be rectified automatically once it has a working tracker — it stays in `templates-reshoot/`
+   on the GOLD-only rule, unchanged; (b) the scale pinning (major semi-axis ⇒ `r_fit_m` +2.4%) is
+   a deliberate choice, revisit if the conservative variant is preferred; (c) the prototype's
+   per-frame hub (camera-drift removal) is NOT implemented — we use the static detected axle,
+   which is why the radial residual lands at 3.42% rather than the prototype's 1.68%.
 4. `color_track.py` bugs worth fixing regardless: `area × mean_saturation` is invalid for a DARK
    target; `max_step` must come from `ω·r/fps`, not a round number.
 
-**SHIPPED THIS SESSION (uncommitted, working tree):** `worker/tasks.py` `_inject_clip_hints()` +
-`{{CLIP_HINTS}}` in `prompts/orchestrator.txt` (hints are **injected into the prompt**, verified
-live — telling the agent to "read hints.md" fails: it logged "hints.md found — AUTHORITATIVE" and
-never read a word). 4048 moved to `templates-reshoot/`. 10 × `hints.md`. Report + evidence doc.
+**HINT DELIVERY (07-15, still uncommitted):** `worker/tasks.py:_inject_clip_hints()` substitutes
+each template's `hints.md` into `{{CLIP_HINTS}}` in `prompts/orchestrator.txt`. Hints must be
+**injected, not read** — told to "read hints.md" the agent logged "hints.md found — AUTHORITATIVE"
+and never opened it (0 tool calls).
 
 **METHOD LESSON (cost 4 wrong claims):** overlay the cached track on REAL frames before trusting
 ANY statistic. Killed: "4048 is at 29° tilt" (a conic fitted to trees), "squash the ellipse"
@@ -79,8 +287,8 @@ Critique of `e6fed2e9` vs P-MAGIC → `agent-backend/docs/material-pedagogy-crit
 (Part A correctness, B design, C multimodal).
 
 **The ENTIRE correctness/annotation backlog (A1–A8, C1–C5) + agreed Part-B items are DONE,
-committed and live-validated** on branch `feat/video-annotation-phase-labeller` (23 commits ahead
-of main, PR #1 open + mergeable, tests 33/33). Golden = **`9ed918d0`** (int+adv gate CLEAN; basic
+committed and live-validated** on branch `feat/video-annotation-phase-labeller`. Golden =
+**`9ed918d0`** (int+adv gate CLEAN; basic
 only the known stochastic vocab/`²` leak). Per-item detail, commit hashes and the new deterministic
 gates (`wrong_duration_products`, `average_period_as_peak`, `_phase_significant`,
 render-aware `annotation_issues` `2c24a0d`) live in **[[centri-tiered-material]]** +
@@ -90,9 +298,12 @@ render-aware `annotation_issues` `2c24a0d`) live in **[[centri-tiered-material]]
 colour-coded table (C4 upgrade), predict-box, contextualize/noticing/anchor, Bahasa. See the
 critique doc §Part B.
 
-## 1. Current state & in-flight (as of 2026-07-15)
-- **Branch `feat/video-annotation-phase-labeller`, PR #1 OPEN + MERGEABLE**
-  (https://github.com/damarsimple/centri/pull/1), **23 commits ahead of main**, unmerged.
+## 1. Current state & in-flight (as of 2026-07-20)
+- **Branch `feat/video-annotation-phase-labeller`, PR #1 still OPEN**
+  (https://github.com/damarsimple/centri/pull/1) — **32 commits ahead of `origin/main`** (which is
+  still at `57818aa`), and **25 ahead of the pushed branch** `origin/feat/…` (`2bbb8db`), so the
+  07-16..07-20 work is local-only. Local `main` has been fast-forwarded to `30ce433` but never
+  pushed — don't read local `main` as "what's on GitHub".
 - **Stack:** lab2 API/worker/redis UP (`docker compose -f docker-compose.yml -f compose.lab2.yml up
   -d api worker redis`, API `10.0.0.2:8088`); Qwen3.6-35B `192.168.1.205:8083` UP;
   **SAM3 `10.0.0.1:8086` is UP** (verified 07-15; tracked 5 clips + prompt sweeps). If it dies again:
@@ -109,11 +320,19 @@ critique doc §Part B.
 - **Weekly deck:** NEW `presentation/centri-weekly-2026-07-15.tex` COMMITTED (`aa8e33e`) — standalone,
   6 slides (material-quality + multimodal annotation, current-state). **CLAUDE.md now has a 5th deck
   rule — STANDALONE/self-explanatory** (committed `865b76c`; see [[centri-presentation-style]]).
-- **UNCOMMITTED (working tree):** the 07-15 data-quality workstream (see §00: `worker/tasks.py`,
+- **Reviewable run set:** `workspaces/job_<name>` from the 07-20 sweep — `roundabout-4046`,
+  `turntable-1/2/3`, `computerfan-4029`, `fan-4027`, `fan-4028` (readable names via the new
+  `job_name`). Post-fix re-runs: **`job_roundabout-4046-r4`** (gate all-clean, the one to show)
+  and `job_fan-4027-r3`. **`job_fan-4027-r2` is the 2× SCALE-ERROR run — do not use it** (OPEN 0);
+  `job_roundabout-4046-r2` failed on the runaway guard (see §4).
+- **UNCOMMITTED (working tree):** the 07-15 data-quality workstream (`worker/tasks.py`,
   `prompts/orchestrator.txt`, 10 × `templates/*/hints.md`, `templates-reshoot/`, `docs/figures/`,
-  `docs/tracking-data-quality-2026-07-15.md`, `technical-report/`) + the prior-session
-  eval-framework workstream + `docs/material-pedagogy-critique-2026-07-14.md` + `compose.lab2.yml`
-  + `document-4.pdf` + this checkpoint. **Nothing from 07-15 is committed yet.** Eval files:
+  `docs/tracking-data-quality-2026-07-15.md`) + today's material fixes
+  (`workspace_lib/analysis/{material_gate,material_seed,material_tiers,quality_signals,
+  render/report}.py`, `tools/tests/test_material_gate.py`, fan `hints.md` calibration sections)
+  + the prior-session eval-framework workstream + `docs/material-pedagogy-critique-2026-07-14.md`
+  + `compose.lab2.yml` + `document-4.pdf` + this checkpoint. Only `technical-report/` (`e0a20d0`)
+  has been committed from this whole stretch. Eval files:
   `docs/{eval-framework,eval-progress,eval-rubric-ika,related-work-positioning,effectiveness-study-blueprint}.md`,
   `tools/{run_llm_judge,build_rater_sheet,eval_stats,generate_tier_material}.py`.
 
@@ -156,12 +375,32 @@ critique doc §Part B.
 - **Deterministic PDF recovery** (after runaway-guard fails at report): `docker compose exec worker …
   python -m analysis.render.report` in the workspace, then `pdflatex ×2` (teacher key needs
   **lualatex** for ✓). Qwen is reachable from the WORKER container, not the host sandbox.
+- **TAIL REPLAY — test a material/figure change WITHOUT the agent (~5 min, no SAM3, no runaway
+  risk).** Clone a workspace that already has a good `pipeline_inputs.json`, drop in current code,
+  and run the deterministic steps. **The worker mounts workspaces at the HOST path**
+  (`/home/damar/centri/agent-backend/workspaces`), NOT `/app/workspaces`:
+  ```
+  W=/home/damar/centri/agent-backend/workspaces
+  docker compose exec -T worker bash -c "cp -a $W/job_X $W/job_X-r2 && rm -rf $W/job_X-r2/analysis \
+    && cp -a /app/workspace_lib/analysis $W/job_X-r2/analysis \
+    && find $W/job_X-r2/analysis -name __pycache__ -exec rm -rf {} +"
+  docker compose exec -T -w $W/job_X-r2 worker bash -c 'python -m analysis.run && \
+    python -m analysis.render.figures && python -m analysis.material_tiers && python -m analysis.render.report'
+  ```
+  Steps 1–5 (perception) are untouched, so the trajectory and calibration are identical — which is
+  the point: it isolates the change AND removes agent nondeterminism from the comparison.
+- **A full e2e re-run of 4046 is not free:** `roundabout-4046-r2` died on the **1024 MB
+  runaway guard** in the track phase — the injected hints tell the agent about the hub offset and
+  it starts prototyping rectification. Prefer the tail replay for material work; keep e2e for
+  perception changes.
 - **Worker kills:** `celery revoke --terminate` stalls the prefork pool → `docker compose restart
   worker`; a DELETEd job's pi process keeps running (kill the `pi` PID in-container);
   `pkill -9 -f "[m]aterial_tiers"` (bracket trick — plain pattern self-kills); long in-container
   runs: launch `docker exec -d` (foreground “timeout” leaves orphans racing on files).
 - **`cleanup_expired_workspaces` (hourly) + job deletion REMOVE workspaces** — export promptly.
-- Calibration `px_per_m = reference.diameter_px / physical_size_m`. zsh: `status` is read-only.
+- Calibration `px_per_m = reference.diameter_px / physical_size_m` — **the two must describe the
+  SAME span**; in `frequency` mode both are RADII despite the field name (OPEN 0). zsh: `status`
+  is read-only.
 - Detection cues = simple nouns (`docs/object-detection-prompts.md`); `tools/prompt_sweep.py` ranks
   cues on a short clip (`--reset` kills SAM3 — leave OFF).
 
