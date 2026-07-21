@@ -79,6 +79,10 @@ class Inputs:
     physical_size_source: str
     # Opaque passthrough recorded in stats.json for external remapping.
     roi_crop: dict
+    # The IMAGED AXLE, when the agent could detect it — the pixel the object turns
+    # about, which under real perspective is NOT the centre of the ellipse you see.
+    # Optional: absent means "no rectification", never "rectification failed".
+    hub_px: tuple[float, float] | None = None
 
 
 def _arr(values, n: int, field: str) -> np.ndarray:
@@ -127,6 +131,17 @@ def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
     cx_px = float(center["cx_px"])
     cy_px = float(center["cy_px"])
 
+    # Optional: the imaged axle, for projective rectification (see rectify.py). Accepted
+    # either at the top level or inside `center`, because it is a property of the same
+    # observation the centre came from.
+    raw_hub = data.get("hub_px", center.get("hub_px"))
+    hub_px = None
+    if raw_hub is not None:
+        try:
+            hub_px = (float(raw_hub[0]), float(raw_hub[1]))
+        except (TypeError, ValueError, IndexError, KeyError):
+            raise ContractError(f"hub_px must be [x, y] in pixels, got {raw_hub!r}")
+
     # Single source of truth for the display→cropped transform. The agent passes
     # raw full-frame coords; we subtract the crop offset from trajectory AND center
     # together so they can never drift into different spaces (the IMG_3072 bug).
@@ -167,6 +182,10 @@ def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
             y_px = y_px - y_off
         cx_px -= x_off
         cy_px -= y_off
+        if hub_px is not None:
+            # The hub is a point in the same picture as the centre, so it takes the
+            # centre's transform — never the trajectory's.
+            hub_px = (hub_px[0] - x_off, hub_px[1] - y_off)
     elif space not in _CROPPED_SPACES:
         raise ContractError(
             f"coordinate_space must be one of {sorted(_DISPLAY_SPACES | _CROPPED_SPACES)}, "
@@ -195,4 +214,5 @@ def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
         physical_size_m=float(ref["physical_size_m"]),
         physical_size_source=str(ref.get("physical_size_source", "unknown")),
         roi_crop=roi_crop,
+        hub_px=hub_px,
     )

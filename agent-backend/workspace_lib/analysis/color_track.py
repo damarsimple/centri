@@ -52,12 +52,28 @@ def track(
     roi_radius_px=None,
     min_area: float = 60.0,
     max_step_px=None,
+    roi_inner_px=None,
+    max_area=None,
 ) -> dict:
     """Follow the coloured marker per frame; return the remote-/track schema.
 
     `roi_center_px`/`roi_radius_px` (optional) confine detection to a disc around
     the rotation centre, which rejects static coloured clutter elsewhere in the
     frame (door frames, skin, glare). `min_area` drops specks.
+
+    `roi_inner_px` makes that region an ANNULUS instead of a disc. A marker on a
+    rim only ever appears in a band around its orbit radius, while the clutter that
+    beats it on score is usually inboard — signage, the hub, the rig's own body. On
+    the park wheel a disc ROI let a 3400 px sunlit patch of the base and a yellow
+    sign outscore the 38 px knob, giving a track that was 100% "covered" and
+    completely stationary. Leave it None for a plain disc.
+
+    `max_area` rejects blobs too big to be the marker. Because scoring is area ×
+    mean saturation, a large dull object beats a small vivid one, so on a rig that
+    shares the marker's hue over a big area — the park wheel's own red cap and base —
+    an upper bound is what keeps the marker in play at all. The marker's apparent
+    size follows from the sidecar, so this is a fact about the scene rather than a
+    tuned constant.
 
     Blob selection is robust to look-alike clutter (e.g. brown fan blades share
     the marker's hue when the threshold is loosened for coverage):
@@ -91,6 +107,9 @@ def track(
             roi_mask = np.zeros((h, w), np.uint8)
             cv2.circle(roi_mask, (int(roi_center_px[0]), int(roi_center_px[1])),
                        int(roi_radius_px), 255, -1)
+            if roi_inner_px:
+                cv2.circle(roi_mask, (int(roi_center_px[0]), int(roi_center_px[1])),
+                           int(roi_inner_px), 0, -1)
         hsv = cv2.cvtColor(fr, cv2.COLOR_BGR2HSV)
         m = _band_mask(hsv, hsv_lo, hsv_hi)
         m = cv2.morphologyEx(m, cv2.MORPH_OPEN, open_k)
@@ -102,7 +121,7 @@ def track(
         cands = []
         for c in cnts:
             area = cv2.contourArea(c)
-            if area < min_area:
+            if area < min_area or (max_area and area > max_area):
                 continue
             mom = cv2.moments(c)
             if mom["m00"] <= 0:
@@ -149,7 +168,13 @@ def _main(argv=None) -> int:
     ap.add_argument("--hsv-hi", required=True, help="H,S,V upper, e.g. 22,255,255")
     ap.add_argument("--roi-center", default=None, help="cx,cy px of rotation centre (optional ROI)")
     ap.add_argument("--roi-radius", type=float, default=None, help="ROI disc radius px (optional)")
+    ap.add_argument("--roi-inner", type=float, default=None,
+                    help="inner radius px: makes the ROI an ANNULUS, excluding inboard clutter "
+                         "a rim marker can never be confused with")
     ap.add_argument("--min-area", type=float, default=60.0)
+    ap.add_argument("--max-area", type=float, default=None,
+                    help="reject blobs larger than this: area x saturation scoring otherwise "
+                         "prefers a big dull object over the small vivid marker")
     ap.add_argument("--max-step", type=float, default=None,
                     help="max centroid jump px between frames (temporal gate); omit to disable")
     ap.add_argument("--out", default=None, help="write JSON here (default stdout)")
@@ -157,7 +182,7 @@ def _main(argv=None) -> int:
     lo = [int(x) for x in a.hsv_lo.split(",")]
     hi = [int(x) for x in a.hsv_hi.split(",")]
     rc = [float(x) for x in a.roi_center.split(",")] if a.roi_center else None
-    res = track(a.video, a.label, lo, hi, rc, a.roi_radius, a.min_area, a.max_step)
+    res = track(a.video, a.label, lo, hi, rc, a.roi_radius, a.min_area, a.max_step, a.roi_inner, a.max_area)
     out = json.dumps(res)
     if a.out:
         with open(a.out, "w") as f:

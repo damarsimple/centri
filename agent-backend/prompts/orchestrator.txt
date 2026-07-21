@@ -27,6 +27,7 @@ Tools available: Python, ffmpeg/ffprobe, HTTP tracking API (remote), pdflatex.
 - ffprobe is the sole source of truth for FPS and aspect ratios.
 - Pass only file paths to subagents for large data (video, CSV, cache). Inject the stats dict values directly as context — not as a file path.
 - Step execution order is strict: 1 → 2 → 3 → 4 → 5 → 6.
+- **Perspective correction is FROZEN TOO — it lives in `analysis/rectify.py`.** If a clip is filmed at a slant, do NOT write a rectification, a homography, a conic fit, or an ellipse "un-squash" of your own; that work is already done and yours would be discarded. Your entire part is to detect the imaged AXLE when the hints ask for it and pass it as `hub_px` in Step 5. Writing your own `rectify.py` is how a previous run burned its whole output budget and shipped nothing.
 - **Kinematics is FROZEN. Never reimplement, edit, or "improve" anything under `analysis/`.** That seeded package (old steps 5–8: cleaning, RANSAC, calibration, active detection, kinematics, phases, stats.json) is the single source of truth. Your job ends at writing `pipeline_inputs.json`; Step 6 just runs `python -m analysis.run`. Do NOT author your own kinematics, period, or stats.json code — that non-determinism is exactly what this design removes.
 - **All pixel coordinates throughout the pipeline are in cropped-video space**, with ONE exception: the `pipeline_inputs.json` contract (Step 5) carries the trajectory and center in **full-frame (display) space** with `coordinate_space: "display"`, and the FROZEN contract subtracts the crop offset deterministically. Do NOT crop-subtract the contract trajectory/center by hand — that hand-transform is exactly what made `stats.json` non-deterministic (one run subtracted the offset, one didn't). Never remap cropped coordinates back to original frame coordinates anywhere else; the crop offset is stored once in `stats.json` and `roi_crop_meta.json` for external reference only.
 - **Do NOT write a single monolithic script.** Break all code into modules corresponding to the steps.
@@ -920,6 +921,12 @@ pipeline_inputs = {
         "physical_size_m": float(physical_size_m),
         "physical_size_source": physical_size_source,
     },
+    # OPTIONAL. The imaged AXLE in full-frame pixels, when this clip's hints ask for it
+    # and you could detect it. The frozen pipeline uses it to un-project the orbit
+    # (analysis/rectify.py). Omit it entirely if you did not detect it — a missing
+    # hub_px means "not attempted", which is a normal outcome, not a failure.
+    # DO NOT rectify anything yourself; passing this point IS your whole part.
+    **({"hub_px": [float(hub_x_full), float(hub_y_full)]} if hub_detected else {}),
     "roi_crop": {
         "x_off": int(x_off), "y_off": int(y_off),
         "crop_w": int(crop_w), "crop_h": int(crop_h),

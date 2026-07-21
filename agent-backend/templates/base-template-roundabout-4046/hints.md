@@ -38,23 +38,25 @@ and pure tilt can only produce **2** per revolution. The 1/rev term is the near 
 orbit being magnified relative to the far side — true perspective. An affine stretch removes
 only the 2/rev half, which is the smaller half: it buys 12% and leaves the artifact.
 
-## The fix: rectify with the vanishing line (no calibration)
+## The fix is ALREADY IMPLEMENTED — your job is one point, not one algorithm
 
-For a circle, the polar line of the circle's centre w.r.t. the circle is that plane's line at
-infinity. Both survive projection, so the imaged hub + the fitted orbit conic give you the
-vanishing line directly — no focal length, no intrinsics.
+**Do NOT write a rectification.** `analysis/rectify.py` does it (vanishing-line, uncalibrated)
+and it is frozen like the rest of the pipeline. A previous run on this clip ignored this, started
+building its own `rectify.py`, and **burned its entire output budget and shipped nothing** — twice.
+
+Your entire part: **detect the imaged axle and pass it as `hub_px`** (full-frame pixels) in the
+Step 5 contract. That is the one input the method needs and the one thing only you can do.
 
 ```python
-C = fit_conic(orbit_x, orbit_y)       # image of the orbit (an ellipse)
-h = (hub_x, hub_y, 1)                 # the IMAGED AXLE — see the warning below
-l = C @ h                             # vanishing line of the wheel's plane
-H = [[1,0,0],[0,1,0],[l0,l1,l2]]      # maps l to infinity -> affine image
-                                      # then ellipse -> circle by the axis stretch
-theta = atan2(...)                    # in the metric-rectified plane
+pipeline_inputs["hub_px"] = [axle_x_full, axle_y_full]   # that is all
 ```
 
-Working prototype, end to end, on this exact clip: `docs/figures/rectify_prototype.py`.
-Before/after figure: `docs/figures/rectify-4046-before-after.png`.
+The pipeline then reports what it did in `stats.json → calibration.rectification`, raises the
+`orbit_rectified` flag, and the numbers arrive corrected. On this clip that is ripple CV
+0.096 → 0.033 and phase-lock 0.884 → 0.065, with mean ω preserved to 0.1%.
+
+Reference only, if you want to understand what happens to your point:
+`docs/figures/rectify_prototype.py`, figure `docs/figures/rectify-4046-before-after.png`.
 
 ### The one way to get this wrong
 
@@ -84,19 +86,22 @@ But do not expect this to fix ω: drift is uncorrelated with orbital phase, so i
 phase-locked ripple. Measured here it moved ripple CV 0.166 → 0.164. Do it because it is nearly
 free and because it hands you `h` for the rectification — not as a remedy.
 
-## Prove it worked — two checks, both required
+## Prove it worked — read them off, do not recompute them
 
-"It looks smoother" is not evidence; smoothing does that. Report both of these:
+The pipeline runs both checks itself and records them in `stats.json →
+calibration.rectification`. Quote those; do not write your own diagnostics.
 
-- **Mean ω must be preserved.** Rectification redistributes angle *within* a revolution and
-  cannot change how many revolutions happened. This clip: 7.799 → 7.800 rad/s. If your mean
-  moves, you are fitting away real signal — stop.
-- **Circularity must improve without having been optimized.** `l` comes from the hub, never
-  from ω or from the radial residual, so the residual falling (5.20% → 1.68% here) is a free,
-  independent confirmation.
+"It looks smoother" is not evidence; smoothing does that. The two that count:
 
-A rectification derived from the kinematics it then "improves" is circular. Say which of your
-inputs came from the geometry and which from the motion.
+- **Mean ω is preserved.** Rectification redistributes angle *within* a revolution and cannot
+  change how many revolutions happened. This clip: 7.808 → 7.800 rad/s (0.1%). A mean that
+  moves would mean real signal was being fitted away, and the pipeline guards against it.
+- **Circularity improves without having been optimized.** The vanishing line comes from the
+  hub, never from ω or from the radial residual, so the residual falling
+  (`radial_residual_before_pct` 5.22% → `_after_pct` 3.42%) is a free, independent confirmation.
+
+Both land in `stats.json → calibration.rectification` alongside the measured hub offset
+(85.6 px), axis ratio (0.890) and tilt (27.1°).
 
 ## What the material may say once rectified
 

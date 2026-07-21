@@ -8,12 +8,13 @@ Lifted verbatim from a known-good run (job 1fc6311f) except:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from . import common
 from .contract import Inputs
+from .rectify import rectify
 
 
 @dataclass
@@ -32,6 +33,9 @@ class Calibration:
     n_valid_frames: int
     n_outliers_rejected: int
     tracking_coverage_pct: float
+    # How (and whether) the orbit was un-projected before any angle was measured.
+    # Always present so stats.json can state the reason it was NOT done. See rectify.py.
+    rectification: dict = field(default_factory=dict)
 
 
 def _radius_cv(x, y, cx, cy) -> float:
@@ -74,12 +78,35 @@ def _ransac_circle_fit(x, y, n_iters=1000, threshold=8.0, min_inliers=20):
     return best_params[0], best_params[1], best_params[2], best_inliers
 
 
-def calibrate(inp: Inputs) -> tuple[Calibration, np.ndarray, np.ndarray]:
-    """Returns (Calibration, cleaned x_full, cleaned y_full)."""
+def calibrate(inp: Inputs) -> tuple[Calibration, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Returns (Calibration, x_kin, y_kin, x_img, y_img).
+
+    `x_kin`/`y_kin` are the coordinates every ANGLE is measured from — rectified onto
+    the orbit's own plane when the clip has real perspective. `x_img`/`y_img` are the
+    same frames in IMAGE space, and are what the renderers must draw: a rectified point
+    plotted on unrectified footage lands off the object, which is the whole reason the
+    marker used to float. Cleaning (outlier rejection) is applied to both together so a
+    frame is either present in both or absent from both.
+    """
     common.step_start("step5")
-    x_full = inp.x_px.copy()
-    y_full = inp.y_px.copy()
+    x_img = inp.x_px.copy()
+    y_img = inp.y_px.copy()
     n_raw_frames = inp.n_raw_frames
+
+    # Un-project BEFORE anything geometric is measured. A circle filmed with real
+    # perspective images as an ellipse whose centre is not the imaged axle, and both
+    # effects distort ANGLE once per revolution — so a radius or a theta taken from the
+    # raw image is already wrong. Needs `hub_px` (the imaged axle) from the agent; with
+    # no hub, or on a near-affine clip, this returns the input untouched and records why.
+    x_full, y_full, rect_centre, rect = rectify(x_img, y_img, inp.hub_px)
+    if rect.applied:
+        common.set_validation_flag("orbit_rectified")
+        common.log(f"[calibrate] rectified: hub offset {rect.hub_offset_px:.1f}px, "
+                   f"tilt {rect.tilt_deg:.1f}deg, radial residual "
+                   f"{rect.radial_residual_before_pct:.2f}% -> "
+                   f"{rect.radial_residual_after_pct:.2f}%")
+    elif inp.hub_px is not None:
+        common.log(f"[calibrate] rectification skipped: {rect.reason}")
 
     valid_mask = ~np.isnan(x_full) & ~np.isnan(y_full)
     n_valid_frames = int(valid_mask.sum())
@@ -114,7 +141,15 @@ def calibrate(inp: Inputs) -> tuple[Calibration, np.ndarray, np.ndarray]:
     # _mismatch). Adopt the RANSAC fit over the mark only when it is unambiguously
     # better: a tight inlier residual AND a materially lower radius coefficient of
     # variation. A degenerate giant-circle fit fails both, so this is self-guarding.
-    if inp.center_source in ("user_mark", "bootstrap"):
+    if rect.applied:
+        # The rectified orbit is a circle about the imaged axle BY CONSTRUCTION — that
+        # is what the vanishing line was built from — so there is nothing left for the
+        # centre heuristics to choose, and letting RANSAC "improve" it here would only
+        # re-introduce the error the rectification just removed.
+        cx_active, cy_active = rect_centre
+        center_source = "rectified_hub"
+        center_drift_px = 0.0
+    elif inp.center_source in ("user_mark", "bootstrap"):
         cx_active, cy_active = cx_cal, cy_cal
         center_source = inp.center_source
         if ransac_ok:
@@ -155,6 +190,10 @@ def calibrate(inp: Inputs) -> tuple[Calibration, np.ndarray, np.ndarray]:
     outlier_full = np.abs(r_per_frame - r_fit_px) > np.maximum(2.5 * sigma_r, 15.0)
     x_full[outlier_full] = np.nan
     y_full[outlier_full] = np.nan
+    # Drop the same frames from the image-space copy, so the drawn marker and the
+    # measured angle can never disagree about which frames exist.
+    x_img[outlier_full] = np.nan
+    y_img[outlier_full] = np.nan
     n_outliers_rejected = int(outlier_full.sum())
 
     common.step_end("step5")
@@ -176,7 +215,8 @@ def calibrate(inp: Inputs) -> tuple[Calibration, np.ndarray, np.ndarray]:
         n_inliers=n_inliers, n_valid_frames=n_valid_frames,
         n_outliers_rejected=n_outliers_rejected,
         tracking_coverage_pct=float(tracking_coverage_pct),
+        rectification=rect.as_dict(),
     )
     common.log(f"[calibrate] px_per_m={px_per_m:.2f} center_source={center_source} "
                f"drift={center_drift_px:.1f}px r_fit_m={r_fit_m:.4f}")
-    return cal, x_full, y_full
+    return cal, x_full, y_full, x_img, y_img

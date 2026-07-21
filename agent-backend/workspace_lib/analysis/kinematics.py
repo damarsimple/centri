@@ -150,7 +150,13 @@ def _fill_short_gaps(x_full, y_full, cx, cy, fps):
     return x, y, n_filled
 
 
-def compute(inp: Inputs, cal: Calibration, x_full, y_full) -> Kinematics:
+def compute(inp: Inputs, cal: Calibration, x_full, y_full,
+            x_img=None, y_img=None) -> Kinematics:
+    """`x_full`/`y_full` are the coordinates ANGLE is measured from (rectified when the
+    clip had real perspective). `x_img`/`y_img` are the same frames in IMAGE space and
+    are what lands in kinematics.csv for the renderers — plotting a rectified point on
+    unrectified footage puts the marker off the object. They default to `x_full`, which
+    is exactly right for the clips that were never rectified."""
     common.step_start("step8")
     FPS = inp.fps
     n = inp.n_raw_frames
@@ -159,6 +165,8 @@ def compute(inp: Inputs, cal: Calibration, x_full, y_full) -> Kinematics:
     # Fill short blur-dropout gaps along the orbit before deriving anything, so omega
     # / active-detection / period see a continuous spin. Real-detection coverage in
     # stats.json is unchanged (computed in calibrate, before this).
+    if x_img is None or y_img is None:
+        x_img, y_img = x_full, y_full
     x_full, y_full, n_interpolated = _fill_short_gaps(x_full, y_full, cal.cx_px, cal.cy_px, FPS)
     if n_interpolated:
         common.set_validation_flag("interpolated_short_gaps")
@@ -227,7 +235,7 @@ def compute(inp: Inputs, cal: Calibration, x_full, y_full) -> Kinematics:
         t_s=t_s, r_px=r_px, r_m=r_m, theta_unwrapped=theta_unwrapped,
         omega=omega, v_m_s=v_m_s, ac_m_s2=ac_m_s2, active_mask=active_mask,
         rotation_direction=rotation_direction, active_duration_s=active_duration_s,
-        x_px=x_full, y_px=y_full, n_interpolated=n_interpolated,
+        x_px=x_img, y_px=y_img, n_interpolated=n_interpolated,
     )
 
     active_idx = np.where(active_mask)[0]

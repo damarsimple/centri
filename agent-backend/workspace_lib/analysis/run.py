@@ -27,8 +27,8 @@ def main() -> int:
         print(f"CONTRACT ERROR: {e}", file=sys.stderr)
         return 2
 
-    cal, x_full, y_full = calibrate(inp)
-    k = compute(inp, cal, x_full, y_full)
+    cal, x_kin, y_kin, x_img, y_img = calibrate(inp)
+    k = compute(inp, cal, x_kin, y_kin, x_img, y_img)
     stats = writer.write_stats(inp, cal, k)
     writer.write_csv(inp, cal, k)
     # Deterministic seed for Module D (learning material). Reads the stats dict +

@@ -110,6 +110,9 @@ def build_stats(inp: Inputs, cal: Calibration, k: Kinematics) -> dict:
             "physical_size_source": cal.physical_size_source,
             "r_fit_px": _num(cal.r_fit_px),
             "r_fit_m": _num(cal.r_fit_m),
+            # Whether the orbit was un-projected before any angle was measured, and if
+            # not, why not. Always present so a reader never has to guess (rectify.py).
+            "rectification": cal.rectification,
         },
         "summary": {
             "mean_r_m": _num(k.mean_r_m),
