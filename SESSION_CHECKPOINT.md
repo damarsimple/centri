@@ -89,6 +89,35 @@ recording *why* rectification was skipped. Tests **50** (`test_rectify.py` 8: un
 through a known homography to machine precision, sign-of-ω preservation, ellipse-centre refusal,
 JSON-safety).
 
+**SEED ARITHMETIC (`32ae15e`)** — `material_seed.py` worked examples must close on the figures they
+PRINT. 4046's basic tier showed `1.2 × 15 s` and concluded `≈ 19 laps` (it computed from
+f = 1.2479 × 14.998 = 18.72 while displaying rounded factors), so the gate failed the tier —
+correctly. **Only fires when rounded and unrounded products straddle a .5 boundary**: across 13
+seeds exactly ONE tripped it, and the tail replay of the SAME clip printed 18 correctly because a
+19 px difference in the detected hub moved f to 1.2296. A defect that surfaces on a coin flip is
+worse than one that always fires ⇒ fixed the mechanism (`_shown()` round-trips through `_g`), not
+the rounding. Circumference had the same shape (`2 × 3.14 × r` displayed, `math.pi` × full-precision
+r computed). Test drives the real `build_seed` on a real `stats.json`, verified to FAIL on the old
+code. **Suite 51.**
+
+**FULL E2E SWEEP RE-RUN, all 7 clips on the fixed code — 7/7 GATE-CLEAN.** Trusted set =
+`workspaces/job_{roundabout-4046-final, turntable-1-final, turntable-2-rect, turntable-3-rect,
+computerfan-4029-rect, fan-4027-rect, fan-4028-rect}`. Exactly ONE clip rectifies — 4046 (hub offset 96 px, agent-detected axle
+`[532.13, 996.92]`; three independent axle detections across the day — 07-20's `[532.3, 997.9]`,
+an e2e's `[513.6, 1006.9]`, and this one — all reproduce tilt 27.1°, r_fit_m 0.2601, mean ω 7.800,
+residual 3.42%, so the method is insensitive to ~20 px of hub jitter). computerfan-4029 + turntable-1 skip on `no_hub_px`; **fan-4027/4028 + turntable-2/3
+ACTIVELY DECLINE on `hub_offset_below_20px`** — the agent supplied a hub and the pipeline refused,
+which is the threshold's first exercise outside a unit test. Non-rectified clips: 0 numeric
+diffs >1% vs archive.
+
+**⚠ THE GUARD IS LOAD-BEARING, NOT DEFENSIVE.** `turntable-2`'s agent **independently reproduced the
+coordinate error today** (trajectory 87 px = its own `y_off` below the centre; CV 0.188 as declared
+vs 0.015 corrected). The guard caught it mid-e2e and recovered numbers matching the known-good
+archive exactly. **So the 232 px bug is a RECURRING stochastic failure at the contract seam — two
+clips, two sessions — not a 4046 one-off** (an earlier claim in this session that it was a one-off
+is RETRACTED). Without the guard that run ships a 19% radius spread with the flags blaming the
+physics, which is precisely how 4046 passed a 7-clip sweep, a gate, and reached the deck.
+
 **Old runs archived** to `agent-backend/workspaces-archive/pre-coordfix-20260721-145038/` (all 12).
 
 ### WHAT TO TRY NEXT — the limit is now the MARKER, not the projection model
