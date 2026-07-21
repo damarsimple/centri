@@ -20,6 +20,20 @@ below. Keep this file short: current state, open work, ops crib — not a diary.
   (gate) remain **UNVERIFIED** and need Qwen. Everything deterministic was verified by replay.
   This is the one open thread blocked purely on the LLM being back.
 
+### ⚠ TWO RETRACTIONS FROM LATE 07-21 — read before quoting any ripple number
+1. **The cross-tracker agreement figures were inflated by the at-rest tail.** Honest values, on the
+   79 shared ACTIVE frames: ripple correlation **r = +0.81 (not 0.98)**, mean-ω agreement
+   **1.7% (not 0.10%)**. A third of every turntable clip is the object sitting still, where both
+   trackers read zero and agree trivially. **Any agreement statistic must exclude the dead segment.**
+2. **turntable-3's ripple is NOT demonstrably phase-locked.** A surrogate test (keep the residual,
+   destroy only its relation to orbital angle, 3000 shuffles) shows **no clip in the corpus** beats
+   chance: p = 0.81 / 0.12 / 0.23 / 0.55 / 0.21. On a 1.5-revolution clip the statistic explains
+   **20–30% of variance from noise alone**, and the shipped `PHASELOCK_UNRELIABLE = 0.60` has a
+   **5.2% false-positive rate** on turntable-2. *Not* overturned: 4046's pre-rectification 0.94 over
+   18.6 revs sits far above its own null p95 of 0.30 — the statistic is sound where revolutions are
+   plentiful. **Recommended, not built: replace the constant with a per-clip surrogate test.**
+   The oriented-box-length-vs-angle finding DOES survive (p = 0.0497, marginal).
+
 ### THE TURNTABLE RIPPLE — Damar spotted a speed-up that cannot be physical
 `job_turntable-3-rect/plots/v_t.png` shows the turntable **speeding up at t≈3.05–3.15 s** mid
 coast-down. Chased through every mechanism available; the honest end state is **artifact, cause
@@ -32,7 +46,8 @@ unidentified** — it joins `bicycle` in that bucket.
 | perspective | hub offset 0.7 px, orbit round to 1.002 |
 | wrong centre | radial residual 2.1 px rms (0.52%) |
 | real torque (table not level) | ripple scales as **ω^0.7–1.1**, not ω⁻¹ |
-| **SAM3's mask algorithm specifically** | **a different model (LocateAnything-3B) reproduces the same ripple: r = +0.993 on turntable-2, +0.936 on turntable-1** |
+| **SAM3's mask algorithm specifically** | **a different model (LocateAnything-3B) reproduces the same ripple: r = +0.81 on turntable-3's own active window** |
+| a dropped camera frame | **found and FIXED** (`c0d0ddd`) — but it is only ~1/8 of the anomaly, see below |
 
 **The scaling test is the discriminator**: a fixed geometric error gives ripple ∝ ω; a fixed torque
 gives ∝ 1/ω. **CAUTION — my first run of it was wrong**: a global cubic detrend cannot follow a sharp
@@ -56,6 +71,20 @@ SPEED (constant, so "not blur") and never against ORBITAL PHASE. Measured on tur
   **not SAM3's fault** — a structurally different detector inherits it. Read it as a property of the
   imagery (glare, self-occlusion, foreshortening of an extended object), which any appearance-based
   tracker will reproduce. Fixing it needs a better *marker*, not a better *tracker*.
+
+**SHIPPED `c0d0ddd` — dropped-frame detection.** The camera dropped ONE frame at t=2.99 s
+(confirmed 3 ways: packet timestamps show a single 2.0× gap; duration×fps = 351.00 intervals for
+350 frames; `avg_frame_rate` 59.769 ≠ `r_frame_rate` 59.940). ffmpeg fills the hole by REPEATING
+the previous image → 351 images from 350 real frames, and both trackers faithfully report zero
+motion across the repeat (LA returned bit-identical coordinates — that is what exposed it).
+`contract.py` now reads container timestamps and blanks the repeated sample
+(`dropped_source_frames`); `kinematics._fill_short_gaps` interpolates. **Detect from TIMESTAMPS,
+never from a frozen position — every clip ends with the object genuinely at rest.**
+**HONEST EFFECT: only 12%** of the delivered anomaly (spurious rise 5.76% → 5.09%); the 21-frame
+Savitzky–Golay smooth had already spread the bad sample thin. My first estimate looked like the
+whole feature because I measured on RAW unsmoothed gradients — **the pipeline smooths, so always
+measure the effect on the delivered signal.** Exactly 1 dropped frame in all 7 clips / 12,900
+frames. 11 new tests; suite now 69.
 
 ### SHIPPED: the trust channel no longer clears what it cannot explain (`3960dec`, `cdaa664`)
 `quality_signals` required an **elliptical orbit** before distrusting a phase-locked ripple —

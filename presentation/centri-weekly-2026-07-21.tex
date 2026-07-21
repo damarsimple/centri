@@ -254,6 +254,44 @@ camera work, not from more mathematics.}
 \end{frame}
 
 % =========================================================================
+\begin{frame}{A number that could not be true, and where it came from}
+\small
+One clip shows a turntable \textbf{speeding up} while it is slowing down --- nothing pushes it, so
+that cannot happen. Rather than smooth it away, it was traced back stage by stage.
+\vspace{0.3em}
+\scriptsize
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}p{4.3cm}p{4.0cm}p{5.2cm}@{}}
+\toprule
+\rowcolor{cMeas!12}
+\textbf{Stage checked} & \textbf{What was found} & \textbf{Why it matters} \\
+\midrule
+The camera, while filming &
+\textbf{one frame missing}, at 2.99\,s &
+the phone skipped a beat; its own clock records the gap \\
+Turning video into still pictures &
+the gap is filled by \textbf{repeating the frame before it} &
+a valid image, so the object appears not to have moved \\
+Measuring speed from positions &
+timing assumed \textbf{perfectly even} &
+one motionless step, then a normal one, reads as ``stopped, then sped up'' \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+\scriptsize \textbf{\color{cApp}Now fixed:} the software reads the video's own clock and discards
+positions taken from a repeated picture. It cannot be done the obvious way --- spotting an object
+that stopped moving --- because every clip ends with the object genuinely at rest.
+\vspace{0.2em}
+
+\scriptsize\color{cGrey}Scope, stated plainly: this explains about \textbf{one-eighth} of that
+clip's anomaly, and one frame in 12{,}900 is affected. The rest stays unexplained, and the clip
+carries that label rather than being presented as clean.
+\takeaway{The discipline matters more than the bug: a number that violates physics is traced to a
+cause, and whatever remains unexplained keeps its warning label.}
+\end{frame}
+
+% =========================================================================
 \begin{frame}{Planned: filming the ceiling fan with sensors running}
 \small
 The open question this project has not yet answered directly: \textbf{does a video measurement agree

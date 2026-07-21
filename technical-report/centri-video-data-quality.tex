@@ -37,8 +37,9 @@ in Automatically Generated Circular-Motion Learning Material}
 re-measured end-to-end; a $232$\,px coordinate defect on \texttt{roundabout-4046} that this
 report's first edition missed; marker extent identified as the new limit; \texttt{turntable-3}'s
 angle-dependent box quality --- shown by a second-detector ablation to be a property of the footage
-rather than of the tracker --- and a trust channel that no longer infers health from the absence of a
-diagnosis}}
+rather than of the tracker --- a trust channel that no longer infers health from the absence of a
+diagnosis; a dropped camera frame now detected from timestamps; and a null distribution for the
+phase-lock statistic, which retracts the claim that \texttt{turntable-3}'s ripple is angle-locked}}
 
 \begin{document}
 \maketitle
@@ -733,10 +734,16 @@ detector. We tested it. Swapping the segmentation-and-propagation tracker for
 \textbf{LocateAnything-3B}, a structurally different model (an autoregressive box detector with no
 mask, no temporal state and no propagation between frames), \textbf{reproduces the same ripple}. On
 \texttt{turntable-3} itself the two locally-detrended $\omega$ residuals correlate at
-$r={+}0.980$ and the mean rates agree to $0.10\%$; \texttt{turntable-1} gives $r={+}0.980$ and
-$0.02\%$, \texttt{turntable-2} $r={+}0.991$ and $0.13\%$. The two angular tracks sit $0.46^\circ$
-rms apart where the disputed ripple is worth $\approx1.8^\circ$ --- the trackers agree with each
-other far more closely than either agrees with a clean coast-down.
+$r={+}0.81$ and the mean rates agree to $1.7\%$, measured on the $79$ frames inside the active
+window where both trackers have a real detection. The two angular tracks sit $0.46^\circ$ rms
+apart where the disputed ripple is worth $\approx1.8^\circ$ --- the trackers agree with each other
+far more closely than either agrees with a clean coast-down.
+
+\emph{Correcting our own first pass:} we initially quoted $r={+}0.98$ and $0.10\%$ for this
+comparison. Those were computed over the whole clip, a third of which is the turntable sitting
+still --- an interval where both trackers report zero and agree trivially. Any agreement statistic
+spanning a dead segment is flattered by it. The active-window figures above are the honest ones,
+and they still support the conclusion, just less emphatically.
 
 This eliminates one hypothesis and sharpens another. The \emph{implementation} is exonerated: no
 particular segmentation algorithm is producing the artifact. But both trackers are appearance-based,
@@ -786,15 +793,40 @@ The correction matters for the finding above, not just for the tool: with the ba
 disputed window, so \textbf{the clip in dispute now carries the result itself} rather than borrowing
 it from its siblings.
 
-One further use of the same data: two independent trackers agreeing on mean $\omega$ to
-$0.02$--$0.13\%$ is not the external ground truth this report calls its most valuable missing piece
+One further use of the same data: two independent trackers agreeing on mean $\omega$ to $1.7\%$ is
+not the external ground truth this report calls its most valuable missing piece
 (\S\ref{sec:limits}), but it is the strongest available substitute, and it bears directly on the
 verdict below --- the time-averaged claim is the one that survives.
 
+\paragraph{One dropped frame, and what it does and does not explain.}
+The camera dropped a frame at $t=2.99$\,s. Three independent readings agree: the container's packet
+timestamps show a single interval of exactly $2.0\times$ the median; $\text{duration}\times\text{fps}$
+spans $351.00$ frame intervals while only $350$ frames exist; and \texttt{avg\_frame\_rate}
+($59.769$) disagrees with \texttt{r\_frame\_rate} ($59.940$), which is what a missing frame looks
+like in metadata. Frame extraction runs at a constant rate, so \texttt{ffmpeg} fills the hole by
+repeating the previous image --- $351$ images from $350$ real frames --- and the repeat is a
+perfectly valid picture, so both trackers report it faithfully: the object does not move across it.
+LocateAnything returned bit-identical coordinates on the pair, which is what made it visible at all.
+With time assumed uniform, one motionless step followed by a normal one reads as the turntable
+stopping and then making up the distance.
+
+The pipeline now detects this from timestamps and blanks the repeated sample
+(\texttt{dropped\_source\_frames}), so the trajectory carries no position the camera never measured.
+Detecting it from the \emph{trajectory} would not work: a frozen position is also exactly what a
+stationary object looks like, and every clip here ends at rest.
+
+\textbf{It is not, however, the explanation for the bump.} Exactly one dropped frame exists in the
+whole corpus, and correcting it moves the spurious mid-coast rise in the delivered $v(t)$ from
+$5.76\%$ to $5.09\%$ --- a $12\%$ reduction. The pipeline's $21$-frame Savitzky--Golay smoothing had
+already spread the bad sample thin. We report this because our first measurement of the effect, taken
+on raw unsmoothed gradients, suggested it accounted for the whole feature; on the delivered signal it
+does not. The correction is worth having as a data-integrity guard, not as a diagnosis.
+
 \textbf{Verdict: GOLD for time-averages, \und{} per-instant.} Cleared of perspective by the static
-hub offset, and now cleared of any tracker-specific defect, but carrying an unexplained angle-locked
-artifact and too short to characterise it. The pipeline now says so rather than inferring health
-from the absence of a diagnosis (\S\ref{sec:trustchannel}).
+hub offset, and now cleared of any tracker-specific defect, but carrying a ripple of $\approx 17\%$
+of mean $\omega$ that no mechanism we can test accounts for, over too few revolutions to characterise
+(\S\ref{sec:phaselocknull}). The pipeline now says so rather than inferring health from the absence
+of a diagnosis (\S\ref{sec:trustchannel}).
 
 \subsection{fan-4027, fan-4028 --- the synth fabricates the ends; measurement makes them SILVER}
 \label{sec:fans}
@@ -1200,6 +1232,61 @@ determines only that the orbit \emph{images} as an ellipse; whether that ellipse
 a projective image of the circle depends on the camera's distance relative to the orbit --- 4046
 was shot close with a wide phone lens, the others flatter. \textbf{An affine ellipse needs no
 un-projection: $\theta$ read from a correctly-centred ellipse is already right.}
+
+\subsection{How much phase-lock does pure noise produce? A null distribution}
+\label{sec:phaselocknull}
+
+The footnote in Table~\ref{tab:null} --- ``below 2 revolutions the statistic is not meaningful''
+--- was an argument from first principles, and the threshold it defends ($0.60$, the value at
+which the pipeline distrusts per-instant $\omega$) was chosen without ever measuring what the
+statistic does when there is nothing to find. That is the same mistake as the retraction above,
+one level up: a number was trusted because it was computed, not because its null was known.
+
+So we measured it. For each clip we keep the detrended $\omega$ residual exactly as it is ---
+same amplitude, same autocorrelation, same everything --- and destroy only its relationship to
+orbital angle, by circularly shifting it against the phase. Repeating that a few thousand times
+gives the distribution of phase-lock values obtainable from a signal that, by construction, is
+\emph{not} phase-locked.
+
+\begin{center}\small
+\begin{tabular}{@{}lrrrrl@{}}
+\toprule
+Clip & Revs & Observed & Null median & Null p95 & Verdict \\
+\midrule
+\texttt{turntable-1} & $2.61$ & $0.106$ & $0.213$ & $0.427$ & indistinguishable ($p{=}0.81$) \\
+\texttt{turntable-2} & $1.47$ & $0.517$ & $0.301$ & $0.608$ & indistinguishable ($p{=}0.12$) \\
+\texttt{turntable-3} & $1.79$ & $0.260$ & $0.202$ & $0.325$ & indistinguishable ($p{=}0.23$) \\
+\texttt{roundabout-4046}$^*$ & $18.6$ & $0.058$ & $0.069$ & $0.297$ & indistinguishable ($p{=}0.55$) \\
+\texttt{computerfan-4029} & $11.8$ & $0.042$ & $0.017$ & $0.122$ & indistinguishable ($p{=}0.21$) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent$^*$post-rectification, i.e.\ after its real artifact was removed --- correctly reading
+as nothing left to find.
+
+Two things follow. First, \textbf{on a short clip the statistic manufactures phase-lock from
+nothing}: fitting four harmonics to an autocorrelated residual over $1.5$ revolutions explains
+$20$--$30\%$ of the variance on average, and up to $0.61$ at the $95$th percentile on
+\texttt{turntable-2}. The shipped $0.60$ threshold therefore carries a $5.2\%$ false-positive rate
+on the shortest clip in the corpus. Second, and reassuringly, \textbf{no clip's per-instant ripple
+is demonstrably locked to orbital angle} --- so the rule has never actually fired on noise here,
+and the clips that need holding back are held back by the revolution count instead, which is the
+guard doing real work.
+
+This does not overturn 4046. Its pre-rectification lock of $0.94$ over $18.6$ revolutions sits far
+above that clip's null p95 of $0.30$, which is exactly why the effect was real and removable. The
+statistic is sound where revolutions are plentiful and an effect is large; it is uninformative
+where they are not. \textbf{The correct fix is to stop comparing against a fixed constant and
+compare each clip against its own null} --- the surrogate test above costs milliseconds and
+removes the arbitrary threshold entirely. That is recommended, not yet implemented.
+
+One claim of ours does survive the same test. The tracked phone's oriented box varies
+$432 \to 470$\,px with orbital angle, and that variation \emph{is} locked to phase beyond chance
+($p = 0.0497$) --- marginally, on the same short clip, so it should be re-measured on a longer one.
+The imaged extent of an extended object really does depend on the angle it is viewed from. What
+does not follow, and what we previously implied, is that this produces a detectable phase-locked
+signature in $\omega$: it does not.
 
 \subsection{What the corpus does support}
 
@@ -1713,13 +1800,20 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
   threshold has been calibrated, and no clip sits in between --- we have not seen an
   intermediate case.
   \item \textbf{Two clips are unexplained, not one.} \texttt{bicycle} carries a phase-locked
-  ripple that is neither perspective nor occlusion; \texttt{turntable-3} carries one that survives
-  every mechanism we can test (\S\ref{sec:tt3}), while the measured box demonstrably varies with
-  the object's angle ($432 \to 470$\,px, $44\%$ phase-locked). Until these are understood we cannot
-  claim to know what those clips' per-instant data should be. The ablation of \S\ref{sec:tt3}
-  narrows the search without closing it: a second, structurally different detector reproduces the
-  ripple, so the defect is not in any particular tracker --- it is in what the footage presents to
-  \emph{any} appearance-based tracker.
+  ripple ($0.72$ over $6.4$ revolutions) that is neither perspective nor occlusion;
+  \texttt{turntable-3} carries a ripple of $\approx17\%$ of mean $\omega$ that survives every
+  mechanism we can test (\S\ref{sec:tt3}). The ablation there narrows the search without closing
+  it: a second, structurally different detector reproduces the ripple, so the defect is not in any
+  particular tracker --- it is in what the footage presents to \emph{any} appearance-based tracker.
+  Note that \texttt{turntable-3}'s ripple is \emph{not} demonstrably locked to orbital angle
+  (\S\ref{sec:phaselocknull}); the object's imaged extent is, marginally, but that does not carry
+  through to $\omega$. Until these are understood we cannot claim to know what those clips'
+  per-instant data should be.
+  \item \textbf{A threshold in the shipped gate is uncalibrated.} The phase-lock value at which
+  per-instant $\omega$ is distrusted ($0.60$) was never checked against the statistic's null
+  distribution, and on the shortest clip in the corpus noise alone reaches it $5.2\%$ of the time
+  (\S\ref{sec:phaselocknull}). It has not misfired on this corpus, but it is a constant where a
+  per-clip surrogate test belongs.
   \item \textbf{No external ground truth.} Everything rests on internal consistency (invariant
   mean $\omega$; an unoptimised circularity gain) and agreement with the pipeline's independent
   1-revolution boxcar. No independently measured $\omega$ --- a rated fan speed, a metronome, a
