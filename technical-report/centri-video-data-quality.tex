@@ -31,7 +31,11 @@
 \large A Per-Phenomenon Breakdown of Tracking and Projective Artifacts\\
 in Automatically Generated Circular-Motion Learning Material}
 \author{Technical Report --- Centri / Hwang Lab}
-\date{2026-07-15\quad(rev.\ 2026-07-16: fan blade-tip scale measured, SILVER tier, $\omega(t)$ staircase fix)}
+\date{2026-07-15\\[0.2em]
+\normalsize rev.\ 2026-07-16: fan blade-tip scale measured, SILVER tier, $\omega(t)$ staircase fix\\
+\normalsize \textbf{rev.\ 2026-07-21: rectification delivered in the frozen pipeline and
+re-measured end-to-end; a $232$\,px coordinate defect on \texttt{roundabout-4046} that this
+report's first edition missed; marker extent identified as the new limit}}
 
 \begin{document}
 \maketitle
@@ -46,8 +50,11 @@ Two findings dominate. First, on one clip (\texttt{roundabout-4046}) \textbf{the
 $\omega(t)$ is not noise and not tilt: it is true perspective projection}. The natural remedy
 (fit the elliptical image of the orbit, stretch it back to a circle) removes only $12\%$ of it,
 because an affine model addresses the wrong harmonic. An uncalibrated projective rectification,
-derived from the imaged rotation axle and the orbit conic, removes $91\%$ (ripple CV
-$0.166 \rightarrow 0.015$) while leaving mean $\omega$ invariant to four significant figures.
+derived from the imaged rotation axle and the orbit conic, removes the artifact while leaving mean
+$\omega$ invariant. \textbf{This is now implemented in the frozen pipeline} and measured end-to-end:
+ripple CV $0.167 \rightarrow 0.031$, phase-locked fraction $0.944 \rightarrow 0.057$, mean
+$|\omega|$ moving $0.2\%$, with the other six clips of the golden set bit-identical and their
+refusals recorded with reasons.
 
 Crucially, \textbf{this does not generalise, and the reason is the useful result}. Applying the
 same rectification to the two other clips that a tilt-based reading nominates
@@ -74,10 +81,23 @@ staircase make $v$, $a_c$ and $\omega(t)$ trustworthy. But because the per-frame
 reconstructed from the rate, these clips are \textbf{silver} --- teachable numbers, reconstructed
 trajectory --- not gold.
 
+Fourth, and found only after the first edition of this report, \textbf{4046 carried a second and
+larger defect that this report's own audit missed}: the tracker ran on a cropped copy of the video
+while the axle was detected on the full frame, and both were declared full-frame, so the pipeline
+measured a trajectory against a centre $232$\,px away from it. Radius spread, $\sigma_\omega$ and
+peak $a_c$ were inflated by factors of $3$--$10$, and the validation flags that fired blamed the
+physics. \textbf{A file whose mean $\omega$ implies a $0.80$\,s lap while reporting $1.072$\,s
+should not have needed a second pair of eyes}; the check that catches it is now deterministic, and
+a later run reproduced the same mis-declaration on a different clip.
+
 Of four phenomena we can now vouch for, \textbf{only one required correcting the data}; the other
-three were recovered by fixing our own diagnostics and configuration. We report what did
-\emph{not} work --- including four of our own claims falsified by frame-by-frame inspection, and a
-tracker bug we documented and then re-committed --- and locate each fix in the architecture:
+three were recovered by fixing our own diagnostics and configuration. With projection removed, what
+limits that clip is no longer the geometric model --- only $1.3\%$ of the residual is
+phase-locked --- but the tracked marker itself, a $108\times119$\,px knob whose apparent size varies
+with viewing angle: the next gain is a better sticker, not a better model. We report what did
+\emph{not} work --- including four of our own claims falsified by frame-by-frame inspection, a
+tracker bug we documented and then re-committed, and two end-to-end runs destroyed by a hint that
+asked the agent for a fix the architecture forbids --- and locate each fix in the architecture:
 geometry is deterministic and belongs in code, while per-clip judgement belongs to the agent.
 \end{abstract}
 
@@ -393,46 +413,105 @@ the fitted ellipse's $(A-B)/2 = 26.9$\,px almost exactly, while its 1/rev compon
 $2.8$\,px --- so \textbf{the rotation centre is correct}, and the dominant 1/rev term in
 $\omega$ is not a centring error.
 
-\textbf{Improved.} Projective rectification (\S\ref{sec:method-rect}) reduced the ripple CV
-from $0.166$ to $0.015$ and the 1/rev amplitude from $1.725$ to $0.054$
+\textbf{Improved.} Projective rectification (\S\ref{sec:method-rect}) is now \textbf{implemented in
+the frozen pipeline} (\S\ref{sec:shipped}) and runs on this clip end-to-end. It reduces the ripple
+CV from $0.167$ to $0.031$ and the 1/rev amplitude from $1.727$ to $0.034$
 (Table~\ref{tab:rect}, Figure~\ref{fig:rectify}). This is the only clip in the corpus with a
 \emph{measured} improvement; everything else in this report is diagnosis.
 
 \begin{table}[htbp]
 \centering
 \footnotesize
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Metric & Baseline & + drift removed & + projective rectified \\
+& \multicolumn{3}{c}{Prototype study} & Delivered \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-5}
+Metric & Baseline & + drift removed & + projective & \textbf{as shipped} \\
 \midrule
-ripple CV                & 0.166 & 0.164 & \textbf{0.015} \\
-$A_1$ (1/rev amplitude)  & 1.725 & 1.727 & \textbf{0.054} \\
-$A_2$ (2/rev amplitude)  & 0.843 & 0.844 & \textbf{0.069} \\
-phase-lock fraction      & 0.942 & 0.976 & \textbf{0.304} \\
-orbit radial residual    & 5.20\% & --- & \textbf{1.68\%} \\
-mean $|\omega|$ (rad/s)  & 7.799 & 7.799 & \textbf{7.800} \\
+ripple CV                & 0.166 & 0.164 & 0.015 & \textbf{0.031} \\
+$A_1$ (1/rev amplitude)  & 1.725 & 1.727 & 0.054 & \textbf{0.034} \\
+$A_2$ (2/rev amplitude)  & 0.843 & 0.844 & 0.069 & \textbf{0.076} \\
+phase-lock fraction      & 0.942 & 0.976 & 0.304 & \textbf{0.057} \\
+orbit radial residual    & 5.20\% & --- & 1.68\% & \textbf{3.39\%} \\
+mean $|\omega|$ (rad/s)  & 7.799 & 7.799 & 7.800 & \textbf{7.803} \\
 \bottomrule
 \end{tabular}
 \caption{Rectification on \texttt{roundabout-4046}. The baseline is deliberately generous: the
 \emph{best least-squares circle} (not the sidecar's mark) plus the pipeline's exact
-Savitzky--Golay${+}$median smoothing. The gain is therefore attributable to geometry, not to a
-weakened baseline.}
+Savitzky--Galay${+}$median smoothing. The gain is therefore attributable to geometry, not to a
+weakened baseline. \textbf{The final column is the delivered system}
+(\texttt{analysis/rectify.py}), measured end-to-end on a full agent run; recomputing the baseline
+on that same run gives ripple CV $0.167$, so the two leftmost columns transfer.
+\textbf{The delivered version uses a single static detected axle and does \emph{not} remove camera
+drift}, which is the whole of the difference: it beats the prototype on the harmonics it targets
+($A_1$ $0.054 \to 0.034$; phase-lock $0.304 \to 0.057$) and loses on the radial residual
+($1.68\% \to 3.39\%$), because the residual is where a handheld camera's $53\times41$\,px of drift
+lands. Drift removal is a known, unimplemented improvement (\S\ref{sec:recs}).}
 \label{tab:rect}
 \end{table}
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{fig-rectify-4046.png}
-\caption{\textbf{Left:} $\omega(t)$ as the pipeline produces it today (red) versus after
-projective rectification (green). The red curve's $\sim$18 oscillations are a projection
-artifact; the wheel simply coasts from 9.4 to 6.5\,rad/s. \textbf{Centre:} the orbit as filmed
---- a visible ellipse --- with the tracked hub showing $53\times41$\,px of handheld camera
-drift. \textbf{Right:} the rectified orbit, now a circle to within 1.68\%.}
+\caption{Regenerated from a full end-to-end run of the \emph{delivered} pipeline
+(\texttt{figures/make\_fig\_rectify\_4046.py}). \textbf{Left:} $\omega(t)$ about the best-fit
+circle as filmed (red) versus the rectification the pipeline now applies (blue). The red curve's
+$\sim$18 oscillations are a projection artifact; the wheel simply coasts from 9.4 to 6.5\,rad/s.
+\textbf{Centre:} the orbit as filmed --- a visible ellipse --- with the detected axle
+($\boldsymbol{+}$) sitting $84.6$\,px from the centre of that ellipse ($\circ$). That offset is
+the method's entire input. \textbf{Right:} the rectified orbit, a circle to within $3.42\%$; the
+remaining scatter is camera drift and marker extent (\S\ref{sec:marker}), not projection.}
 \label{fig:rectify}
 \end{figure}
 
+\subsubsection{A second defect on this clip, found after this report's first edition}
+\label{sec:coordbug}
+
+The analysis above is computed from the cached tracker output directly, and it is sound. The
+\emph{pipeline}, however, was reading the same clip through a broken seam, and this report did not
+catch it --- an instructive failure, because the report audits 4046 in more detail than any other
+clip and still missed it.
+
+The perception steps track on a \textbf{cropped} copy of the video and detect the axle on the
+\textbf{full} frame. Both were then declared \texttt{coordinate\_space: "display"}, so
+\texttt{contract.load\_inputs} subtracted the crop offset from both together --- correct for a pair
+that really is full-frame, and fatal for a pair that is not. The trajectory and the centre ended
+up $232$\,px apart. Nothing downstream could see it: the orbit simply read as real-but-eccentric.
+
+\begin{center}
+\footnotesize
+\begin{tabular}{lrr}
+\toprule
+& Trajectory 232\,px off & Corrected \\
+\midrule
+radius spread $\sigma_r$ (m)     & 0.114 & \textbf{0.035} \\
+$\sigma_\omega$ (rad/s)          & 4.47  & \textbf{1.16} \\
+largest $a_c$ (m/s\textsuperscript{2}) & 235.5 & \textbf{31.2} \\
+$r_{\mathrm{fit}}$ (m)           & 0.281 & \textbf{0.254} \\
+mean $a_c$ (m/s\textsuperscript{2})    & 22.78 & \textbf{15.83} \\
+period vs.\ $2\pi/\bar\omega$ (s) & 1.072 vs.\ 0.798 & \textbf{0.808 vs.\ 0.804} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two things make this worth recording. First, \textbf{the validation flags fired and blamed the
+physics}: \texttt{radius\_unstable}, \texttt{omega\_spike} and \texttt{ransac\_fit\_rejected} are
+exactly what a genuinely wobbly wheel would raise, so the warnings read as a property of the clip
+rather than of the arithmetic. Second, the internal contradiction was there to be seen and nobody
+looked: a mean $\omega$ of $7.875$\,rad/s implies a $0.80$\,s lap, while the same file reported
+$1.072$\,s. \textbf{Checking that a clip's own numbers agree with each other is close to free and
+was not being done.}
+
+The defect is now caught deterministically: a trajectory and a centre that share a coordinate frame
+trace a steady radius, so the contract compares the radius spread under both readings and keeps the
+self-consistent one, raising \texttt{trajectory\_space\_mismatch}. On 4046 that is $0.437$ against
+$0.144$; on every other clip in the corpus the declared reading already wins and the check is inert.
+It is not a rare event: a later end-to-end run of \texttt{turntable-2} reproduced the same
+mis-declaration independently, and the guard caught it mid-run.
+
 \textbf{Verdict: GOLD (corrected).} A real perspective artifact, removed by rectification with mean
-$\omega$ invariant --- the one clip in the corpus that needed its \emph{data} corrected.
+$\omega$ invariant --- the one clip in the corpus that needed its \emph{data} corrected, and, as it
+turns out, its coordinate handling corrected too.
 
 \subsection{bicycle --- phase-locked, but not perspective (unexplained)}
 
@@ -1000,7 +1079,10 @@ turntable-3/flick & $3.8^\circ$  & \textbf{0.7\,px} & 1.8 & 0.40$^\dag$ & --- & 
 \end{tabular}
 \caption{The null results. $^\dag$Below 2 revolutions the phase-lock statistic fits four
 harmonics to $\sim$1.5 cycles and is not meaningful. Rectification helps exactly one clip, and
-the hub offset predicts which one \emph{in advance}.}
+the hub offset predicts which one \emph{in advance}. All five rows are the \emph{prototype}
+(per-frame axle, camera drift removed) so that they compare like with like; the delivered pipeline
+reaches $0.167 \to 0.031$ on 4046 with a single static axle (Table~\ref{tab:rect}), and its
+$20$\,px gate leaves the other four untouched --- the same prediction, now enforced in code.}
 \label{tab:null}
 \end{table}
 
@@ -1268,15 +1350,65 @@ evidence. Two independent checks are required and both are reported:
 \begin{itemize}
   \item \textbf{Mean $\omega$ must be preserved.} Rectification redistributes angle
   \emph{within} a revolution; it cannot change how many revolutions occurred, since a full
-  revolution's average is projection-invariant. Measured: $7.799 \rightarrow 7.800$\,rad/s. A
+  revolution's average is projection-invariant. Measured on the delivered pipeline:
+  $7.819 \rightarrow 7.803$\,rad/s, a shift of $0.2\%$ (prototype: $7.799 \rightarrow 7.800$). A
   moving mean would indicate real signal being fitted away.
   \item \textbf{Circularity must improve without having been optimised.} The vanishing line is
   derived from the detected hub --- never from $\omega$, never from the radial residual. The
-  residual falling $5.20\% \rightarrow 1.68\%$ is therefore a free, independent confirmation.
+  residual falling $5.22\% \rightarrow 3.42\%$ on the delivered run ($5.20\% \rightarrow 1.68\%$
+  for the prototype, which additionally removed camera drift) is therefore a free, independent
+  confirmation.
 \end{itemize}
 
 A rectification derived from the kinematics it then ``improves'' is worthless; any report of
 this method should state which inputs came from geometry and which from motion.
+
+Both checks are now \emph{enforced} rather than merely reported: the delivered implementation
+rejects a rectification that moves mean $|\omega|$ by more than $2\%$, and records the
+before/after radial residual in every run's statistics.
+
+\subsection{What is left after rectification: the marker, not the model}
+\label{sec:marker}
+
+With the projective artifact removed, the natural next question is whether a richer geometric
+model --- recovering the orbit's full 3-D pose, or abandoning the planar assumption --- would buy
+anything further. Measured on the delivered run, it would not.
+
+\begin{center}
+\footnotesize
+\begin{tabular}{p{7.4cm}rp{4.4cm}}
+\toprule
+Measured after rectification & & Reading \\
+\midrule
+radial residual & $16.5$\,px (3.4\%) & the scatter that remains \\
+\quad of which locked to orbital phase & \textbf{1.3\%} & a wrong shape model would appear
+\emph{here}; nothing left to model \\
+apparent size of the tracked knob & $108\times119$\,px & it is a solid object, not a point \\
+\quad of that size variation, locked to phase & \textbf{75--82\%} & different faces of it are seen
+at different depths as it turns \\
+residual scatter relative to marker size & $\approx 15\%$ & the limit on ``where is the handle?'' \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The interpretation is that the surface model is now adequate and the \emph{measurand} is not
+well defined: the tracked centroid of an extended, self-occluding body genuinely moves relative to
+the body as it rotates. No projective, affine or 3-D model addresses that, because the error is
+not in the mapping from world to image --- it is in what ``the position of the object'' means.
+
+For completeness, the 3-D pose \emph{is} recoverable from what we already have, and it corroborates
+the planar route: the orbit's vanishing line meets the imaged circle at that plane's circular
+points, which must also lie on the image of the absolute conic, giving one equation for the focal
+length under square pixels and a centred principal point. On 4046 that yields $f \approx 1116$\,px
+and a plane-to-image angle of $27.4^\circ$, against the axis-ratio route's $27.1^\circ$. It buys
+nothing for $\omega$ --- planar rectification already recovers in-plane angle up to a similarity,
+and $\omega$ is similarity-invariant --- and it is ill-conditioned on near-circular ellipses, so
+only 4046 and the park wheel would support it at all. It would matter for \emph{scale}, where a
+reference object at a different depth or orientation than the orbit is currently unmodelled.
+
+\textbf{The actionable consequence is a capture instruction, not an algorithm:} a small, flat,
+high-contrast marker collapses the blob toward a point. That is the fix that already rescued both
+fan clips (a red marker) and is specified for the park-wheel re-shoot (tape on one knob).
 
 \subsection{Independent corroboration}
 
@@ -1288,11 +1420,13 @@ methods agreeing on the physics is meaningful support that the rectification rec
 rather than manufacturing it.
 
 %======================================================================
-\section{What the pipeline does today}
+\section{What the pipeline did, and what it does now}
 \label{sec:filter}
 
-The current system \emph{already detects} this artifact and responds in two ways, both of which
-treat the symptom:
+\subsection{What it did: treat the symptom}
+
+Before rectification was implemented, the system \emph{already detected} this artifact and
+responded in two ways, both of which treated the symptom:
 
 \begin{enumerate}
   \item \textbf{A filter.} \texttt{render/figures.py} draws a 1-revolution moving average boldly
@@ -1311,9 +1445,9 @@ But the comparison is unfavourable on every axis that matters:
 \begin{center}
 \begin{tabular}{p{4.2cm}p{5.1cm}p{5.1cm}}
 \toprule
- & 1-rev boxcar (current) & Projective rectification \\
+ & 1-rev boxcar (former) & Projective rectification \\
 \midrule
-within-revolution $\omega$ & destroyed; may never be discussed & recovered (ripple CV 0.015) \\
+within-revolution $\omega$ & destroyed; may never be discussed & recovered (ripple CV 0.031) \\
 cancellation & imperfect --- fixed window while the wheel decelerates & artifact removed at source \\
 what the student sees & a bold line over a faint jagged trace, implying the raggedness is real & one clean line \\
 material generation & \texttt{do\_not\_claim} suppression remains & suppression unnecessary \\
@@ -1321,10 +1455,45 @@ material generation & \texttt{do\_not\_claim} suppression remains & suppression 
 \end{tabular}
 \end{center}
 
-The system is currently hiding an artifact it has enough information to remove.
+The system was hiding an artifact it had enough information to remove.
+
+\subsection{What it does now: remove it at source}
+\label{sec:shipped}
+
+Rectification is implemented in the frozen layer as \texttt{analysis/rectify.py} and runs inside
+\texttt{geometry.calibrate}, \textbf{before any radius or angle is measured} --- which is the only
+correct place for it, since a $\theta$ taken from raw image pixels is already wrong. The split is
+the one \S\ref{sec:where} argues for, and it survives contact with a real agent:
+
+\begin{itemize}
+  \item \textbf{The agent supplies one observation.} It detects the imaged axle and passes
+  \texttt{hub\_px} through \texttt{pipeline\_inputs.json}. It writes no geometry.
+  \item \textbf{The frozen pipeline does the arithmetic}, gated on \texttt{hub\_px} being present
+  \emph{and} materially offset from the ellipse centre. The threshold is $20$\,px, which separates
+  the corpus cleanly: 4046 at $84.6$\,px and the parked park-wheel clip at $60$--$73$\,px are
+  rectified; every other clip sits at $0.7$--$8.8$\,px and is left alone.
+  \item \textbf{Refusal is recorded, not silent.} Every run carries a
+  \texttt{calibration.rectification} block giving the hub offset, the axis ratio, the tilt, the
+  vanishing line, the before/after radial residual --- or, when it declined, the reason
+  (\texttt{no\_hub\_px}, \texttt{hub\_offset\_below\_20px}). Both fan clips exercise the refusal
+  path: the agent supplied a hub and the pipeline correctly declined.
+  \item \textbf{Non-rectified clips are bit-identical.} Six of the seven clips in the golden set
+  show zero numeric change against their pre-rectification runs, flags included.
+\end{itemize}
+
+The guard rails the method demands are enforced rather than merely reported: passing the
+\emph{ellipse centre} as $h$ --- the silent failure of \S\ref{sec:trap} --- is refused by the
+offset gate rather than quietly performing an identity transform, and a rectification that moved
+mean $|\omega|$ by more than 2\% would be rejected outright. Measured on the delivered run, mean
+$|\omega|$ moves $0.2\%$.
+
+\textbf{The correction is invisible in the finished material, which is the point.} A worksheet
+generated from a rectified clip reads exactly like one generated from a face-on clip; the
+difference is that its per-instant $\omega$ is now allowed to be discussed at all.
 
 %======================================================================
 \section{Where each fix belongs}
+\label{sec:where}
 
 An end-to-end test settled this. Per-clip guidance (\texttt{hints.md}) was injected verbatim
 into the orchestrator prompt and the agent \emph{correctly ignored} the instruction to rectify,
@@ -1335,6 +1504,23 @@ own docstrings record that agent-authored kinematics made \texttt{center\_drift}
 
 \textbf{This was not a model limitation. It was a misplaced hint.} The knowledge was filed in a
 layer with no authority to act on it.
+
+\paragraph{What the misplaced hint actually cost.} The first edition of this report recorded that
+the agent refused, and treated the refusal as the end of the story. It was not. A hint that
+\emph{asks} for a fix the architecture forbids does not produce a clean refusal every time --- it
+produces an expensive one. On two subsequent end-to-end runs the agent accepted the instruction,
+began building its own \texttt{rectify.py}, and \textbf{exhausted the 1024\,MB output guard in the
+kinematics phase}, shipping nothing and leaving a degenerate contract behind ($x$ spanning
+$0.0$--$0.1$\,px, mean $\omega$ of $0.0$). On the one run that did finish, it computed a rectified
+trajectory, wrote it to \texttt{rectified\_trajectory.json}, and then --- having nowhere to put it
+in the contract --- \textbf{passed the raw trajectory to the pipeline anyway}. The work was done
+and discarded.
+
+The fix was to invert the hint: it now states that rectification is frozen, that the agent must not
+write one, and that its entire part is to detect the axle and hand over \texttt{hub\_px}. The same
+rule was added to the orchestrator's hard rules. The clip completed end-to-end on the next attempt,
+having failed twice before. \textbf{A hint that asks a layer to do what it cannot is worse than no
+hint at all}, because the model will try.
 
 \begin{center}
 \begin{tabular}{l p{6.6cm} l}
@@ -1348,13 +1534,20 @@ Step 6 \texttt{analysis/} (frozen) & calibration, geometry, kinematics, stats & 
 \end{tabular}
 \end{center}
 
-The proposed split follows directly, and matches the intended small-agent/large-agent
-architecture: \textbf{the large agent supplies the method} (once, validated, as code);
-\textbf{the small agent supplies the per-clip observation} (detect the axle, emit
-\texttt{hub\_px} through the contract); \textbf{the frozen pipeline does the arithmetic}
-(rectify when \texttt{hub\_px} is present and materially offset from the ellipse centre).
-Nothing asks a 35B model to re-derive projective geometry per job, and the gate leaves
-near-face-on clips bit-identical.
+The split follows directly, and matches the intended small-agent/large-agent architecture:
+\textbf{the large agent supplies the method} (once, validated, as code); \textbf{the small agent
+supplies the per-clip observation} (detect the axle, emit \texttt{hub\_px} through the contract);
+\textbf{the frozen pipeline does the arithmetic} (rectify when \texttt{hub\_px} is present and
+materially offset from the ellipse centre). Nothing asks a 35B model to re-derive projective
+geometry per job, and the gate leaves near-face-on clips bit-identical.
+\textbf{This is now what runs} (\S\ref{sec:shipped}), and the corpus behaved as predicted: one
+clip rectified, six untouched and bit-identical, refusals recorded with reasons.
+
+One caveat the split does not remove. The contract seam it relies on is also where the coordinate
+defect of \S\ref{sec:coordbug} lived: the agent is trusted to \emph{declare} which pixel space it
+wrote, and a wrong declaration is invisible to every layer below. The architecture correctly stops
+the agent doing the geometry; it does not stop the agent mislabelling the geometry's input. That
+needed a separate, deterministic consistency check, and it fires often enough to matter.
 
 \subsection{A delivery bug worth recording}
 \label{sec:survey-bugs}
@@ -1392,6 +1585,21 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
   1-revolution boxcar. No independently measured $\omega$ --- a rated fan speed, a metronome, a
   hand-counted revolution --- anchors the corpus. \textbf{This is the most valuable missing
   piece.}
+  \item \textbf{Accuracy is now limited by the marker, not by the geometry} (\S\ref{sec:marker}).
+  Only $1.3\%$ of the post-rectification radial residual is phase-locked, so no further shape
+  model is indicated; but the tracked knob images $108\times119$\,px with $75$--$82\%$ of its
+  apparent-size variation locked to phase, leaving a scatter of $\approx 15\%$ of the marker's own
+  size. This bounds what any amount of modelling can achieve on the existing footage.
+  \item \textbf{Camera drift is not removed by the delivered rectification.} The prototype tracked
+  the axle per frame and reached a $1.68\%$ radial residual; the shipped version uses a single
+  static axle and reaches $3.39\%$ (Table~\ref{tab:rect}). The difference is $53\times41$\,px of
+  handheld drift. This is a known, unimplemented improvement rather than a limit of the method.
+  \item \textbf{The contract seam is trusted, and was wrong once} (\S\ref{sec:coordbug}). The agent
+  declares which pixel space it wrote; a mis-declaration is invisible below and cost 4046 a $232$\,px
+  offset that the validation flags attributed to the physics. A deterministic consistency check now
+  catches it, but the general problem --- an agent-asserted fact the pipeline cannot verify --- is
+  unsolved, and other such assertions exist (notably whether a trajectory was measured or
+  synthesized, \S\ref{sec:fans}).
   \item \textbf{The corpus is thin and partly duplicated.} Eleven templates reduce to $\sim$six
   phenomena; \texttt{flick} $=$ \texttt{turntable-3}; \texttt{turntable-1/2/3} are one phenomenon;
   \texttt{fan-4027/4028} are one physical fan; two of ten tracks are unusable. \textbf{Four
@@ -1416,16 +1624,29 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
 \end{itemize}
 
 \section{Recommendations}
+\label{sec:recs}
+
+\emph{Item 2 of the first edition --- implement rectification in the frozen layer, gated on the hub
+offset --- is done (\S\ref{sec:shipped}); 4046's golden numbers moved as predicted
+($r_{\mathrm{fit}}$ $0.254 \rightarrow 0.260$\,m). What follows is what remains.}
 
 \begin{enumerate}
   \item \textbf{Capture beats correction.} Every artifact here was cheaper to prevent than to
   fix. Film closer to face-on; ensure $\ge 3$ revolutions; choose a marker that contrasts with
-  the \emph{background}, not merely with the object.
-  \item \textbf{Implement rectification in \texttt{geometry.py}}, \textbf{gated on the hub
-  offset} rather than on tilt, with the agent detecting the axle in Step 5 and passing
-  \texttt{hub\_px} through \texttt{pipeline\_inputs.json}. The gate is the point: four of five
-  clips must be left untouched and bit-identical. Accept that 4046's golden numbers will move
-  --- the previous ones were wrong.
+  the \emph{background}, not merely with the object --- and make it \textbf{small and flat}, since
+  marker extent is now the binding constraint (\S\ref{sec:marker}), not projection.
+  \item \textbf{Remove camera drift inside the rectification.} The delivered version uses one
+  static axle; tracking it per frame and smoothing over $\sim$2\,s took the prototype's radial
+  residual from $3.39\%$ to $1.68\%$ on the same clip. It is the largest remaining
+  \emph{measurable} gain and the method already detects the axle in every frame.
+  \item \textbf{Make ``was this measured?'' a field, not a convention.} The golden set's
+  silver tier --- clips whose orbit is synthesized from a rate rather than tracked
+  (\S\ref{sec:fans}) --- is recorded in prose and in the sidecar's \texttt{tracking\_mode}, but
+  \emph{not} in \texttt{pipeline\_inputs.json}, so neither the statistics nor the material
+  generator can tell a measured trajectory from a generated one. The consequence is live: a
+  generated perfect circle is presented to learners as an observation. This is the same class of
+  defect as \S\ref{sec:coordbug} --- an agent-asserted fact the pipeline cannot verify --- and
+  wants the same treatment.
   \item \textbf{Fix the two \texttt{color\_track.py} bugs} (saturation scoring for dark targets;
   physically-derived \texttt{max\_step}) independently of 4048's fate.
   \item \textbf{Replace coverage with correctness} in the quality gate: box-area stability plus an
@@ -1442,9 +1663,19 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
 
 \begin{tabular}{@{}ll@{}}
 Diagnostic and evidence & \texttt{docs/tracking-data-quality-2026-07-15.md} \\
-Working rectification prototype & \texttt{docs/figures/rectify\_prototype.py} \\
+\textbf{Delivered rectification} & \texttt{workspace\_lib/analysis/rectify.py} \\
+\textbf{Its gate and refusal reasons} & \texttt{workspace\_lib/analysis/geometry.py} (\texttt{calibrate}) \\
+\textbf{Coordinate-space guard} & \texttt{workspace\_lib/analysis/contract.py} \\
+\textbf{Tests} & \texttt{tools/tests/test\_rectify.py}, \texttt{test\_contract\_space.py} \\
+Original rectification prototype & \texttt{docs/figures/rectify\_prototype.py} \\
+Figure regeneration & \texttt{technical-report/figures/make\_fig\_rectify\_4046.py} \\
 Per-clip guidance & \texttt{templates/*/hints.md} \\
 Archived clip and re-shoot notes & \texttt{templates-reshoot/} \\
 \end{tabular}
+
+\vspace{4pt}
+\noindent Numbers attributed to the delivered pipeline are measured on a full end-to-end run of
+\texttt{roundabout-4046} (agent-detected axle, no manual intervention); the golden set referenced
+throughout is seven clips across four phenomena, all passing their material checks.
 
 \end{document}
