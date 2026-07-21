@@ -269,6 +269,27 @@ the rim. **By this rule `templates/base-template-fan-doll` (detection returns no
 See [[centri-templates-gold-only]].
 
 **OPEN (needs Damar, do NOT guess):**
+-1. **⚠ SILVER IS UNDECLARED IN THE DATA — the fans tell students a manufactured path is evidence.**
+   Found 07-21 auditing the trusted set by overlaying every run's track on real frames. The fans'
+   marker sits on **empty ceiling** because their trajectory is SYNTHESIZED (measured radius CV
+   **0.000115**; a real track is ~0.05) — correct for frequency mode, but **nothing shipped says so**.
+   The sidecar knows (`tracking_mode: frequency`, `frequency_meta.json` exists) yet
+   `pipeline_inputs.json` carries **no mode**, so `stats.json` and `material_seed` cannot tell a
+   measured path from a generated one ⇒ `measurement_quality.reliable: true`, **`do_not_claim: []`**,
+   guidance *"narrate the timeline normally"*. Result, in the shipped **basic** worksheet for
+   fan-4028: *"The third picture shows the traced path, and you can see that **every single point
+   falls perfectly on one circle**."* The points fall on a circle because the software drew one.
+   This is exactly what the GOLD/SILVER rule forbids ("present the orbit as a model, never as
+   measured data") — and that rule currently exists only in this file, with **no representation in
+   the data**. It passed every gate because no check knows synthesized paths exist. **PRE-EXISTING,
+   not from the 07-21 work, but live in all 7 "trusted" runs.** Fix needs a decision because it
+   touches the frozen handover: carry a `path_is_measured` flag sidecar → `pipeline_inputs.json` →
+   seed, so `do_not_claim` populates itself and a check can reject evidentiary claims about a
+   generated orbit. **Damar 07-21: deferred, do later.**
+   (Audit also confirmed CLEAN: internal arithmetic on all 7 — v=ωr, a_c=ω²r, r=px/ppm,
+   ppm=diameter/size; marker lands ON the object for 4046, turntable-1/2/3, computerfan-4029.
+   Period vs 2π/ω differs >5% only on turntable-2 and fan-4027, legitimate — both have ω varying
+   3–4×, so a measured lap time ≠ 2π/mean ω.)
 0. **NEW 07-20 — the fan's measured scale is a coin flip across runs.** `freq_track` sizes the
    synthesized bbox at `orbit_radius_px` (355 px) so the generic Step-5 sizing pairs it with
    `physical_size = 0.635 m` (the ruler-measured hub→blade-tip RADIUS) ⇒ px_per_m 559. But the
