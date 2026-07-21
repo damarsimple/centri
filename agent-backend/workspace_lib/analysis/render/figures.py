@@ -614,7 +614,7 @@ def _smooth_1rev(t, y, stats):
 
 
 def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
-                 hline=None, hline_lbl=None, smooth_trend=False):
+                 hline=None, hline_lbl=None, smooth_trend=False, note=None):
     t = cols.get("time_s")
     y = cols.get(col)
     labels = stats.get("phases", {}).get("phase_labels") or []
@@ -623,7 +623,7 @@ def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
     fig, ax = plt.subplots(figsize=(8, 5))
     _shade_phases(ax, t, labels)
     if smooth_trend:
-        # Oblique-capture clip: the per-instant curve is a projection artifact. Show the
+        # Diagnosed per-revolution artifact on a clip long enough to average it out: show the
         # raw values faintly and the 1-revolution trend boldly (the real physics).
         ax.plot(t, y, color=colour, lw=0.8, alpha=0.22)
         ax.plot(t, _smooth_1rev(t, y, stats), color=colour, lw=2.6,
@@ -631,6 +631,14 @@ def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
         ax.legend(fontsize=8, loc="best")
     else:
         ax.plot(t, y, color=colour, lw=1.6)
+    if note:
+        # Used when the within-revolution detail could not be VERIFIED (too few revolutions)
+        # rather than diagnosed. Smoothing is not the answer there: the 1-revolution window is
+        # a large fraction of a short record, so it flattens the real transient — on
+        # turntable-3 it cut a genuine 1.44 m/s flick peak to 1.09. Keep the measurement and
+        # mark it instead.
+        ax.text(0.5, -0.155, note, transform=ax.transAxes, ha="center", va="top",
+                fontsize=7.5, color="#B5651D", style="italic", wrap=True)
     if hline is not None and np.isfinite(hline):
         ax.axhline(hline, ls="--", color="#455A64", lw=1.2,
                    label=hline_lbl or None)
@@ -818,17 +826,30 @@ def main() -> int:
     # not "fan blade on fan blade" (shares the report/seed helper).
     scene = dedup_display_name(stats.get("scene_title") or stats.get("object_name"))
 
-    # Oblique-capture clips have a per-instant omega ripple that is a viewing-angle
-    # projection artifact, not real motion. When flagged, the omega(t)/a_c(t) plots show
-    # the 1-revolution trend (bold) over a faint raw trace, so the artifact ripple is not
-    # presented as physics. Data/stats are unchanged — only the plotted curve is smoothed.
-    unreliable = False
+    # When the per-instant omega ripple cannot be presented as physics, the omega(t)/a_c(t)
+    # plots show the 1-revolution trend (bold) over a faint raw trace. Data/stats are
+    # unchanged — only the plotted curve is smoothed.
+    #
+    # This covers BOTH reasons the trust channel withholds per-instant omega: a ripple we
+    # have diagnosed (`_unreliable`) and one we could not assess because the clip is under
+    # two revolutions (`_unverified`). Keying only on the first left the prose saying the
+    # timeline could not be trusted while the figure beside it drew that same timeline as a
+    # confident line — and the figure is what a student looks at.
+    diagnosed = unverified = False
+    per_instant_note = None
     try:
         from .. import quality_signals
         sig = quality_signals.compute(DATA / "kinematics.csv", stats)
-        unreliable = "per_instant_omega_unreliable" in sig.get("flags", [])
+        flags = sig.get("flags", [])
+        diagnosed = "per_instant_omega_unreliable" in flags
+        unverified = "per_instant_omega_unverified" in flags
+        if unverified:
+            per_instant_note = (
+                f"Within-revolution detail is not verified: this clip covers only "
+                f"{sig.get('n_revolutions')} revolutions, too few to tell a measurement "
+                f"artifact from real motion. The trend across the clip is sound.")
     except Exception:
-        unreliable = False
+        diagnosed = unverified = False
 
     s, st, pf = stats["summary"], stats["stable_phase"], stats["period_and_frequency"]
     # The ω(t) reference line matches the table/prose: clip-average on a (de)accelerating
@@ -848,27 +869,27 @@ def main() -> int:
     fig_annotated_image_basic(stats, scene)  # simplified frame for the basic tier
     traj_x, traj_y = fig_trajectory(stats, cols, scene)
     fig_trajectory_basic(stats, cols, scene)  # single-colour path for the basic tier
-    fig_angle_points_basic(stats, cols, scene, unreliable=unreliable)  # angle-at-time dots
+    fig_angle_points_basic(stats, cols, scene, unreliable=diagnosed)  # angle-at-time dots
     # ω(t) with phase bands == the "annotated graph"
     _series_plot("annotated_graph.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity & phases",
                  TRACE["omega"], hline=stable_omega, hline_lbl=omega_hline_lbl,
-                 smooth_trend=unreliable)
+                 smooth_trend=diagnosed, note=per_instant_note)
     _series_plot("omega_t.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity", TRACE["omega"],
-                 hline=stable_omega, hline_lbl=omega_hline_lbl, smooth_trend=unreliable)
+                 hline=stable_omega, hline_lbl=omega_hline_lbl, smooth_trend=diagnosed, note=per_instant_note)
     _series_plot("ac_t.png", cols, stats, scene, "ac_m_s2",
                  "centripetal acceleration (m/s^2)", "Centripetal acceleration",
                  TRACE["ac"], hline=ac_hline, hline_lbl=ac_hline_lbl,
-                 smooth_trend=unreliable)
+                 smooth_trend=diagnosed, note=per_instant_note)
     _series_plot("radius_t.png", cols, stats, scene, "r_m",
                  "radius (m)", "Orbit radius", TRACE["r"], hline=mean_r,
-                 hline_lbl="mean", smooth_trend=unreliable)
+                 hline_lbl="mean", smooth_trend=diagnosed, note=per_instant_note)
     _series_plot("theta_t.png", cols, stats, scene, "theta_rad",
                  "angle (rad)", "Unwrapped angle", TRACE["theta"])
     _series_plot("v_t.png", cols, stats, scene, "v_m_s",
                  "tangential speed (m/s)", "Tangential speed", TRACE["v"],
-                 hline=s.get("mean_v"), hline_lbl="mean", smooth_trend=unreliable)
+                 hline=s.get("mean_v"), hline_lbl="mean", smooth_trend=diagnosed, note=per_instant_note)
     fig_annotated_table(stats, scene)
     fig_summary_panel(scene)
 
