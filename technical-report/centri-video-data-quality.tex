@@ -36,7 +36,8 @@ in Automatically Generated Circular-Motion Learning Material}
 \normalsize \textbf{rev.\ 2026-07-21: rectification delivered in the frozen pipeline and
 re-measured end-to-end; a $232$\,px coordinate defect on \texttt{roundabout-4046} that this
 report's first edition missed; marker extent identified as the new limit; \texttt{turntable-3}'s
-angle-dependent box quality, and a trust channel that no longer infers health from the absence of a
+angle-dependent box quality --- shown by a second-detector ablation to be a property of the footage
+rather than of the tracker --- and a trust channel that no longer infers health from the absence of a
 diagnosis}}
 
 \begin{document}
@@ -712,7 +713,7 @@ radial residual is $2.1$\,px rms ($0.52\%$). Not a real torque from a table that
 fixed geometric error produces a ripple scaling as $\omega$, a fixed torque as $1/\omega$, and the
 measured exponent is $0.7$--$1.1$.
 
-What \emph{is} demonstrable is that \textbf{the detector's box depends on the object's angle}. The
+What \emph{is} demonstrable is that \textbf{the measured box depends on the object's angle}. The
 phone's measured long side varies $432 \to 470$\,px with orbital phase, $44\%$ of it phase-locked
 (1/rev amplitude $10.4$\,px); a rigid object's length cannot depend on its angle. A rigidity check
 --- the phone co-rotates, so its orientation minus its orbital angle must be constant --- spreads
@@ -726,10 +727,74 @@ The error is almost purely tangential, which is what disguises it: $r(t)$ holds 
 all clip and reads as textbook tracking, while everything wrong hides in $\theta$ --- the quantity
 $\omega$ is computed from.
 
+\paragraph{The tracker is not at fault: an ablation against a second detector.}
+``The measured box depends on the object's angle'' invites an obvious remedy --- change the
+detector. We tested it. Swapping the segmentation-and-propagation tracker for
+\textbf{LocateAnything-3B}, a structurally different model (an autoregressive box detector with no
+mask, no temporal state and no propagation between frames), \textbf{reproduces the same ripple}. On
+\texttt{turntable-3} itself the two locally-detrended $\omega$ residuals correlate at
+$r={+}0.980$ and the mean rates agree to $0.10\%$; \texttt{turntable-1} gives $r={+}0.980$ and
+$0.02\%$, \texttt{turntable-2} $r={+}0.991$ and $0.13\%$. The two angular tracks sit $0.46^\circ$
+rms apart where the disputed ripple is worth $\approx1.8^\circ$ --- the trackers agree with each
+other far more closely than either agrees with a clean coast-down.
+
+This eliminates one hypothesis and sharpens another. The \emph{implementation} is exonerated: no
+particular segmentation algorithm is producing the artifact. But both trackers are appearance-based,
+so an imaged extent that changes with viewing angle is inherited by both, and the angle dependence
+therefore moves from a property of \emph{our tracker} to a property of \emph{the footage} --- glare,
+self-occlusion and foreshortening of an extended, specular object seen from a fixed camera. The
+practical consequence is a redirection of effort: \textbf{this class of error is fixed by a better
+marker, not a better tracker.} A small, matte, radially-symmetric fiducial has no angle-dependent
+extent to inherit.
+
+\paragraph{The detection cue is a first-class experimental variable, and we got it wrong first.}
+Our first pass ran this ablation with the cue each clip's sidecar already carried ---
+\texttt{"red phone"}, \texttt{"black ball"} --- and concluded the second detector was too unreliable
+to be usable, losing the phone for $0.70$\,s continuously at peak speed and finding the ball in only
+$32\%$ of 4046's frames. That conclusion was substantially an artifact of the \emph{wording}.
+Dropping the colour adjective, so that the cue is a bare noun, changes the same model's behaviour on
+the same footage:
+
+\begin{center}\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+clip & cue & raw & usable & worst gap & mean-$\omega$ \\
+\midrule
+\texttt{turntable-3} & \texttt{"red phone"} & $92.6\%$ & $82.3\%$ & $0.70$\,s & $54\%$ \\
+\texttt{turntable-3} & \texttt{"phone"} & $\mathbf{100\%}$ & $\mathbf{90.3\%}$ & $\mathbf{0.25}$\,s & $\mathbf{0.10\%}$ \\
+\texttt{turntable-1} & \texttt{"red phone"} & $91.9\%$ & $87.5\%$ & $0.25$\,s & $0.04\%$ \\
+\texttt{turntable-1} & \texttt{"phone"} & $96.9\%$ & $90.3\%$ & $0.13$\,s & $0.02\%$ \\
+\texttt{turntable-2} & \texttt{"red phone"} & $98.4\%$ & $96.0\%$ & $0.08$\,s & $0.16\%$ \\
+\texttt{turntable-2} & \texttt{"phone"} & $100\%$ & $98.8\%$ & $0.03$\,s & $0.13\%$ \\
+\texttt{roundabout-4046} & \texttt{"black ball"} & $32.4\%$ & $32.4\%$ & $0.58$\,s & $30\%$ \\
+\texttt{roundabout-4046} & \texttt{"ball"} & $\mathbf{84.9\%}$ & $\mathbf{57.2\%}$ & $0.32$\,s & $\mathbf{1.4\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Every clip improves; 4046's raw detection rate rises by a factor of $2.6$. This
+independently reconfirms, on a model unrelated to the one it was found on, the corpus's existing
+prompt-collision result (\S\ref{sec:prompts}): \textbf{a bare noun outperforms the same noun
+qualified by a colour}, because the qualifier invites the detector to match the qualifier --- with
+\texttt{"red phone"} the failures are whole-frame boxes enclosing everything red-ish in the scene,
+whereas with \texttt{"phone"} the same frames simply return nothing. The second failure mode is far
+safer: a miss is caught by a coverage gate, while a plausible-looking box silently poisons the
+trajectory.
+
+The correction matters for the finding above, not just for the tool: with the bare-noun cue,
+\texttt{turntable-3} recovers $1.87$ of its $1.88$ revolutions and $73\%$ coverage across the
+disputed window, so \textbf{the clip in dispute now carries the result itself} rather than borrowing
+it from its siblings.
+
+One further use of the same data: two independent trackers agreeing on mean $\omega$ to
+$0.02$--$0.13\%$ is not the external ground truth this report calls its most valuable missing piece
+(\S\ref{sec:limits}), but it is the strongest available substitute, and it bears directly on the
+verdict below --- the time-averaged claim is the one that survives.
+
 \textbf{Verdict: GOLD for time-averages, \und{} per-instant.} Cleared of perspective by the static
-hub offset, but carrying an unexplained angle-locked artifact and too short to characterise it. The
-pipeline now says so rather than inferring health from the absence of a diagnosis
-(\S\ref{sec:trustchannel}).
+hub offset, and now cleared of any tracker-specific defect, but carrying an unexplained angle-locked
+artifact and too short to characterise it. The pipeline now says so rather than inferring health
+from the absence of a diagnosis (\S\ref{sec:trustchannel}).
 
 \subsection{fan-4027, fan-4028 --- the synth fabricates the ends; measurement makes them SILVER}
 \label{sec:fans}
@@ -1194,6 +1259,7 @@ hard rules assume SAM3 is non-deterministic and wrap it in a bounded-retry loop;
 not hold on this clip. One clip is not a general claim, but the assumption deserves a test.
 
 \subsection{Detection fails by prompt--shape collision}
+\label{sec:prompts}
 
 Three of ten real tracks are unusable, and every failure has the same mechanism: \textbf{the
 prompt noun names a shape or colour that the background also contains.}
@@ -1635,6 +1701,7 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
 
 %======================================================================
 \section{Limitations}
+\label{sec:limits}
 
 \begin{itemize}
   \item \textbf{One clip carries the finding.} Perspective is validated, and fixed, on
@@ -1647,15 +1714,20 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
   intermediate case.
   \item \textbf{Two clips are unexplained, not one.} \texttt{bicycle} carries a phase-locked
   ripple that is neither perspective nor occlusion; \texttt{turntable-3} carries one that survives
-  every mechanism we can test (\S\ref{sec:tt3}), while its detector's box demonstrably varies with
+  every mechanism we can test (\S\ref{sec:tt3}), while the measured box demonstrably varies with
   the object's angle ($432 \to 470$\,px, $44\%$ phase-locked). Until these are understood we cannot
-  claim to know what those clips' per-instant data should be --- and the corpus's angle-dependent box
-  quality is now a known defect of the tracker, not only of the footage.
+  claim to know what those clips' per-instant data should be. The ablation of \S\ref{sec:tt3}
+  narrows the search without closing it: a second, structurally different detector reproduces the
+  ripple, so the defect is not in any particular tracker --- it is in what the footage presents to
+  \emph{any} appearance-based tracker.
   \item \textbf{No external ground truth.} Everything rests on internal consistency (invariant
   mean $\omega$; an unoptimised circularity gain) and agreement with the pipeline's independent
   1-revolution boxcar. No independently measured $\omega$ --- a rated fan speed, a metronome, a
   hand-counted revolution --- anchors the corpus. \textbf{This is the most valuable missing
-  piece.}
+  piece.} The closest substitute we have is the cross-tracker agreement of \S\ref{sec:tt3}
+  ($0.02$--$0.13\%$ on mean $\omega$ between two unrelated models), which constrains the
+  time-averaged quantities but says nothing about absolute scale, since both trackers consume the
+  same calibration.
   \item \textbf{Accuracy is now limited by the marker, not by the geometry} (\S\ref{sec:marker}).
   Only $1.3\%$ of the post-rectification radial residual is phase-locked, so no further shape
   model is indicated; but the tracked knob images $108\times119$\,px with $75$--$82\%$ of its
@@ -1689,9 +1761,12 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
   untrackable: the object is a motion-blur streak on a hand-held pivot, and a \texttt{"pink
   object"} prompt returns 100\% coverage while tracking the \emph{centroid of the smear}. Corpus
   breadth requires new filming, not more processing.
-  \item \textbf{The prompt-collision rule is descriptive.} It is drawn from three failures and
-  has not been confirmed by re-prompting; the one attempt (\texttt{fan-doll}) failed for an
-  unrelated reason.
+  \item \textbf{The prompt-collision rule is now partly confirmed, on a second model.} It was
+  drawn from three failures and never confirmed by re-prompting; the one attempt
+  (\texttt{fan-doll}) failed for an unrelated reason. The cue sweep of \S\ref{sec:tt3} supplies
+  that confirmation for a bare noun versus a colour-qualified one, across eight clip--cue pairs on
+  an unrelated detector. It remains unconfirmed for the shape-collision half of the rule, and no
+  cue has been swept on the incumbent tracker itself.
 \end{itemize}
 
 \section{Recommendations}
@@ -1705,7 +1780,25 @@ offset --- is done (\S\ref{sec:shipped}); 4046's golden numbers moved as predict
   \item \textbf{Capture beats correction.} Every artifact here was cheaper to prevent than to
   fix. Film closer to face-on; ensure $\ge 3$ revolutions; choose a marker that contrasts with
   the \emph{background}, not merely with the object --- and make it \textbf{small and flat}, since
-  marker extent is now the binding constraint (\S\ref{sec:marker}), not projection.
+  marker extent is now the binding constraint (\S\ref{sec:marker}), not projection. The ablation of
+  \S\ref{sec:tt3} makes this the \emph{only} available fix for angle-dependent extent: swapping in
+  an unrelated detector reproduced the artifact at $r={+}0.99$, because an appearance-based tracker
+  of any design inherits what the footage presents. \textbf{A better marker is a real remedy; a
+  better tracker is not.}
+  \item \textbf{Treat the detection cue as a tuned parameter, not a label.} It is the
+  highest-leverage variable measured in this report: rewording \texttt{"black ball"} to
+  \texttt{"ball"} raised 4046's detection rate from $32\%$ to $85\%$ on identical footage
+  (\S\ref{sec:tt3}), and every clip improved. Prefer a \textbf{bare noun}; a colour qualifier
+  invites the detector to match the colour and fail by returning a large region rather than nothing.
+  Sidecar cues are currently written once, by hand, and never swept --- two or three candidates per
+  clip, scored on coverage, would cost minutes.
+  \item \textbf{Do not replace the tracker --- but the margin is narrower than first measured.}
+  LocateAnything-3B was evaluated as a drop-in across all four object-tracked clips. With tuned
+  cues it is genuinely close on the turntables ($90$--$99\%$ usable, worst gap $0.03$--$0.25$\,s,
+  mean $\omega$ within $0.13\%$), and our initial ``not viable'' reading was substantially an
+  artifact of our own cue wording. It still loses on \texttt{roundabout-4046} ($57\%$ usable against
+  a continuous track) and it has no temporal propagation to recover from a bad frame, so the
+  incumbent stays --- but on this evidence the choice is a trade-off, not a rout.
   \item \textbf{Remove camera drift inside the rectification.} The delivered version uses one
   static axle; tracking it per frame and smoothing over $\sim$2\,s took the prototype's radial
   residual from $3.39\%$ to $1.68\%$ on the same clip. It is the largest remaining
@@ -1723,7 +1816,11 @@ offset --- is done (\S\ref{sec:shipped}); 4046's golden numbers moved as predict
   \item \textbf{Replace coverage with correctness} in the quality gate: box-area stability plus an
   \textbf{angular} step bound derived from $\omega r/\mathrm{fps}$. A fixed pixel threshold both
   misses real failures and manufactures false ones --- it wrongly condemned \texttt{4029}, a clip
-  that turned out to be the cleanest in the corpus.
+  that turned out to be the cleanest in the corpus. The box-area half of this now has a measured
+  threshold: rejecting boxes outside $0.45$--$1.8\times$ the clip median area separated good frames
+  from failures \emph{exactly} in the ablation (36 of 36 on \texttt{turntable-3}, with every frame
+  disagreeing by more than $50$\,px falling on the reject side and none outside it), and coverage
+  alone would have passed all of them.
   \item \textbf{Make the visual check mandatory} before any geometry statistic is computed. It
   falsified two confident claims in this investigation and two bugs in its own tooling.
 \end{enumerate}
@@ -1742,6 +1839,7 @@ Original rectification prototype & \texttt{docs/figures/rectify\_prototype.py} \
 Figure regeneration & \texttt{technical-report/figures/make\_fig\_rectify\_4046.py} \\
 Per-clip guidance & \texttt{templates/*/hints.md} \\
 Archived clip and re-shoot notes & \texttt{templates-reshoot/} \\
+\textbf{Tracker ablation and cue sweep} & \texttt{docs/la-ablation-2026-07-21/} \\
 \end{tabular}
 
 \vspace{4pt}

@@ -5,18 +5,20 @@ was removed; it lives in `git log -p SESSION_CHECKPOINT.md` (full pre-compact te
 the memory files (`~/.claude/projects/-home-damar-centri/memory/centri-*.md`), and the docs cited
 below. Keep this file short: current state, open work, ops crib — not a diary.
 
-## 00. RESUME HERE — 2026-07-21 (later): the turntable ripple, the trust channel, and a blocked ablation
+## 00. RESUME HERE — 2026-07-21 (later): the turntable ripple, the trust channel, and the LA ablation
 
-### ⚠ STATE ON STOPPING — two things are broken/blocked
-- **Qwen `192.168.1.205:8083` is DOWN** (`http_code=000`; was `ok` earlier today). Damar took the
-  GPU for the LocateAnything ablation. **Nothing that needs the LLM can run**: perception Step 1,
-  material generation, the gate.
-- **Two e2e jobs are STALLED at 6%** (`job_turntable-2-suppress`, `job_turntable-3-suppress`),
-  parked in "Look at the video" waiting on Qwen, and **turntable-2 is holding the Celery worker so
-  turntable-3 can never start**. Kill both before queueing anything (`docker compose restart worker`
-  if revoke stalls). They were validating the trust-channel change below and **never completed** —
-  checks 6 (material prose) and 7 (gate) are UNVERIFIED. Everything deterministic was verified by
-  replay.
+### ⚠ STATE ON STOPPING
+- **Qwen is DOWN** (`http_code=000`). **Nothing that needs the LLM can run**: perception Step 1,
+  material generation, the gate. **The GPU is now FREE (2 MiB)** — the LA worker was stopped after
+  the ablation finished, so Qwen can be brought straight back up.
+- **The two stalled e2e jobs are KILLED** (2026-07-21, revoked + SIGKILL; worker idle, queue 0).
+  They were never going to finish: `turntable-2-suppress` burned 85 min to produce nothing (no
+  video, no analysis output — it never got past the LLM stage) and `turntable-3-suppress` was on
+  **retry 10/10 with a 42-minute backoff** against a dead endpoint. Both workspaces still exist and
+  hold only `sidecar.json` + `hints.md` (+ the video for -3); delete or re-queue as you prefer.
+- **The trust-channel change is still only PARTLY validated** — checks 6 (material prose) and 7
+  (gate) remain **UNVERIFIED** and need Qwen. Everything deterministic was verified by replay.
+  This is the one open thread blocked purely on the LLM being back.
 
 ### THE TURNTABLE RIPPLE — Damar spotted a speed-up that cannot be physical
 `job_turntable-3-rect/plots/v_t.png` shows the turntable **speeding up at t≈3.05–3.15 s** mid
@@ -30,6 +32,7 @@ unidentified** — it joins `bicycle` in that bucket.
 | perspective | hub offset 0.7 px, orbit round to 1.002 |
 | wrong centre | radial residual 2.1 px rms (0.52%) |
 | real torque (table not level) | ripple scales as **ω^0.7–1.1**, not ω⁻¹ |
+| **SAM3's mask algorithm specifically** | **a different model (LocateAnything-3B) reproduces the same ripple: r = +0.993 on turntable-2, +0.936 on turntable-1** |
 
 **The scaling test is the discriminator**: a fixed geometric error gives ripple ∝ ω; a fixed torque
 gives ∝ 1/ω. **CAUTION — my first run of it was wrong**: a global cubic detrend cannot follow a sharp
@@ -49,6 +52,10 @@ SPEED (constant, so "not blur") and never against ORBITAL PHASE. Measured on tur
 - Not fully accounted for: a ~10 px length wobble implies ~5 px of centroid shift, but the tangential
   wander is ~15 px rms / 116 px p-p (25% of the phone's length). Present and phase-locked, magnitude
   unexplained.
+- **The ablation below sharpened this rather than settling it**: the angle dependence is real but is
+  **not SAM3's fault** — a structurally different detector inherits it. Read it as a property of the
+  imagery (glare, self-occlusion, foreshortening of an extended object), which any appearance-based
+  tracker will reproduce. Fixing it needs a better *marker*, not a better *tracker*.
 
 ### SHIPPED: the trust channel no longer clears what it cannot explain (`3960dec`, `cdaa664`)
 `quality_signals` required an **elliptical orbit** before distrusting a phase-locked ripple —
@@ -71,32 +78,77 @@ boxcar; **unverified clips keep the raw measurement and carry a printed note**. 
 visible because it IS the data; what changed is that nothing presents it as physics.
 **Tests 58** (`test_quality_signals.py` 7, verified to fail on the old rule).
 
-### LOCATEANYTHING-3B ABLATION — set up, not run
-Damar's proposal: swap SAM3 for **LocateAnything-3B** (`locateanything-3b/`, 7.3 GB) as the tracking
-server and see if box quality improves. **Motivated** — SAM3's boxes demonstrably vary with angle,
-and my "orientation shows it too" test could not separate mask-level effects because both derive
-from the SAME SAM3 mask. A different segmentation is the clean test.
+### LOCATEANYTHING-3B ABLATION — RUN, 2026-07-21. Two results, both worth keeping.
 
-- **USE THE `locateanything` CONDA ENV**: `/home/damar/miniconda3/envs/locateanything/bin/python`
-  (torch 2.12.1+cu130 / torchvision 0.27.1+cu130 matched, transformers 4.57.1, flash_attn 2.8.3 ⇒
-  the faster `la_flash` kernels). **The base env is BROKEN for this** — torch cu130 vs torchvision
-  cu128, so `import torchvision` fails outright and `transformers` cannot load. Do not "fix" base.
-- Worker: `test/locateanything_worker.py`, port **8087**, has a `/track` endpoint that is already a
-  drop-in for SAM3's (returns `{frame,cx,cy,bbox}`) with a `stride` arg for cheap timing.
-- **Scope is 4 clips, not 7**: only 4046 + turntable-1/2/3 use SAM3 object tracking.
-  computerfan-4029 is COLOUR-thresholded and the fans are FREQUENCY (blade-pass FFT) — no object
-  tracking to replace.
-- **LA returns axis-aligned BOXES only** (no mask, no oriented box), so the "rigid length vs angle"
-  metric does NOT transfer: an axis-aligned box around a rotating rectangle must change size by pure
-  geometry. Compare on the TRAJECTORY: ripple CV, phase-locked fraction, radial residual, whether
-  the t≈3.1 bump survives, and mean-ω agreement between trackers.
-- **SAM3 baseline already measured** (turntable-3): length spread 432–470 px / 44% phase-locked;
-  rigidity 0.7° rms; ω ripple CV 0.17, phase-lock 0.26; tangential wander 116 px p-p.
-- Prior `test/compare_sam3_vs_locateanything.py` is **single-frame only** (IoU/latency/coverage) —
-  it never tested trajectory quality, so it does not answer this.
-- **Best metric this gives us**: *does the measured size of a rigid object depend on its viewing
-  angle?* It must not. Needs **no ground truth** — the thing the tech report calls the most valuable
-  missing piece.
+Damar's proposal: swap SAM3 for **LocateAnything-3B** as the tracking server and see if box quality
+improves. Ran all 4 SAM3-tracked clips (`locateanything` conda env, worker on 8087, ~0.28 s/frame).
+
+**RESULT 0 — THE CUE WORDING DOMINATES. Damar asked "did you try different words?" — I hadn't, and
+it changed the answer.** First pass used each sidecar's existing cue verbatim. Dropping the colour
+adjective improves **every clip**, and 4046's raw detection rate rises 2.6×:
+
+| clip | cue | raw | usable | worst gap | mean-ω |
+|---|---|---|---|---|---|
+| turntable-3 | `red phone` | 92.6% | 82.3% | 0.70 s | 54% |
+| turntable-3 | **`phone`** | **100%** | **90.3%** | **0.25 s** | **0.10%** |
+| turntable-1 | `red phone` | 91.9% | 87.5% | 0.25 s | 0.04% |
+| turntable-1 | **`phone`** | **96.9%** | **90.3%** | **0.13 s** | 0.02% |
+| turntable-2 | `red phone` | 98.4% | 96.0% | 0.08 s | 0.16% |
+| turntable-2 | **`phone`** | **100%** | **98.8%** | **0.03 s** | 0.13% |
+| 4046 | `black ball` | 32.4% | 32.4% | 0.58 s | 30% |
+| 4046 | **`ball`** | **84.9%** | **57.2%** | **0.32 s** | **1.4%** |
+
+Confirms the corpus's bare-noun law on a model unrelated to the one it was found on. **The failure
+modes differ, and the difference matters**: `"red phone"` fails by emitting a whole-frame box around
+everything reddish; `"phone"` fails by returning nothing. A miss is gateable; a plausible box
+silently poisons the trajectory. **Cues are written once by hand and never swept — that is now a
+standing recommendation in the report.**
+
+**RESULT 1 — SAM3's mask algorithm is NOT the cause of the ripple.** A structurally different model
+(autoregressive box detector: no mask, no temporal state, no propagation) reproduces the same
+locally-detrended ω residual almost exactly — and with the corrected cue, **turntable-3 itself
+carries the result** instead of borrowing it from its siblings:
+
+| clip | LA usable | mean-ω agreement | ripple correlation |
+|---|---|---|---|
+| **turntable-3** | 90% | **0.10%** | **r = +0.980** |
+| turntable-1 | 90% | **0.02%** | **r = +0.980** |
+| turntable-2 | 99% | **0.13%** | **r = +0.991** |
+
+Angular tracks agree to **0.46° rms** where the ripple itself is worth ~1.8° — the two trackers are
+closer to each other than to the signal in dispute. **What this does and does not settle:** it
+eliminates "SAM3's segmentation is buggy", but NOT Damar's angle hypothesis — both trackers are
+appearance-based, so an imaged extent that changes with viewing angle is inherited by both. The
+finding therefore *promotes* his read from a SAM3-specific defect to **a property of the footage**.
+Combined with the earlier ω-scaling test (rules out real torque), the ripple is an appearance-locked
+artifact upstream of segmentation. Cause still unnamed; the shipped trust-channel rule (convict on
+the signature, whatever the cause) is exactly right.
+
+**RESULT 2 — keep SAM3, but the margin is much narrower than my first pass claimed.** With tuned
+cues LA is genuinely close on the turntables (90–99% usable, worst gap 0.03–0.25 s, mean ω within
+0.13%). It still loses on **roundabout-4046 (57% usable** vs a continuous SAM3 track) and has no
+temporal propagation to recover from a bad frame. **My initial "not viable" verdict was
+substantially an artifact of my own cue wording — do not cite it.** Failure mode with the old cue
+was a degenerate whole-frame box (frame 150 → `[0,0,1079,1665]`) with the target plainly visible,
+verified on rendered frames.
+
+**RESULT 3 — the cheapest partial substitute for ground truth we have.** Two independent trackers
+agreeing on mean ω to **0.02–0.13%** directly supports the turntables' GOLD claim, which rests on
+time-averages. The tech report calls external ground truth its most valuable missing piece; this is
+not that, but it is the strongest cross-check available without it.
+
+**METHOD NOTE — I made the coordinate-space error myself while comparing.** turntable-2 first showed
+83.7 px "disagreement" and an 11× radial-scatter difference. That was me comparing LA's display-space
+output against SAM3's *cropped-space* stored trajectory: 83.7 px ≈ the y_off=87 crop offset. The
+shipped guard had already caught it correctly (`trajectory_space_mismatch` flagged, physics radius
+clean at CV 0.0150). **Any script reading `pipeline_inputs.json` directly must re-resolve the space
+the way `contract.py` does** — the stored trajectory is not necessarily in the space it declares.
+
+**Everything is in `agent-backend/docs/la-ablation-2026-07-21/`** (tracked; `test/` is gitignored,
+which is why it does not live next to the worker) — scripts, raw trajectories for both cue sets
+(`la_*.json` = original cue, `la2_*.json` = bare noun), and a README carrying both traps. Use
+`prompt_effect.py` for current numbers; `ripple_test.py` still reads the OLD cue set. Prior
+`test/compare_sam3_vs_locateanything.py` is single-frame only and does not answer this.
 
 **Workspaces cleaned to the 7 trusted runs** (3.6 G → 2.1 G). Scratch clones deleted after verifying
 their archived originals; superseded/failed runs moved to `workspaces-archive/superseded-*`.
