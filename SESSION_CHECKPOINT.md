@@ -33,7 +33,7 @@ Hit `job_roundabout-4046`, `-r3`, and **`-r4`** (the run 07-20 called "the one t
 readings are separable with no scene knowledge: `contract` compares radius CV both ways and keeps
 the self-consistent one, raising `trajectory_space_mismatch`. 4046 = 0.437 vs 0.144; every other
 clip's declared reading already wins ⇒ inert (9 jobs load byte-identically; replayed sample shows
-**0 numeric diffs**, flags identical). Tests `tools/tests/test_contract_space.py` (6); suite 42.
+**0 numeric diffs**, flags identical). Tests `tools/tests/test_contract_space.py` (7); suite 51.
 **Root cause is the AGENT seam** — `prompts/orchestrator.txt:31` makes `pipeline_inputs.json` the
 one place in full-frame space while all else is cropped, and the example at :910 pairs
 `center_cx_full` with a `traj_x` taken from the cropped video. The guard is a net, not a cure.
@@ -85,7 +85,7 @@ rectification leaves every diagnostic NaN ⇒ `stats.json` truncated mid-write. 
 re-running the clips the change was meant NOT to touch (Damar's "randomly sample existing jobs").
 Fixed in `Rectification.as_dict()`, with a test. **Regression proof:** turntable-2/-3,
 fan-4027-r3, fan-4028, computerfan-4029 all **0 numeric diffs + identical flags**, each now
-recording *why* rectification was skipped. Tests **50** (`test_rectify.py` 8: uniform-rate recovery
+recording *why* rectification was skipped. Tests **51** (`test_rectify.py` 8: uniform-rate recovery
 through a known homography to machine precision, sign-of-ω preservation, ellipse-centre refusal,
 JSON-safety).
 
@@ -102,7 +102,7 @@ code. **Suite 51.**
 
 **FULL E2E SWEEP RE-RUN, all 7 clips on the fixed code — 7/7 GATE-CLEAN.** Trusted set =
 `workspaces/job_{roundabout-4046-final, turntable-1-final, turntable-2-rect, turntable-3-rect,
-computerfan-4029-rect, fan-4027-rect, fan-4028-rect}`. Exactly ONE clip rectifies — 4046 (hub offset 96 px, agent-detected axle
+computerfan-4029-rect, fan-4027-rect, fan-4028-rect}`. Exactly ONE clip rectifies — 4046 (hub offset 84.6 px, agent-detected axle
 `[532.13, 996.92]`; three independent axle detections across the day — 07-20's `[532.3, 997.9]`,
 an e2e's `[513.6, 1006.9]`, and this one — all reproduce tilt 27.1°, r_fit_m 0.2601, mean ω 7.800,
 residual 3.42%, so the method is insensitive to ~20 px of hub jitter). computerfan-4029 + turntable-1 skip on `no_hub_px`; **fan-4027/4028 + turntable-2/3
