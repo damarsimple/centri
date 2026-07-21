@@ -27,10 +27,11 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..common import canonical_omega, dedup_display_name
+from ..common import canonical_omega, dedup_display_name, fit_orbit_ellipse
 from . import palette as _PAL
 
 DATA = Path("analysis_output/data")
@@ -311,7 +312,11 @@ def fig_annotated_image(stats, scene, cols=None):
 
         # The object's own position in this frame — the anchor every vector springs from. Falls
         # back to the upper-right of the orbit when the track has no finite first sample.
+        # Use the measured centroid itself, not its bearing re-projected onto the fitted
+        # circle: on an orbit that images as an ellipse those are different points, and
+        # the marker then sits off the object (mean 186 px on roundabout-4046).
         th0 = -math.pi / 4
+        px_, py_ = cx + r_fit_px * math.cos(th0), cy + r_fit_px * math.sin(th0)
         if cols is not None:
             xs, ys = cols.get("x_px"), cols.get("y_px")
             if xs is not None and ys is not None:
@@ -319,14 +324,25 @@ def fig_annotated_image(stats, scene, cols=None):
                 if ok.any():
                     j = int(np.argmax(ok))
                     th0 = math.atan2(ys[j] - cy, xs[j] - cx)
-        px_, py_ = cx + r_fit_px * math.cos(th0), cy + r_fit_px * math.sin(th0)
+                    px_, py_ = float(xs[j]), float(ys[j])
         ux, uy = math.cos(th0), math.sin(th0)          # outward radial unit vector
         ccw = (omega_val or 0) >= 0
         s = 1.0 if ccw else -1.0
         tx, ty = -uy * s, ux * s                        # unit vector along the motion
 
-        ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color=pal["orbit"], lw=2.6,
-                                path_effects=_halo(4.5, pal["orbit"])))
+        # Trace the shape the orbit ACTUALLY has in the image — a circle seen off-axis
+        # is an ellipse, and a drawn circle then floats off the object it claims to
+        # follow. Picture only; r, v, ω, a_c all still come from the circle fit.
+        orbit_fit = fit_orbit_ellipse((cols or {}).get("x_px", []),
+                                      (cols or {}).get("y_px", []))
+        if orbit_fit is not None:
+            ex, ey, semi_major, semi_minor, ang = orbit_fit
+            ax.add_patch(mpatches.Ellipse((ex, ey), 2 * semi_major, 2 * semi_minor,
+                                          angle=ang, fill=False, color=pal["orbit"],
+                                          lw=2.6, path_effects=_halo(4.5, pal["orbit"])))
+        else:
+            ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color=pal["orbit"], lw=2.6,
+                                    path_effects=_halo(4.5, pal["orbit"])))
         ax.plot([cx], [cy], "+", color=pal["orbit"], ms=15, mew=2.5,
                 path_effects=_halo(4.5, pal["orbit"]))
         ax.plot([px_], [py_], "o", color="#1565C0", ms=8, mec="white", mew=1.6, zorder=6)

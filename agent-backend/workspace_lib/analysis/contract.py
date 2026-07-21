@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import common
+
 INPUTS_PATH = Path("analysis_output/data/pipeline_inputs.json")
 
 # Required top-level keys; the run aborts loudly if any are missing rather than
@@ -27,6 +29,12 @@ INPUTS_PATH = Path("analysis_output/data/pipeline_inputs.json")
 # crop offset from BOTH together, guaranteeing they always share one space. The old
 # bug — the LLM crop-subtracting the trajectory inconsistently while the center
 # stayed cropped — is structurally impossible once the agent never does the math.
+#
+# What remained possible is the agent MIS-DECLARING the space it wrote: tracking on
+# the cropped video while detecting the centre on the full frame, then labelling the
+# pair "display". Doing the transform here does not catch that — both get shifted,
+# so they end up an offset apart. `load_inputs` therefore measures the two readings
+# against each other and keeps the self-consistent one (see the guard below).
 REQUIRED = (
     "fps", "duration_s", "n_raw_frames",
     "object_name", "tracked_label", "ref_label",
@@ -79,6 +87,21 @@ def _arr(values, n: int, field: str) -> np.ndarray:
     return np.array([np.nan if v is None else float(v) for v in values], dtype=float)
 
 
+def _radius_cv(x, y, cx, cy) -> float:
+    """Spread of the per-frame radius about (cx, cy), as a fraction of its mean.
+
+    A trajectory and a centre that live in the SAME space trace a near-constant
+    radius; one shifted against the other sweeps a wide range. That contrast is
+    what makes the frame mismatch below detectable without any scene knowledge.
+    """
+    r = np.hypot(x - cx, y - cy)
+    r = r[np.isfinite(r)]
+    if r.size < 8:
+        return float("nan")
+    m = float(r.mean())
+    return float(r.std() / m) if m > 1e-9 else float("nan")
+
+
 def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
     if not path.exists():
         raise ContractError(
@@ -111,8 +134,37 @@ def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
     if space in _DISPLAY_SPACES:
         x_off = float(roi_crop.get("x_off", 0) or 0)
         y_off = float(roi_crop.get("y_off", 0) or 0)
-        x_px = x_px - x_off
-        y_px = y_px - y_off
+
+        # `coordinate_space` is the agent's WORD for what it wrote, and it can be
+        # wrong in a way nothing downstream can see. On roundabout-4046 the tracker
+        # ran on the CROPPED video, so the trajectory was already cropped, while the
+        # centre came from axle detection on the FULL frame. Both were labelled
+        # "display", so subtracting the offset from both left them 232 px apart —
+        # which reads as a real-but-eccentric orbit (radius 97→772 px, |ω| spread
+        # 57%), not as an error. Only the flags fire, and they blame the physics.
+        #
+        # The two readings are distinguishable without knowing anything about the
+        # scene: a trajectory and a centre in the same space trace a steady radius.
+        # Take the declaration at its word unless the alternative is decisively
+        # better, and say so out loud when it is.
+        traj_needs_crop = True
+        if x_off or y_off:
+            cv_declared = _radius_cv(x_px, y_px, cx_px, cy_px)
+            cv_traj_cropped = _radius_cv(x_px + x_off, y_px + y_off, cx_px, cy_px)
+            if (cv_declared == cv_declared and cv_traj_cropped == cv_traj_cropped
+                    and cv_declared > 0.15 and cv_traj_cropped < 0.6 * cv_declared):
+                traj_needs_crop = False
+                common.set_validation_flag("trajectory_space_mismatch")
+                common.log(
+                    f"[contract] coordinate_space={space!r} but the trajectory is "
+                    f"already in cropped space: radius spread {cv_declared:.3f} as "
+                    f"declared vs {cv_traj_cropped:.3f} untouched. Cropping the "
+                    f"centre only (offset {x_off:g},{y_off:g} px)."
+                )
+
+        if traj_needs_crop:
+            x_px = x_px - x_off
+            y_px = y_px - y_off
         cx_px -= x_off
         cy_px -= y_off
     elif space not in _CROPPED_SPACES:

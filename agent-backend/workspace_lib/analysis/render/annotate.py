@@ -30,6 +30,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from ..common import fit_orbit_ellipse as _fit_orbit_ellipse
 from . import palette as _PAL
 
 DATA = Path("analysis_output/data")
@@ -221,6 +222,18 @@ def _vector(img, start, end, color, tex=None, off_dir=None):
         _label(img, tex, (sx + dx * 0.62 + ox * gap, sy + dy * 0.62 + oy * gap), color)
 
 
+def _orbit_ellipse_args(xs, ys):
+    """`common.fit_orbit_ellipse` in the argument shape cv2.ellipse wants."""
+    fit = _fit_orbit_ellipse(xs, ys)
+    if fit is None:
+        return None
+    ex, ey, semi_major, semi_minor, ang = fit
+    if min(semi_major, semi_minor) <= 1:
+        return None
+    return (int(round(ex)), int(round(ey))), \
+           (int(round(semi_major)), int(round(semi_minor))), ang
+
+
 def _arc_arrow(img, cx, cy, radius, th0, s, color, span=0.30):
     """Curved arrow centred on bearing `th0`, curling the way the object turns — the ANGULAR
     quantity ω. Kept a separate mark from the straight tangent v, as in the reference diagram."""
@@ -319,6 +332,12 @@ def main() -> int:
     v_scale = 0.78 * r_fit_px / max([x for x in v_vals if x == x] + [1e-6])
     ac_scale = 0.62 * r_fit_px / max([x for x in ac_vals if x == x] + [1e-6])
 
+    # A circular orbit seen off-axis images as an ELLIPSE, so a drawn circle can only
+    # hug the path on a face-on clip. Trace the shape the track actually has — this is
+    # the picture only; every number still comes from the circle fit in geometry.py.
+    orbit_ellipse = _orbit_ellipse_args([col(r, "x_px") for r in rows],
+                                        [col(r, "y_px") for r in rows])
+
     cap = cv2.VideoCapture(str(_cropped_video()))
     if not cap.isOpened():
         raise RuntimeError("cannot open cropped video")
@@ -354,8 +373,15 @@ def main() -> int:
         v, ac = col(r, "v_m_s"), col(r, "ac_m_s2")
         if math.isnan(theta):
             out.write(frame); i += 1; continue
-        ox = cx + r_fit_px * math.cos(theta)
-        oy = cy + r_fit_px * math.sin(theta)
+        # The marker goes where the object WAS MEASURED, not where the fitted circle
+        # says it should be. Those differ whenever the orbit images as an ellipse: on
+        # roundabout-4046 the circle-projected point sat a mean 186 px (max 430) off
+        # the handle, so the figure quietly showed the model instead of the data.
+        # Fall back to the circle only when a frame has no finite centroid.
+        ox, oy = col(r, "x_px"), col(r, "y_px")
+        if math.isnan(ox) or math.isnan(oy):
+            ox = cx + r_fit_px * math.cos(theta)
+            oy = cy + r_fit_px * math.sin(theta)
 
         phase = phase_labels[i] if i < len(phase_labels) else "STABLE"
         pc = PHASE_C.get(phase, C_ORBIT)
@@ -365,9 +391,15 @@ def main() -> int:
             cv2.rectangle(frame, p1, p2, pc, -1)
 
         # Orbit is the most prominent element — thickest stroke.
-        cv2.circle(frame, (int(cx), int(cy)), int(r_fit_px), _PAL.casing(palette["orbit"]),
-                   _t(4) + 2 * max(1, _t(1.2)), cv2.LINE_AA)
-        cv2.circle(frame, (int(cx), int(cy)), int(r_fit_px), palette["orbit"], _t(4), cv2.LINE_AA)
+        if orbit_ellipse is not None:
+            e_args = (orbit_ellipse[0], orbit_ellipse[1], orbit_ellipse[2], 0, 360)
+            cv2.ellipse(frame, *e_args, _PAL.casing(palette["orbit"]),
+                        _t(4) + 2 * max(1, _t(1.2)), cv2.LINE_AA)
+            cv2.ellipse(frame, *e_args, palette["orbit"], _t(4), cv2.LINE_AA)
+        else:
+            cv2.circle(frame, (int(cx), int(cy)), int(r_fit_px), _PAL.casing(palette["orbit"]),
+                       _t(4) + 2 * max(1, _t(1.2)), cv2.LINE_AA)
+            cv2.circle(frame, (int(cx), int(cy)), int(r_fit_px), palette["orbit"], _t(4), cv2.LINE_AA)
 
         trail.append((ox, oy))
         trail = trail[-30:]

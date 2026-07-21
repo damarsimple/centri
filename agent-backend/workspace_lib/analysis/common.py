@@ -118,3 +118,52 @@ def progress(stage: str, note: str, pct: int) -> None:
     """Heartbeat the live UI reads between step markers."""
     with open(".centri_progress.json", "w") as f:
         json.dump({"stage": stage, "note": note, "pct": pct}, f)
+
+
+def fit_orbit_ellipse(x, y, min_points: int = 20):
+    """Least-squares conic through the tracked points, returned as an ellipse:
+    `(cx, cy, semi_major, semi_minor, angle_deg)`, or None if it will not fit.
+
+    FOR DRAWING ONLY. A circular orbit filmed off-axis images as an ellipse, so a
+    drawn circle can only hug the path on a face-on clip; every physical quantity
+    still comes from the circle fit in `geometry.py`. On a face-on clip the two
+    semi-axes come out equal to within a few pixels, so this degrades to the circle
+    it replaces instead of inventing eccentricity.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    m = np.isfinite(x) & np.isfinite(y)
+    x, y = x[m], y[m]
+    if x.size < min_points:
+        return None
+
+    # Normalise before the SVD: raw pixel coordinates square to ~1e6 and the conic
+    # solve is badly conditioned without it.
+    xm, ym = x.mean(), y.mean()
+    s = max(x.std(), y.std(), 1e-9)
+    X, Y = (x - xm) / s, (y - ym) / s
+    D = np.c_[X * X, X * Y, Y * Y, X, Y, np.ones_like(X)]
+    try:
+        _, _, V = np.linalg.svd(D)
+    except np.linalg.LinAlgError:
+        return None
+    a, b, c, d, e, g = V[-1]
+    A = np.array([[a, b / 2], [b / 2, c]])
+    if np.linalg.det(A) <= 0:          # hyperbola/parabola — not an orbit
+        return None
+    try:
+        cen = np.linalg.solve(2 * A, [-d, -e])
+    except np.linalg.LinAlgError:
+        return None
+    scale = cen @ A @ cen + np.array([d, e]) @ cen + g
+    ev, evec = np.linalg.eigh(A)
+    rad = -scale / ev
+    if np.any(rad <= 0) or not np.all(np.isfinite(rad)):
+        return None
+    axes = np.sqrt(rad)
+    order = np.argsort(-axes)          # major first
+    axes = axes[order] * s
+    major_vec = evec[:, order[0]]
+    return (float(cen[0] * s + xm), float(cen[1] * s + ym),
+            float(axes[0]), float(axes[1]),
+            float(np.degrees(np.arctan2(major_vec[1], major_vec[0]))))
