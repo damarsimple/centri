@@ -5,7 +5,105 @@ was removed; it lives in `git log -p SESSION_CHECKPOINT.md` (full pre-compact te
 the memory files (`~/.claude/projects/-home-damar-centri/memory/centri-*.md`), and the docs cited
 below. Keep this file short: current state, open work, ops crib — not a diary.
 
-## 00. RESUME HERE — 2026-07-21 (the 4046 coordinate bug; annotation now draws the measurement)
+## 00. RESUME HERE — 2026-07-21 (later): the turntable ripple, the trust channel, and a blocked ablation
+
+### ⚠ STATE ON STOPPING — two things are broken/blocked
+- **Qwen `192.168.1.205:8083` is DOWN** (`http_code=000`; was `ok` earlier today). Damar took the
+  GPU for the LocateAnything ablation. **Nothing that needs the LLM can run**: perception Step 1,
+  material generation, the gate.
+- **Two e2e jobs are STALLED at 6%** (`job_turntable-2-suppress`, `job_turntable-3-suppress`),
+  parked in "Look at the video" waiting on Qwen, and **turntable-2 is holding the Celery worker so
+  turntable-3 can never start**. Kill both before queueing anything (`docker compose restart worker`
+  if revoke stalls). They were validating the trust-channel change below and **never completed** —
+  checks 6 (material prose) and 7 (gate) are UNVERIFIED. Everything deterministic was verified by
+  replay.
+
+### THE TURNTABLE RIPPLE — Damar spotted a speed-up that cannot be physical
+`job_turntable-3-rect/plots/v_t.png` shows the turntable **speeding up at t≈3.05–3.15 s** mid
+coast-down. Chased through every mechanism available; the honest end state is **artifact, cause
+unidentified** — it joins `bicycle` in that bucket.
+
+| ruled out | by |
+|---|---|
+| marker centroid sliding on the phone | the phone's own ORIENTATION carries the same ripple |
+| motion blur | imaged size constant to +1% across a 3× speed range |
+| perspective | hub offset 0.7 px, orbit round to 1.002 |
+| wrong centre | radial residual 2.1 px rms (0.52%) |
+| real torque (table not level) | ripple scales as **ω^0.7–1.1**, not ω⁻¹ |
+
+**The scaling test is the discriminator**: a fixed geometric error gives ripple ∝ ω; a fixed torque
+gives ∝ 1/ω. **CAUTION — my first run of it was wrong**: a global cubic detrend cannot follow a sharp
+decay and inflated the fast half (reported 3.6×; the honest figure with a one-revolution LOCAL
+detrend is 1.5–1.9×). Same trap as the computerfan detrend. **Always detrend locally at the
+revolution scale.**
+
+**DAMAR'S READ WAS BETTER THAN MINE — box quality varies with ANGLE.** I tested mask size against
+SPEED (constant, so "not blur") and never against ORBITAL PHASE. Measured on turntable-3:
+- the phone's **measured length varies 432→470 px with angle, 44% phase-locked** (1/rev amp 10.4 px).
+  A rigid object's length cannot depend on its angle ⇒ **detector artifact**.
+- rigidity check (orientation − orbital angle, which must be CONSTANT for a co-rotating phone):
+  **3.7° peak-to-peak, 0.7° rms**, 36% phase-locked.
+- I had read "the orientation carries it too" as EXCLUDING a mask problem. It is the **signature** of
+  one: a mask that loses an end region at certain angles shifts the centroid AND rotates the fitted
+  box together. **Retracted.**
+- Not fully accounted for: a ~10 px length wobble implies ~5 px of centroid shift, but the tangential
+  wander is ~15 px rms / 116 px p-p (25% of the phone's length). Present and phase-locked, magnitude
+  unexplained.
+
+### SHIPPED: the trust channel no longer clears what it cannot explain (`3960dec`, `cdaa664`)
+`quality_signals` required an **elliptical orbit** before distrusting a phase-locked ripple —
+oblique capture being the cause it was derived from on 4046 — so **any phase-locked ripple on a round
+orbit was cleared however large**. A synthetic round orbit with **99% of its variance locked to
+orbital phase** was declared reliable. Motion cannot repeat with orbital POSITION rather than time,
+so that signature now convicts on its own; the axis ratio only decides whether the guidance may NAME
+a cause, and on a round orbit it says the cause is unidentified instead of inventing a slant.
+Second hole: nothing counted revolutions. Below 2 the statistic fits 4 harmonics to ~1.5 cycles and
+can neither convict nor clear — a caveat the tech report states and the code never encoded. New
+`per_instant_omega_unverified` + `MIN_REVS_FOR_PHASELOCK=2.0`. Flags exactly turntable-2 (1.5 rev,
+23% ripple) and turntable-3 (1.8 rev, 17%); the other five untouched, including the fans whose
+30–42% ripple tracks TIME not phase.
+
+**FIGURES: the two reasons want OPPOSITE treatments** (`cdaa664`). Keying the existing 1-rev boxcar
+on both flags looked like a one-line win and **was a measured 22% distortion**: the window is
+`period_s × fps`, which on turntable-3 spans **44% of the active record** and cut a genuine 1.44 m/s
+flick peak to **1.09**. Diagnosed artifacts (long clips — 4046 is 18.6 rev, window 5%) still get the
+boxcar; **unverified clips keep the raw measurement and carry a printed note**. The bump stays
+visible because it IS the data; what changed is that nothing presents it as physics.
+**Tests 58** (`test_quality_signals.py` 7, verified to fail on the old rule).
+
+### LOCATEANYTHING-3B ABLATION — set up, not run
+Damar's proposal: swap SAM3 for **LocateAnything-3B** (`locateanything-3b/`, 7.3 GB) as the tracking
+server and see if box quality improves. **Motivated** — SAM3's boxes demonstrably vary with angle,
+and my "orientation shows it too" test could not separate mask-level effects because both derive
+from the SAME SAM3 mask. A different segmentation is the clean test.
+
+- **USE THE `locateanything` CONDA ENV**: `/home/damar/miniconda3/envs/locateanything/bin/python`
+  (torch 2.12.1+cu130 / torchvision 0.27.1+cu130 matched, transformers 4.57.1, flash_attn 2.8.3 ⇒
+  the faster `la_flash` kernels). **The base env is BROKEN for this** — torch cu130 vs torchvision
+  cu128, so `import torchvision` fails outright and `transformers` cannot load. Do not "fix" base.
+- Worker: `test/locateanything_worker.py`, port **8087**, has a `/track` endpoint that is already a
+  drop-in for SAM3's (returns `{frame,cx,cy,bbox}`) with a `stride` arg for cheap timing.
+- **Scope is 4 clips, not 7**: only 4046 + turntable-1/2/3 use SAM3 object tracking.
+  computerfan-4029 is COLOUR-thresholded and the fans are FREQUENCY (blade-pass FFT) — no object
+  tracking to replace.
+- **LA returns axis-aligned BOXES only** (no mask, no oriented box), so the "rigid length vs angle"
+  metric does NOT transfer: an axis-aligned box around a rotating rectangle must change size by pure
+  geometry. Compare on the TRAJECTORY: ripple CV, phase-locked fraction, radial residual, whether
+  the t≈3.1 bump survives, and mean-ω agreement between trackers.
+- **SAM3 baseline already measured** (turntable-3): length spread 432–470 px / 44% phase-locked;
+  rigidity 0.7° rms; ω ripple CV 0.17, phase-lock 0.26; tangential wander 116 px p-p.
+- Prior `test/compare_sam3_vs_locateanything.py` is **single-frame only** (IoU/latency/coverage) —
+  it never tested trajectory quality, so it does not answer this.
+- **Best metric this gives us**: *does the measured size of a rigid object depend on its viewing
+  angle?* It must not. Needs **no ground truth** — the thing the tech report calls the most valuable
+  missing piece.
+
+**Workspaces cleaned to the 7 trusted runs** (3.6 G → 2.1 G). Scratch clones deleted after verifying
+their archived originals; superseded/failed runs moved to `workspaces-archive/superseded-*`.
+`WORKSPACE_TTL_HOURS=720` (30 days), so the checkpoint's "export promptly" is about the mechanism,
+not urgency.
+
+## 00a. 2026-07-21 (earlier) — the 4046 coordinate bug; annotation now draws the measurement
 
 Damar looked at `job_roundabout-4046/analysis_output/plots/annotated_image.png` and asked whether
 the naive circular projection was only cosmetic or also in the data. **Both — and underneath it

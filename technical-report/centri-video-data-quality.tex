@@ -35,7 +35,9 @@ in Automatically Generated Circular-Motion Learning Material}
 \normalsize rev.\ 2026-07-16: fan blade-tip scale measured, SILVER tier, $\omega(t)$ staircase fix\\
 \normalsize \textbf{rev.\ 2026-07-21: rectification delivered in the frozen pipeline and
 re-measured end-to-end; a $232$\,px coordinate defect on \texttt{roundabout-4046} that this
-report's first edition missed; marker extent identified as the new limit}}
+report's first edition missed; marker extent identified as the new limit; \texttt{turntable-3}'s
+angle-dependent box quality, and a trust channel that no longer infers health from the absence of a
+diagnosis}}
 
 \begin{document}
 \maketitle
@@ -661,6 +663,7 @@ and $\theta$ needs no correction.}
 already correct and a gate must provably \emph{not} fire on it.
 
 \subsection{turntable-2, turntable-3 / flick --- undecidable, not clean}
+\label{sec:corpus-tt}
 
 \textbf{Scene.} A red phone on a black circular base, filmed nearly top-down: at rest, one flick
 ($t\approx2.1$\,s), then a coast to a stop.
@@ -692,8 +695,41 @@ the closest thing we have to a well-captured example --- but ``least tilted'' is
 1.002 the conic's axes are ill-conditioned, the vanishing line is numerically unstable, and
 rectifying would inject error rather than remove it. Near face-on, leave the geometry alone.
 
-\textbf{Verdict: GOLD (as-is).} Undecidable by fingerprint (under two revolutions), but cleared of
-perspective by the static hub offset; near face-on, the geometry is left untouched.
+\subsubsection{The tracks are not clean: box quality depends on the viewing angle}
+\label{sec:tt3}
+
+``Both tracks are clean'' above was measured as coverage and step continuity, and by those it holds.
+It does not survive a closer look. \texttt{turntable-3}'s $v(t)$ shows the turntable
+\textbf{speeding up} at $t\approx3.05$--$3.15$\,s, midway through a coast-down --- which a coasting
+turntable cannot do. The per-frame angular increments carry it ($5.92 \to \mathbf{6.36} \to 6.04
+\to 5.62$\,rad/s), so it is in the measurement, not in the smoothing.
+
+Every mechanism we can test is excluded. Not the marker centroid sliding along a phone that images
+$460$\,px long while orbiting at $r=397$\,px, because the phone's own \emph{orientation} angle
+carries the same ripple. Not motion blur: its imaged size is constant to $1\%$ across a threefold
+speed range. Not perspective: hub offset $0.7$\,px, orbit round to $1.002$. Not a bad centre: the
+radial residual is $2.1$\,px rms ($0.52\%$). Not a real torque from a table that is not level: a
+fixed geometric error produces a ripple scaling as $\omega$, a fixed torque as $1/\omega$, and the
+measured exponent is $0.7$--$1.1$.
+
+What \emph{is} demonstrable is that \textbf{the detector's box depends on the object's angle}. The
+phone's measured long side varies $432 \to 470$\,px with orbital phase, $44\%$ of it phase-locked
+(1/rev amplitude $10.4$\,px); a rigid object's length cannot depend on its angle. A rigidity check
+--- the phone co-rotates, so its orientation minus its orbital angle must be constant --- spreads
+$3.7^\circ$ peak-to-peak, $0.7^\circ$ rms, $36\%$ phase-locked. A mask that loses an end region at
+certain angles shifts the centroid \emph{and} rotates the fitted box together, which is exactly the
+coupled behaviour observed; reading the orientation agreement as evidence \emph{against} a mask
+problem, as we first did, is backwards. The magnitude is not fully accounted for: a $10$\,px length
+wobble implies roughly $5$\,px of centroid shift, against a tangential wander of $15$\,px rms.
+
+The error is almost purely tangential, which is what disguises it: $r(t)$ holds at $394$--$399$\,px
+all clip and reads as textbook tracking, while everything wrong hides in $\theta$ --- the quantity
+$\omega$ is computed from.
+
+\textbf{Verdict: GOLD for time-averages, \und{} per-instant.} Cleared of perspective by the static
+hub offset, but carrying an unexplained angle-locked artifact and too short to characterise it. The
+pipeline now says so rather than inferring health from the absence of a diagnosis
+(\S\ref{sec:trustchannel}).
 
 \subsection{fan-4027, fan-4028 --- the synth fabricates the ends; measurement makes them SILVER}
 \label{sec:fans}
@@ -1491,6 +1527,38 @@ $|\omega|$ moves $0.2\%$.
 generated from a rectified clip reads exactly like one generated from a face-on clip; the
 difference is that its per-instant $\omega$ is now allowed to be discussed at all.
 
+\subsection{The trust channel: not naming a cause is not clearing it}
+\label{sec:trustchannel}
+
+The rule deciding whether per-instant $\omega$ could be narrated required an \textbf{elliptical
+image orbit} before it would distrust a phase-locked ripple --- oblique capture being the cause it
+had been derived from on \texttt{roundabout-4046}. Any phase-locked ripple on a \emph{round} orbit
+was therefore cleared, however large: a synthetic clip with a perfectly circular orbit and $99\%$ of
+its detrended-$\omega$ variance locked to orbital phase was reported reliable, with the guidance
+``narrate the timeline normally''. \texttt{turntable-3} is round to $1.002$ and went through that
+gate carrying the artifact of \S\ref{sec:tt3}.
+
+Motion of the object cannot repeat with orbital \emph{position} rather than with \emph{time}, so
+that signature is diagnostic on its own. It now convicts alone, and the axis ratio only decides
+whether the guidance may \emph{name} a cause --- on a round orbit it states plainly that the cause is
+unidentified rather than asserting a slant that is not there.
+
+A second gap: nothing counted revolutions. Below two, the fingerprint fits four harmonics to about
+$1.5$ cycles and can neither convict nor clear --- a caveat this report states (\S\ref{sec:corpus-tt})
+and the code never encoded. Clips under that floor with a material ripple are now reported
+\texttt{per\_instant\_omega\_unverified}: per-instant claims suppressed, with the honest reason that
+this is a limit of the recording rather than a finding about the motion.
+
+The two cases want \textbf{opposite} figure treatments, which is not obvious and cost us a nearly
+shipped regression. A diagnosed artifact keeps the 1-revolution boxcar, which cancels the ripple and
+preserves the trend --- appropriate on \texttt{roundabout-4046}, where one revolution is $5\%$ of the
+record. Applying the same filter to an \emph{unverified} clip is destructive: the window is
+$T \times \mathrm{fps}$, which on \texttt{turntable-3} spans $44\%$ of the active record and cut a
+genuine $1.44$\,m/s flick peak to $1.09$ --- understating the transient the clip exists to teach in
+order to hide a wiggle we cannot even attribute. Those clips now plot the measurement unchanged and
+carry a printed note. The bump remains visible because it is the data; what changed is that nothing
+presents it as physics.
+
 %======================================================================
 \section{Where each fix belongs}
 \label{sec:where}
@@ -1577,9 +1645,12 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
   $0.7$--$8.8$\,px). The gap is an order of magnitude and the physics behind it is sound, but no
   threshold has been calibrated, and no clip sits in between --- we have not seen an
   intermediate case.
-  \item \textbf{\texttt{bicycle} is unexplained.} A phase-locked ripple that is neither
-  perspective nor occlusion. Until it is understood, we cannot claim to know what that clip's
-  data should be.
+  \item \textbf{Two clips are unexplained, not one.} \texttt{bicycle} carries a phase-locked
+  ripple that is neither perspective nor occlusion; \texttt{turntable-3} carries one that survives
+  every mechanism we can test (\S\ref{sec:tt3}), while its detector's box demonstrably varies with
+  the object's angle ($432 \to 470$\,px, $44\%$ phase-locked). Until these are understood we cannot
+  claim to know what those clips' per-instant data should be --- and the corpus's angle-dependent box
+  quality is now a known defect of the tracker, not only of the footage.
   \item \textbf{No external ground truth.} Everything rests on internal consistency (invariant
   mean $\omega$; an unoptimised circularity gain) and agreement with the pipeline's independent
   1-revolution boxcar. No independently measured $\omega$ --- a rated fan speed, a metronome, a
