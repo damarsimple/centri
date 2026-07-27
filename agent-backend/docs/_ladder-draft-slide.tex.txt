@@ -1,0 +1,47 @@
+\begin{frame}{The ladder on one real clip}
+\scriptsize
+Draft wording only --- to argue with, not to ship. One clip throughout: the playground wheel, a
+handle \textbf{0.260\,m} out, slowing steadily across \textbf{15.0\,s}.
+\vspace{2pt}
+
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}p{0.7cm}p{4.9cm}p{8.2cm}@{}}
+\toprule
+& \textbf{what the step asks} & \textbf{how it might read} \\
+\midrule
+\rowcolor{cBasic!7}
+\textbf{A1} & name the quantities &
+``Two things describe it: how far out the handle sits, and how fast it goes round.'' \\
+\rowcolor{cBasic!7}
+\textbf{A2} & say what each one means &
+``It sits 0.260\,m from the centre and comes back round every 0.81\,s.'' \\
+\rowcolor{cBasic!7}
+\textbf{A3} & which relation joins them &
+``Further out, or faster round, means a harder inward pull.'' \\
+\midrule
+\rowcolor{cInter!7}
+\textbf{B1} & read the graph, \emph{then} the formula &
+``The line falls steadily and never speeds back up --- $a_c=\omega^2 r$ puts a number on it.'' \\
+\rowcolor{cInter!7}
+\textbf{B2} & substitute this clip's numbers &
+``$\omega=7.80$, $r=0.260 \Rightarrow a_c=7.80^2\times0.260=16.05$\,m/s\textsuperscript{2}.'' \\
+\rowcolor{cInter!7}
+\textbf{B3} & get something new from the timeline &
+``9.32 $\rightarrow$ 6.26\,rad/s in 15.0\,s. How much longer until half its starting speed?''
+\emph{(7.8\,s)} \\
+\midrule
+\rowcolor{cAdv!7}
+\textbf{C1} & compare two moments &
+``A lap took 0.67\,s at the start, 1.00\,s at the end --- the average 0.81\,s describes neither.'' \\
+\rowcolor{cAdv!7}
+\textbf{C2} & compare the phases &
+``Does it shed speed as fast in the first half as in the second?'' \\
+\rowcolor{cAdv!7}
+\textbf{C3} & judge what the measurement supports &
+``0.260\,m comes from a handle $\approx$15\% of its own size wide. Which answers change if it is
+off?'' \\
+\bottomrule
+\end{tabular}
+\takeaway{Every number is this clip's real measured value; only the wording is invented.}
+\end{frame}
+

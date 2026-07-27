@@ -1,0 +1,261 @@
+% Centri — plan from the teaching review of the tiered material (2026-07-23)
+% Standalone deck: every slide readable cold, no narration needed.
+% Compile: pdflatex -interaction=nonstopmode centri-plan-2026-07-23.tex  (run twice)
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{metropolis}
+\metroset{sectionpage=progressbar, subsectionpage=none, numbering=fraction, progressbar=frametitle}
+
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+\usepackage[most]{tcolorbox}
+
+% ---- palette (shared with the other Centri decks) ------------------------
+\definecolor{cMeas}{HTML}{1F6FB2}
+\definecolor{cPed}{HTML}{B5651D}
+\definecolor{cApp}{HTML}{2E7D32}
+\definecolor{cInfra}{HTML}{5E35B1}
+\definecolor{cAccent}{HTML}{C62828}
+\definecolor{cGrey}{HTML}{616161}
+\definecolor{cBasic}{HTML}{2E7D32}
+\definecolor{cInter}{HTML}{1F6FB2}
+\definecolor{cAdv}{HTML}{5E35B1}
+\setbeamercolor{frametitle}{bg=cPed}
+\setbeamercolor{progress bar}{fg=cAccent}
+
+\newcommand{\ok}{{\color{cApp}\textbf{\checkmark}}}
+\newcommand{\nope}{{\color{cGrey}--}}
+\newcommand{\nw}{{\scriptsize\color{cAccent}\textbf{new}}}
+\newcommand{\takeaway}[1]{\vfill{\footnotesize\itshape\color{cGrey}#1\par}}
+
+\title{Centri --- Reworking the Three Levels}
+\subtitle{What a physics-teaching review of the generated material changes, and in what order}
+\author{Damar Albaribin}
+\institute{MSc Thesis --- advisor: Prof.\ Wu-Yuin Hwang}
+\date{2026-07-23 \quad {\scriptsize\color{cGrey}rough plan for discussion}}
+
+\begin{document}
+\maketitle
+
+% =========================================================================
+\begin{frame}{Where this comes from}
+\small
+\textbf{Centri} turns a phone video of something spinning into physics worksheets at \textbf{three
+levels} --- basic, intermediate, advanced --- each with annotated figures and worked examples.
+All three are written from the \emph{same} set of measured numbers, so they differ in demand
+without disagreeing on fact.
+\vspace{0.5em}
+
+Those worksheets have now been read by someone who has taught physics in a classroom
+(\textbf{Vinsa}, who also authors the sibling app \textbf{P-MAGIC}). The verdict, in short:
+\vspace{0.4em}
+
+\begin{tcolorbox}[colback=cPed!6,colframe=cPed,boxsep=2pt,left=6pt,right=6pt,top=3pt,bottom=3pt]
+\small The \textbf{basic} level is fine. The \textbf{intermediate} level reaches for equations
+before the reader has understood the picture. The \textbf{advanced} level is written in language a
+high-school student will not have met --- calibration, scale-free quantities, Jensen's inequality.
+\end{tcolorbox}
+\vspace{0.5em}
+
+\small Read alongside it: the ladder from one level to the next is \textbf{too steep}. Each level is
+a single jump rather than a few graded steps, and nothing carries a reader from the end of one
+level into the start of the next.
+\takeaway{The architecture is right and stays; what changes is the reading level of the top rung and
+the size of the steps between rungs.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{A defect the review exposed}
+\scriptsize
+Checking one review note --- \emph{``why is the turn rate negative, and where do we say so?''} ---
+turned up a live error in the two ceiling-fan clips.
+
+\begin{center}
+\includegraphics[width=0.80\textwidth]{fan-sign-4028.png}
+\end{center}
+
+\begin{columns}[T]
+\begin{column}{0.32\textwidth}
+A minus sign only records \textbf{which way round} something turns; these two fans turn the
+direction recorded as negative.
+\end{column}
+\begin{column}{0.34\textwidth}
+``Speeding up'' is read from the \textbf{sign of the slope} --- and a negative value climbing
+towards zero slopes upward.
+\end{column}
+\begin{column}{0.32\textwidth}
+One fan's \textbf{basic} worksheet teaches \emph{``speeding up motion''} while its own graph reads
+``slowing down''.
+\end{column}
+\end{columns}
+\takeaway{Two of seven clips affected. The fix: judge the trend from the speed, not the signed value.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Lowering the reading level}
+\scriptsize
+Three phrases were named as beyond a high-school reader. Each is in the student worksheet because
+\textbf{our own specification asks for it} --- so each is a one-line change, not a model limitation.
+\vspace{4pt}
+
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{4.5cm}p{4.6cm}p{4.6cm}@{}}
+\toprule
+\textbf{term the student meets today} & \textbf{what it is really saying} & \textbf{where it goes} \\
+\midrule
+``which quantities are independent of the \textbf{calibration}'' &
+angle measurements do not depend on how we sized the scene; metre values do &
+said in plain words to the student \\
+``the angular quantities are \textbf{scale-free}'' &
+the same idea, named twice &
+merged into the sentence above \\
+``formally $\langle\omega^2\rangle \ge \langle\omega\rangle^2$, a \textbf{Jensen inequality}'' &
+squaring an average is not averaging the squares &
+\textbf{teacher copy only} \\
+\bottomrule
+\end{tabular}
+\vspace{6pt}
+
+\small A separate \textbf{teacher copy} of every worksheet already exists and already receives the
+answer key, so this is re-routing rather than new machinery.
+\vspace{2pt}
+
+Alongside it, the \textbf{intermediate} level is reordered: read the graph in words \emph{first},
+then meet the formula as the compact way to say what the reader has already seen.
+\takeaway{Keep the idea, drop the vocabulary, and give the formal version to the teacher.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Smaller steps, and bridges}
+\scriptsize
+The proposal: three graded steps inside each level, and a bridge carrying the reader across.
+\vspace{4pt}
+
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}clll@{}}
+\toprule
+& \textbf{\color{cBasic}A --- basic} & \textbf{\color{cInter}B --- intermediate} &
+\textbf{\color{cAdv}C --- advanced} \\
+\midrule
+\textbf{1} & which quantities are used &
+{\color{cAccent}read the graph in words,} \emph{then} the equation &
+compare two moments \\
+\textbf{2} & what each one means & put this clip's numbers in &
+compare the phases of the motion \\
+\textbf{3} & which equation joins them &
+{\color{cAccent}how long to slow from this speed to that one} &
+{\color{cAccent}which claims does this video actually support?} \\
+\midrule
+\textbf{bridge} & \multicolumn{3}{l}{A3 $\rightarrow$ B1 and B3 $\rightarrow$ C1 --- one staircase,
+not three separate documents} \\
+\bottomrule
+\end{tabular}
+\vspace{2pt}
+
+{\scriptsize\color{cAccent}Red = proposed here, not yet agreed. B1 folds in the ``interpret before
+you calculate'' note; B3 is the ``squeeze the video data harder'' idea; C3 keeps the honesty
+argument as a \emph{task} rather than as vocabulary.}
+\vspace{6pt}
+
+\begin{columns}[T]
+\begin{column}{0.49\textwidth}
+\textbf{\color{cAdv}Advanced stops being ``intermediate with more numbers.''}
+Its distinguishing job becomes \emph{comparison and judgement} --- how long to slow from this speed
+to that one, one phase against another, one scenario against another.
+\end{column}
+\begin{column}{0.49\textwidth}
+\textbf{\color{cApp}The measured difficulty ladder stays the target.}
+Reading grade 7.8 / 8.1 / 11.7 and ideas-held-at-once few / more / many are measured from the text,
+not asserted --- the sub-steps have to keep that ladder rising smoothly.
+\end{column}
+\end{columns}
+\takeaway{The thinking level is what separates the tiers; the sub-steps make each tier reachable
+from the one below.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Showing the correction, not describing it}
+\scriptsize
+The worksheet currently draws \textbf{one} line and explains the correction in words. Draw
+\textbf{both} --- what came off the video, and what we corrected it to. Mock-up on a real clip:
+
+\begin{center}
+\includegraphics[width=0.68\textwidth]{wheel-ac-corrected.png}
+\end{center}
+\vspace{-4pt}
+
+\begin{columns}[T]
+\begin{column}{0.49\textwidth}
+The wheel is filmed at a slant, so the handle appears to race and stall once per turn. That is the
+\textbf{camera position}, not the wheel --- and it lands in the inward pull, which follows the turn
+rate \emph{squared}.
+\end{column}
+\begin{column}{0.49\textwidth}
+Same video, both lines. A reader can \emph{see} what was removed and why the smooth line is the
+honest one --- rather than being told in a caption to trust it.
+\end{column}
+\end{columns}
+\takeaway{The figure carries the argument the honesty box currently has to make in prose.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The basic picture is too bare}
+\small
+Basic currently gets a stripped-down still showing \textbf{only the radius}. Intermediate and
+advanced get the full marked-up frame --- speed along the path, turn rate, and inward pull, each
+drawn as its own arrow with its own label.
+\vspace{0.6em}
+
+Basic gets the fuller picture too, with every label kept in \textbf{plain words} rather than
+symbols --- which is the rule that separates the basic level from the rest, and is untouched by
+this change.
+\vspace{0.6em}
+
+\begin{tcolorbox}[colback=cPed!6,colframe=cPed,boxsep=2pt,left=6pt,right=6pt,top=3pt,bottom=3pt]
+\small The picture a beginner sees should carry \emph{more} of the explanation than the one an
+advanced reader sees, not less --- the beginner has the least text to fall back on.
+\end{tcolorbox}
+\takeaway{The figure is where a basic reader does most of the work, so it is the last thing that
+should be stripped down.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Order of work, and what needs deciding}
+\scriptsize
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}clp{7.4cm}@{}}
+\toprule
+& \textbf{work} & \textbf{why this order} \\
+\midrule
+\textbf{1} & the direction-sign error &
+a correctness bug, in front of students now; needs no teaching decision \\
+\textbf{2} & reading level of advanced; graph before equation &
+named directly in the review; contained edits with an existing check to keep them honest \\
+\textbf{3} & the two figure changes &
+same, and independent of the restructure \\
+\textbf{4} & sub-levels and bridges &
+reshapes the tier architecture --- worth landing on material that is already correct and readable \\
+\bottomrule
+\end{tabular}
+\vspace{7pt}
+
+\textbf{\color{cAccent}Three open questions --- a teaching call, not a code fix:}
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{Nine documents, or three documents with three graded sections inside each?}
+        This decides how much of the pipeline moves.
+  \item \textbf{What are the third steps of intermediate and advanced?} The proposal names the
+        first two of each and stops.
+  \item \textbf{``Show measurement and correction''} --- on the one clip whose camera angle is
+        corrected, or on every graph that is smoothed?
+\end{itemize}
+\vspace{2pt}
+
+Items 1--3 can be built and checked without the language model running, by replaying the
+fixed part of an existing clip in about five minutes per run.
+\takeaway{Fix what is wrong, lower the reading level, then restructure.}
+\end{frame}
+
+\end{document}
