@@ -134,6 +134,30 @@ def test_ellipse_centre_as_hub_is_refused_or_inert():
     assert not meta.applied, "using the ellipse centre must not count as rectification"
 
 
+def test_the_uncorrected_curve_we_draw_is_the_pre_correction_measurement():
+    """The figure that shows "the measurement AND the correction" has to be honest about
+    which is which: the grey curve must carry the once-per-revolution swing the un-projection
+    removes, and both curves must agree on the mean (rectification redistributes angle WITHIN
+    a revolution — a correction that moved the average would be fitting signal away)."""
+    from analysis.kinematics import _angle_series
+    _th, xi, yi, hub = _scene()
+    xr, yr, cen, meta = RC.rectify(xi, yi, hub)
+    assert meta.applied, meta.reason
+    fps = 60.0
+    t = np.arange(len(xi)) / fps
+    _, _, w_pre = _angle_series(xi, yi, hub[0], hub[1], t, fps)
+    _, _, w_post = _angle_series(xr, yr, cen[0], cen[1], t, fps)
+    trim = slice(20, -20)                       # drop the Savitzky-Golay edge transients
+    pre, post = w_pre[trim], w_post[trim]
+    # The corrected curve is the steadier one, by a wide margin...
+    assert np.std(post) / abs(np.mean(post)) < 0.25 * (np.std(pre) / abs(np.mean(pre)))
+    # ...and the correction did not move the average rate.
+    assert abs(np.mean(post) - np.mean(pre)) / abs(np.mean(pre)) < 0.05
+    # a_c follows omega SQUARED, so the swing the reader sees is amplified there.
+    ac_pre, ac_post = pre ** 2, post ** 2
+    assert np.ptp(ac_pre) > 2.0 * np.ptp(ac_post), (np.ptp(ac_pre), np.ptp(ac_post))
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

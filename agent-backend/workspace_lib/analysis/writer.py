@@ -59,18 +59,26 @@ def write_csv(inp: Inputs, cal: Calibration, k: Kinematics) -> None:
     # not from api_cache.json (which is raw full-frame space and will be offset by
     # the crop by exactly roi_crop.y_off — the cause of the "circle off the points"
     # figure bug). null where the detector missed the frame.
-    lines = ["time_s,r_px,r_m,theta_rad,omega_rad_s,v_m_s,ac_m_s2,active,x_px,y_px"]
+    # omega/ac_uncorrected are the same measurement BEFORE the camera-angle correction, and
+    # exist only on a rectified clip. Appended last, and the columns are only emitted when
+    # there is something to put in them, so every existing reader of this file is unaffected.
+    pre = k.omega_uncorrected.size == inp.n_raw_frames and k.ac_uncorrected.size == inp.n_raw_frames
+    header = "time_s,r_px,r_m,theta_rad,omega_rad_s,v_m_s,ac_m_s2,active,x_px,y_px"
+    lines = [header + (",omega_rad_s_uncorrected,ac_m_s2_uncorrected" if pre else "")]
     for i in range(inp.n_raw_frames):
         def f(v):
             return "" if (v is None or (isinstance(v, float) and math.isnan(v))) else f"{v:.6f}"
-        lines.append(",".join((
+        row = [
             f"{k.t_s[i]:.6f}",
             f(k.r_px[i]), f(k.r_m[i]),              # real radius, not dx (old bug)
             f(k.theta_unwrapped[i]), f(k.omega[i]),
             f(k.v_m_s[i]), f(k.ac_m_s2[i]),
             "1" if k.active_mask[i] else "0",
             f(k.x_px[i]), f(k.y_px[i]),             # cropped centroid (cleaned + gap-filled)
-        )))
+        ]
+        if pre:
+            row += [f(k.omega_uncorrected[i]), f(k.ac_uncorrected[i])]
+        lines.append(",".join(row))
     (DATA / "kinematics.csv").write_text("\n".join(lines) + "\n")
     common.log(f"[writer] kinematics.csv written ({inp.n_raw_frames} rows)")
 
@@ -146,6 +154,9 @@ def build_stats(inp: Inputs, cal: Calibration, k: Kinematics) -> dict:
         "angular_acceleration": {
             "motion_type": k.motion_type,
             "alpha_rad_s2": _num(k.alpha_rad_s2),
+            # d|omega|/dt — alpha along the direction of travel. This is what decides
+            # speeding-up vs slowing-down and what a_t is built from (kinematics.py).
+            "alpha_along_rad_s2": _num(k.alpha_along_rad_s2),
             "alpha_r2": _num(k.alpha_r2),
             "omega_initial": _num(k.omega_initial),
             "omega_final": _num(k.omega_final),

@@ -67,6 +67,41 @@ def test_clean_accel_not_impulsive():
     assert abs(k.alpha_rad_s2 - 1.6) < 0.2
 
 
+def test_negative_omega_coastdown_is_decelerating():
+    """The ceiling-fan defect: a clip filmed from the side the tracker records as NEGATIVE.
+
+    |omega| falls 9.5 -> 0.03 (a coast-down), so the quadratic fits alpha = +0.17 and
+    sign(alpha) reads "accelerating" — which is how a fan's basic worksheet came to teach
+    "speeding up motion" beside a graph reading "slowing down". The trend must come from
+    the speed, and a_t must oppose the motion."""
+    k = _kin(-np.linspace(9.5, 0.03, int(6.0 * FPS)))
+    _motion_model(k, _Cal(), FPS)
+    assert k.alpha_rad_s2 > 0, k.alpha_rad_s2          # the raw fit really is positive
+    assert k.motion_type == "decelerating", k.motion_type
+    assert k.alpha_along_rad_s2 < 0, k.alpha_along_rad_s2
+    assert k.a_t_mean_m_s2 < 0, k.a_t_mean_m_s2        # points against the direction of travel
+
+
+def test_negative_omega_spinup_is_accelerating():
+    """Mirror image: turning the negative way and picking up speed is still speeding up."""
+    k = _kin(-(2.0 + 1.6 * (np.arange(int(6.0 * FPS)) / FPS)))
+    _motion_model(k, _Cal(), FPS)
+    assert k.alpha_rad_s2 < 0, k.alpha_rad_s2
+    assert k.motion_type == "accelerating", k.motion_type
+    assert abs(k.alpha_along_rad_s2 - 1.6) < 0.2, k.alpha_along_rad_s2
+    assert k.a_t_mean_m_s2 > 0, k.a_t_mean_m_s2
+
+
+def test_positive_omega_unchanged():
+    """No regression on the clips that already read correctly: turning the positive way,
+    alpha and alpha-along-travel agree."""
+    k = _kin(np.linspace(9.0, 6.0, int(6.0 * FPS)))
+    _motion_model(k, _Cal(), FPS)
+    assert k.motion_type == "decelerating"
+    assert k.alpha_along_rad_s2 == k.alpha_rad_s2
+    assert k.a_t_mean_m_s2 < 0
+
+
 def test_uniform_not_impulsive():
     rng = np.random.default_rng(0)
     k = _kin(5.0 + rng.normal(0, 0.02, int(6.0 * FPS)))

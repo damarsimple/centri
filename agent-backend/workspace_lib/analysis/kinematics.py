@@ -47,6 +47,11 @@ class Kinematics:
     x_px: np.ndarray = field(default_factory=lambda: np.array([]))
     y_px: np.ndarray = field(default_factory=lambda: np.array([]))
     n_interpolated: int = 0
+    # The SAME quantities measured off the raw footage, before the camera-angle correction.
+    # Empty on every clip that was not rectified (there is nothing to compare against there).
+    # Written to kinematics.csv so the figures can draw the measurement AND the correction.
+    omega_uncorrected: np.ndarray = field(default_factory=lambda: np.array([]))
+    ac_uncorrected: np.ndarray = field(default_factory=lambda: np.array([]))
     # summary (active intervals only)
     mean_r_m: float = 0.0
     std_r_m: float = 0.0
@@ -81,11 +86,17 @@ class Kinematics:
     # segment only, so omega_initial is the real peak (~9.8 rad/s), not the parabola's
     # extrapolated intercept over the rise+fall (a fictitious 9.93 that contradicts the data).
     impulsive_start: bool = False
-    alpha_rad_s2: float = 0.0          # signed angular acceleration
+    alpha_rad_s2: float = 0.0          # signed angular acceleration, in the tracker's frame
     alpha_r2: float = float("nan")     # R^2 of the constant-alpha (quadratic theta) fit
     omega_initial: float = 0.0
     omega_final: float = 0.0
-    a_t_mean_m_s2: float = 0.0         # SIGNED tangential accel = alpha * r_fit_m (negative when decelerating)
+    # alpha resolved ALONG THE DIRECTION OF TRAVEL, i.e. d|omega|/dt: positive = the object
+    # is picking up speed, negative = it is losing speed, whichever way round it turns. The
+    # tracker's sign for omega is an image-coordinate accident (a clip shot from the other
+    # side records the same spin as negative), so motion_type and a_t are read off THIS,
+    # never off sign(alpha_rad_s2).
+    alpha_along_rad_s2: float = 0.0
+    a_t_mean_m_s2: float = 0.0         # tangential accel = alpha_along * r_fit_m (negative = opposes the motion)
 
 
 def _segmented(signal, fn):
@@ -150,6 +161,34 @@ def _fill_short_gaps(x_full, y_full, cx, cy, fps):
     return x, y, n_filled
 
 
+def _angle_series(x, y, cx, cy, t_s, FPS):
+    """(theta_unwrapped, theta_smooth, omega) from a trajectory about (cx, cy).
+
+    Factored out so the "what we measured before correcting for the camera angle" curve goes
+    through the IDENTICAL unwrap -> Savitzky-Golay -> gradient -> median chain as the delivered
+    one. If the two were smoothed differently, the gap between the curves would be partly our
+    own processing rather than the correction, and a figure that claims to show the correction
+    has to show only the correction.
+    """
+    theta_raw = np.arctan2(y - cy, x - cx)
+    theta_unwrapped = _segmented(theta_raw, lambda seg, _m: np.unwrap(seg))
+
+    window = max(11, 2 * (int(FPS) // 6) + 1)
+    if window % 2 == 0:
+        window += 1
+    theta_smooth = _savgol_nan_safe(theta_unwrapped, window, 3)
+
+    # A lone valid frame (an island between tracking gaps) has no defined angular velocity,
+    # and np.gradient raises on a <2-point array — return NaN for those so they stay gaps.
+    def _grad(seg, m):
+        if len(seg) < 2:
+            return np.full_like(seg, np.nan, dtype=float)
+        return np.gradient(seg, t_s[m])
+    omega = _segmented(theta_smooth, _grad)
+    omega = scipy.ndimage.median_filter(omega, size=max(5, int(FPS // 10)), mode="nearest")
+    return theta_unwrapped, theta_smooth, omega
+
+
 def compute(inp: Inputs, cal: Calibration, x_full, y_full,
             x_img=None, y_img=None) -> Kinematics:
     """`x_full`/`y_full` are the coordinates ANGLE is measured from (rectified when the
@@ -176,23 +215,9 @@ def compute(inp: Inputs, cal: Calibration, x_full, y_full,
     r_px = np.sqrt(dx**2 + dy**2)
     r_m = r_px / cal.px_per_m
 
-    theta_raw = np.arctan2(dy, dx)
-    theta_unwrapped = _segmented(theta_raw, lambda seg, _m: np.unwrap(seg))
-
-    window = max(11, 2 * (int(FPS) // 6) + 1)
-    if window % 2 == 0:
-        window += 1
-    theta_smooth = _savgol_nan_safe(theta_unwrapped, window, 3)
-
-    # Single omega source for everything downstream. A lone valid frame (an island
-    # between tracking gaps) has no defined angular velocity, and np.gradient raises
-    # on a <2-point array — return NaN for those so they stay gaps, not a crash.
-    def _grad(seg, m):
-        if len(seg) < 2:
-            return np.full_like(seg, np.nan, dtype=float)
-        return np.gradient(seg, t_s[m])
-    omega = _segmented(theta_smooth, _grad)
-    omega = scipy.ndimage.median_filter(omega, size=max(5, int(FPS // 10)), mode="nearest")
+    # Single omega source for everything downstream.
+    theta_unwrapped, theta_smooth, omega = _angle_series(
+        x_full, y_full, cal.cx_px, cal.cy_px, t_s, FPS)
 
     # ── Active detection (old step 7), now off the same omega ────────────────
     common.step_start("step7")
@@ -237,6 +262,21 @@ def compute(inp: Inputs, cal: Calibration, x_full, y_full,
         rotation_direction=rotation_direction, active_duration_s=active_duration_s,
         x_px=x_img, y_px=y_img, n_interpolated=n_interpolated,
     )
+
+    # ── the same measurement BEFORE the camera-angle correction ──────────────
+    # On a clip we un-projected, keep the curve the raw footage gives: the same angle chain
+    # about the same centre, run on the IMAGE-space points. A circle filmed at a slant images
+    # as an ellipse, so the object appears to race and stall once per turn — and because a_c
+    # follows the turn rate SQUARED, that shows up magnified in the inward pull. Carrying it
+    # lets the figure DRAW what was removed instead of asking the reader to trust a caption
+    # that says it was. Absent (all-NaN) on every clip that needed no correction.
+    if (getattr(cal, "rectification", None) or {}).get("applied"):
+        xi, yi, _ = _fill_short_gaps(x_img, y_img, cal.cx_px, cal.cy_px, FPS)
+        _, _, omega_pre = _angle_series(xi, yi, cal.cx_px, cal.cy_px, t_s, FPS)
+        k.omega_uncorrected = omega_pre
+        # Same constant r as the delivered a_c, so the gap between the curves is the angle
+        # correction alone and not a second, unrelated change of radius.
+        k.ac_uncorrected = np.where(np.abs(omega_pre) > spike, np.nan, omega_pre) ** 2 * cal.r_fit_m
 
     active_idx = np.where(active_mask)[0]
     if active_idx.size:
@@ -341,14 +381,24 @@ def _motion_model(k: Kinematics, cal: Calibration, FPS: float) -> None:
     k.omega_initial = float(omega_t[0])
     k.omega_final = float(omega_t[-1])
 
+    # Which way round the object is going over this window. Sign(alpha) alone cannot answer
+    # "is it speeding up?": both ceiling-fan clips turn the way the tracker records as
+    # NEGATIVE, so their omega runs -9.5 -> -0.03 rad/s (a coast-down) while the quadratic
+    # fits alpha = +0.17 — and the material duly taught "speeding up motion" over a graph
+    # that reads "slowing down". Resolve alpha along the direction of travel instead, which
+    # is d|omega|/dt: the trend of the SPEED, sign convention cancelled out.
+    spin_sign = 1.0 if float(np.mean(omega_t)) >= 0 else -1.0
+    k.alpha_along_rad_s2 = alpha * spin_sign
+
     # Non-uniform only when the quadratic clearly beats the line AND omega actually
     # changes appreciably across the window. Both guards must hold so noise on a
     # genuinely steady spin does not get read as acceleration.
     if resid_drop > 0.7 and dw_ratio > 0.3:
-        k.motion_type = "accelerating" if alpha > 0 else "decelerating"
-        # SIGNED: a_t = alpha * r. In a deceleration the sign IS the physics — a_t points
-        # against the motion — so keep alpha's sign rather than storing a bare magnitude.
-        k.a_t_mean_m_s2 = alpha * cal.r_fit_m
+        k.motion_type = "accelerating" if k.alpha_along_rad_s2 > 0 else "decelerating"
+        # a_t carries the sign of the SPEED change, so a negative a_t always means "points
+        # against the direction of travel" — the vector reading of coasting down — rather
+        # than "the tracker happened to call this rotation negative".
+        k.a_t_mean_m_s2 = k.alpha_along_rad_s2 * cal.r_fit_m
     else:
         k.motion_type = "uniform"
 
