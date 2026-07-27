@@ -230,6 +230,11 @@ def wrong_duration_products(text: str, seed: dict, rel_tol=0.03):
     if not rates:
         return []
     t = _neutralize_units(norm(text))
+    # An EXPONENT is not a factor. "(average omega)^2 * r = 5.79 ..." offered the regex a bare
+    # "2" as the rate and the 5.79 rad/s beside it as the time — and on turntable-3 that turn
+    # rate happens to sit within 3% of the 5.87 s clip length, so a correct line was reported
+    # as multiplying a rate by the clip. Strip the squaring marker before looking for products.
+    t = re.sub(r"\^\s*2\b", "", t)
     MUL = r"(?:\*|times|multiplied by)"
     issues = []
     for m in re.finditer(rf"({NUM}){SEP}{MUL}{SEP}({NUM})", t):
@@ -298,6 +303,17 @@ def allowed_values(seed: dict):
         om = tl.get("omega_rad_s")
         if isinstance(om, (int, float)):
             add(om * om)   # ω² — the sanctioned intermediate step of a_c = ω²·r at that instant
+    # WS-4 step B3 asks the reader to take TWO instants off the turn-rate graph and say how
+    # long the object took to fall between them, so the elapsed time and the drop in turn rate
+    # are the answer to the exercise — not fabrications. Sanction differences between grounded
+    # timeline points only (4 instants, 6 pairs); nothing else becomes derivable from this.
+    tl_t = [tl.get("t_s") for tl in seed.get("timeline", [])]
+    tl_w = [tl.get("omega_rad_s") for tl in seed.get("timeline", [])]
+    for series in (tl_t, tl_w):
+        pts = [float(x) for x in series if isinstance(x, (int, float))]
+        for i, a in enumerate(pts):
+            for b in pts[i + 1:]:
+                add(a - b)
     aa = seed.get("angular_acceleration") or {}
     for k in ("alpha_rad_s2", "omega_initial", "omega_final", "a_t_mean_m_s2"):
         add(aa.get(k))
@@ -317,6 +333,13 @@ def allowed_values(seed: dict):
                 add(abs(b0[k]) * turn)
     cn = seed.get("calibration_note") or {}
     add(cn.get("px_per_m")); add(cn.get("reference_physical_size_m"))
+    # Numbers the measurement-quality policy DICTATES to the writer. On a clip covering too few
+    # revolutions to verify the within-turn detail, the policy hands the writer the sentence
+    # "this clip covers only 1.47 revolutions" — and the writer repeating it was then read as a
+    # fabricated number. Anything we put in the writer's mouth has to count as grounded.
+    mq = seed.get("measurement_quality") or {}
+    for k in ("n_revolutions", "omega_phaselocked_fraction", "orbit_axis_ratio"):
+        add(mq.get(k))
     # simple derived: 2pi/omega, 1/f, alpha*r, omega^2*r, omega*r per variable pairs
     byk = {v["symbol"]: v.get("value") for v in seed.get("variables", []) if v.get("value") is not None}
     if "omega" in byk and byk["omega"]:
@@ -421,14 +444,35 @@ _NEG = ("rather than", "instead of", "not ", "isn't", "is not", "no longer",
         "maintaining", "never")
 
 
-def motion_faithfulness(seed, text):
+# Words that mark a sentence as enumerating the PHASES of the clip rather than characterising
+# the motion as a whole. See the carve-out in motion_faithfulness.
+_PHASE_TALK = re.compile(r"\bphases?\b|speed(?:ing|s) up|slow(?:ing|s) down|coast(?:ing|s)|"
+                         r"spin(?:ning|s) up|winds? down|stretch|plateau|pause", re.I)
+
+
+def motion_faithfulness(seed, text, manifest_phases=None):
+    """A decelerating clip narrated as a steady spin, minus the two ways that is legitimate.
+
+    Negation ("rather than holding a constant speed") was always allowed. The second carve-out
+    came out of a live run: on a clip whose omega(t) figure DRAWS a steady band — the fan holds
+    its speed, coasts, then rests — we hand the writer the phase list ["speeding up", "steady",
+    "slowing down", "steady"] from the figure manifest, print the word "steady" on the band
+    itself, and then failed the passage for writing "four phases: a speed-up, a brief steady
+    spin, a long slowdown, a final steady pause". That sentence is true, it matches the figure,
+    and it is what we asked for. So a steady phrase is allowed when the figures really draw a
+    steady phase AND the sentence around it is naming phases; a blanket "it turns at a constant
+    rate" names no other phase and is still flagged.
+    """
     mt = ((seed or {}).get("angular_acceleration") or {}).get("motion_type")
     if mt not in ("accelerating", "decelerating"):
         return []
+    drawn_steady = any("steady" in str(p).lower() for p in (manifest_phases or []))
     out = []
     for m in _STEADY.finditer(text):
         pre = text[max(0, m.start()-40):m.start()].lower()
         if any(neg in pre for neg in _NEG):
+            continue
+        if drawn_steady and _PHASE_TALK.search(text[max(0, m.start()-140):m.end() + 140]):
             continue
         out.append(f'says "{m.group(0)}" but motion_type={mt}')
     return out
@@ -452,8 +496,19 @@ DYNAMICS_VOCAB = [
     r"\bwork\b(?! out\b| together\b)", r"inertia", r"\bdrag\b", r"gravit(?:y|ational)",
     r"\bpush(?:es|ed)?\b",
 ]
+# Rule 8c (reading level): terms a high-school reader has not met, which the material used
+# only because our own spec asked for them. The IDEA stays and is said in plain words; the
+# named/formal version moves to the teacher copy (material_seed._teacher_notes).
+# "calibration-independent" and "scale-free" are the same idea named twice; "Jensen" names a
+# theorem for a sentence that reads perfectly as "squaring an average is not averaging the
+# squares"; ⟨·⟩ is notation no school course introduces.
+READING_LEVEL_VOCAB = [
+    r"calibrat(?:e|ed|ion|ing)", r"scale[- ]free", r"scale[- ]invarian(?:t|ce)",
+    r"\bjensen\b", r"dimensionless", r"\bconvex(?:ity)?\b", r"⟨", r"⟩",
+]
 _TRACKING_RE = re.compile("|".join(f"(?:{p})" for p in TRACKING_VOCAB), re.I)
 _DYNAMICS_RE = re.compile("|".join(f"(?:{p})" for p in DYNAMICS_VOCAB), re.I)
+_READING_RE = re.compile("|".join(f"(?:{p})" for p in READING_LEVEL_VOCAB), re.I)
 
 # Prompt-facing plain-English views of the two banned lists. material_tiers.py renders
 # HARD RULE 8 / 8b from THESE, co-located with the regexes above so the prompt the model
@@ -465,6 +520,9 @@ TRACKING_VOCAB_HUMAN = (
 DYNAMICS_VOCAB_HUMAN = (
     "force, torque, friction, energy, momentum, mass, dissipate, brake / braking, motor, "
     "newton, work, inertia, drag, gravity, push")
+READING_LEVEL_VOCAB_HUMAN = (
+    "calibration / calibrated, scale-free, scale-invariant, Jensen (or Jensen's inequality), "
+    "dimensionless, convex, and the angle-bracket average notation ⟨…⟩")
 
 
 def _vocab_scan(regex, text, kind):
@@ -477,9 +535,11 @@ def _vocab_scan(regex, text, kind):
 
 
 def vocab_issues(text):
-    """Tracking/pipeline words (rule 8) + dynamics words (rule 8b), with context."""
+    """Tracking/pipeline words (rule 8) + dynamics words (rule 8b) + above-reading-level
+    words (rule 8c), with context."""
     return _vocab_scan(_TRACKING_RE, text, "tracking") + \
-        _vocab_scan(_DYNAMICS_RE, text, "dynamics")
+        _vocab_scan(_DYNAMICS_RE, text, "dynamics") + \
+        _vocab_scan(_READING_RE, text, "reading-level")
 
 
 # ---- (6) story fence ---------------------------------------------------------
@@ -679,7 +739,7 @@ def tier_gate(obj, seed, frame=None, manifest_phases=None):
     issues += [f"avg-period-as-peak: {w}" for w in average_period_as_peak(text, seed)]
     issues += [f"annotation: {a}" for a in annotation_issues(text, manifest_phases or [])]
     issues += tier_compliance(tier, text, unreliable=unreliable)
-    issues += motion_faithfulness(seed, text)
+    issues += motion_faithfulness(seed, text, manifest_phases)
     issues += [f"vocab[{v['kind']}]: '{v['word']}' in {v['context']}" for v in vocab_issues(text)]
     issues += story_fence_issues(obj, frame)
     return issues

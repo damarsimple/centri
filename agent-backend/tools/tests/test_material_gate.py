@@ -327,6 +327,149 @@ def test_period_identity_checked_when_unreliable():
     assert any("2pi / 7.813" in i and "arithmetic" in i for i in issues), issues
 
 
+def test_reading_level_vocab_is_flagged_but_the_plain_version_is_not():
+    """Rule 8c: three phrases a physics teacher flagged as beyond a high-school reader.
+
+    Each reached the student only because our own spec asked for it, so the fix is a wording
+    change — but it has to be enforceable, or the next run puts them straight back."""
+    flagged = [
+        "which reported quantities are calibration-independent",
+        "the angular quantities are scale-free",
+        "formally ⟨ω²⟩ ≥ ⟨ω⟩², a Jensen inequality",
+    ]
+    for text in flagged:
+        kinds = [v["kind"] for v in G.vocab_issues(text)]
+        assert "reading-level" in kinds, f"not flagged: {text!r}"
+    plain = ("The angle measurements do not depend on how we sized the scene; the values in "
+             "metres do. Squaring an average is not the same as averaging the squares, so "
+             "putting the average turn rate in falls short.")
+    assert G.vocab_issues(plain) == [], G.vocab_issues(plain)
+
+
+def test_seed_student_text_is_at_reading_level_but_the_teacher_copy_is_not():
+    """The formal version is re-routed, not deleted: the teacher notes still name Jensen's
+    inequality and the calibration, and only they do."""
+    import analysis.material_seed as S
+    ctx = {"obj": "the toy", "motion": "decelerating", "unreliable": False,
+           "px_per_m": 559.0, "omega": 5.7, "a_c": 26.9, "r": 0.635}
+    for tier, text in S._honesty(ctx).items():
+        assert G.vocab_issues(text) == [], f"{tier} honesty box: {G.vocab_issues(text)}"
+    for tier, objs in S._objectives(dict(ctx, obj="the toy")).items():
+        joined = " ".join(objs)
+        assert G.vocab_issues(joined) == [], f"{tier} objectives: {G.vocab_issues(joined)}"
+    notes = S._teacher_notes(ctx)
+    body = " ".join(n["title"] + " " + n["body"] for n in notes["advanced"])
+    assert "Jensen" in body and "calibrat" in body, body
+
+
+def test_a_number_the_quality_policy_dictates_counts_as_grounded():
+    """Found on turntable-2. On a clip with too few revolutions to verify the within-turn
+    detail, the writer is INSTRUCTED to say "this clip covers only 1.47 revolutions" — and was
+    then failed for the 1.47. Anything the pipeline puts in the writer's mouth is grounded."""
+    seed = _seed(motion="decelerating")
+    seed["measurement_quality"] = {"reliable": False, "n_revolutions": 1.47,
+                                   "omega_phaselocked_fraction": 0.517, "orbit_axis_ratio": 1.021}
+    allowed = G.allowed_values(seed)
+    assert G.grounded(1.47, allowed)
+    assert not G.grounded(3.91, allowed), "an unrelated number must still be ungrounded"
+
+
+def test_a_squared_exponent_is_not_a_rate_times_the_clip_length():
+    """Found on turntable-3. The advanced averaging example writes "(average omega)^2 * r = 5.79
+    ...", which offered the wrong-duration check a bare "2" as a rate and the 5.79 rad/s turn
+    rate beside it as a time — and on that clip 5.79 sits within 3% of the 5.87 s clip length.
+    An exponent is not a factor. The real fault it exists to catch must still fire."""
+    seed = _seed(motion="decelerating")
+    seed.update({"active_duration_s": 5.87, "turning_duration_s": 1.94})
+    seed["variables"] = [{"symbol": "r", "value": 0.148}, {"symbol": "omega", "value": 5.79},
+                         {"symbol": "f", "value": 0.92}]
+    ok = "(average ω)²·r = 5.79² × 0.148 = 4.96"
+    assert G.wrong_duration_products(ok, seed) == [], G.wrong_duration_products(ok, seed)
+    bad = "laps = 0.92 × 5.87 ≈ 5.4"
+    assert G.wrong_duration_products(bad, seed), "a rate times the CLIP length must still fail"
+
+
+def test_a_steady_PHASE_the_figure_draws_is_not_a_faithfulness_error():
+    """Found live on the fan clip. The omega(t) figure draws a steady band and prints the word
+    "steady" on it, and we hand the writer that phase list — then failed the passage for
+    narrating it. A steady PHASE named alongside the other phases is allowed; calling the whole
+    motion constant is still an error, and so is a steady phrase on a clip with no steady band."""
+    seed = _seed(motion="decelerating")
+    drawn = ["speeding up", "steady", "slowing down", "steady"]
+    ok = ("The motion unfolds in four phases: an initial speed-up right after the flick, a "
+          "brief steady spin, a long coasting slowdown, and a final steady pause.")
+    assert G.motion_faithfulness(seed, ok, drawn) == [], G.motion_faithfulness(seed, ok, drawn)
+    bad = "Throughout the clip the blade turns at a constant rate."
+    assert G.motion_faithfulness(seed, bad, drawn), "a blanket constant-rate claim must still fail"
+    # No steady band on the figure -> the carve-out does not apply, however it is phrased.
+    assert G.motion_faithfulness(seed, ok, ["speeding up", "slowing down"])
+    assert G.motion_faithfulness(seed, ok, [])
+
+
+def test_b3_elapsed_time_between_two_grounded_instants_is_grounded():
+    """Step B3 asks the reader to read two instants off the graph and say how long the fall
+    took. The first live run flagged that answer as a fabricated number: the seed's timeline is
+    at 22.21/40.38 s, so 18.2 s IS the exercise. Differences between grounded instants count;
+    an unrelated number still does not."""
+    seed = _seed(motion="decelerating")
+    seed["timeline"] = [{"t_s": 22.21, "omega_rad_s": 11.586},
+                        {"t_s": 40.38, "omega_rad_s": 6.417},
+                        {"t_s": 58.56, "omega_rad_s": 2.923},
+                        {"t_s": 76.73, "omega_rad_s": 1.16}]
+    allowed = G.allowed_values(seed)
+    assert G.grounded(18.2, allowed), "elapsed time between two timeline instants"
+    assert G.grounded(36.4, allowed), "elapsed time across two steps"
+    assert G.grounded(5.17, allowed), "the drop in turn rate over that stretch"
+    assert not G.grounded(47.3, allowed), "an unrelated number must still be ungrounded"
+
+
+def test_each_level_is_a_three_step_staircase_with_a_bridge_onto_the_next():
+    """WS-4: three graded steps inside every level, and a bridge that names the step it hands
+    over to. A bridge that only advertises "the next edition" is what left the three tiers
+    reading as three separate documents rather than one staircase."""
+    import analysis.material_seed as S
+    for tier in ("basic", "intermediate", "advanced"):
+        steps = S.TIER_STEPS[tier]
+        assert len(steps) == 3, f"{tier}: {len(steps)} steps"
+        for s in steps:
+            assert s["title"] and s["goal"]
+            assert G.vocab_issues(s["title"] + " " + s["goal"]) == [], s
+    # basic -> B1 and intermediate -> C1 each name the step they lead into.
+    assert "step 1" in S.TIER_BRIDGE["basic"].lower()
+    assert "step 1" in S.TIER_BRIDGE["intermediate"].lower()
+    assert S.TIER_BRIDGE["advanced"] == ""      # the top of the ladder leads nowhere
+    # The writer is told the same order the reader is shown, or the map won't match the terrain.
+    from analysis import material_tiers as T
+    seed = {"tier_steps": S.TIER_STEPS}
+    for tier in ("basic", "intermediate", "advanced"):
+        pol = T._steps_policy(tier, seed)
+        assert all(s["title"] in pol for s in S.TIER_STEPS[tier]), tier
+
+
+def test_c3_claims_task_is_advanced_only_and_grounded_in_this_clip():
+    """The honesty argument as a TASK (advanced step 3), not as vocabulary — and built from
+    what this clip measured, so it is never a generic list."""
+    import analysis.material_seed as S
+    ctx = {"obj": "black handle", "motion": "decelerating", "unreliable": False,
+           "px_per_m": 1875.0, "omega": 7.8, "a_c": 16.05, "r": 0.26, "T": 0.814,
+           "f": 1.23, "dur": 15.0, "turning_dur": 15.0, "comes_to_rest": False,
+           "tl": [{"t_s": 0.0}, {"t_s": 5.0}, {"t_s": 10.0}, {"t_s": 15.0}]}
+    review = S._claims_review(ctx)
+    assert review["basic"] == [] and review["intermediate"] == []
+    items = review["advanced"]
+    assert len(items) >= 4, items
+    for it in items:
+        assert it["claim"] and it["verdict"] and it["why"]
+        assert G.vocab_issues(it["claim"]) == [], it["claim"]
+    joined = " ".join(it["claim"] for it in items)
+    assert "0.814" in joined and "16" in joined, joined       # this clip's own numbers
+    # An unreliable clip trades the steady-rate claim for a per-instant one, pinned to a real
+    # instant from this clip's own timeline rather than an invented time.
+    unreliable = " ".join(i["claim"] for i in S._claims_review(dict(ctx, unreliable=True))["advanced"])
+    assert "perfectly steady rate" not in unreliable
+    assert "at t = 5 s" in unreliable.lower(), unreliable
+
+
 def test_tier_spec_never_hands_the_writer_banned_vocabulary():
     """What a tier is TOLD to write must survive the gate that grades it.
 
@@ -339,6 +482,7 @@ def test_tier_spec_never_hands_the_writer_banned_vocabulary():
     for tier, spec in T.TIERS.items():
         for field in ("seed_fields", "forbidden", "figures"):
             hits = G._vocab_scan(G._TRACKING_RE, spec[field], "tracking")
+            hits += G._vocab_scan(G._READING_RE, spec[field], "reading-level")
             assert not hits, f"{tier}.{field} asks for banned vocabulary: {hits}"
     unreliable = T._quality_policy({"measurement_quality": {"reliable": False,
                                                             "guidance": Q.__doc__ or ""}})
