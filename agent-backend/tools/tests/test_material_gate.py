@@ -362,6 +362,76 @@ def test_seed_student_text_is_at_reading_level_but_the_teacher_copy_is_not():
     assert "Jensen" in body and "calibrat" in body, body
 
 
+def _pedagogy_ctx(**over):
+    ctx = {"obj": "black handle", "motion": "decelerating", "unreliable": False,
+           "px_per_m": 1875.0, "omega": 7.8, "a_c": 16.05, "r": 0.26, "T": 0.814,
+           "f": 1.23, "dur": 15.0, "turning_dur": 15.0, "comes_to_rest": False,
+           "tl": [{"t_s": 0.0, "omega_rad_s": 9.32, "v_m_s": 2.42, "a_c_m_s2": 22.6},
+                  {"t_s": 5.0, "omega_rad_s": 8.40, "v_m_s": 2.18, "a_c_m_s2": 18.3},
+                  {"t_s": 10.0, "omega_rad_s": 7.40, "v_m_s": 1.92, "a_c_m_s2": 14.2},
+                  {"t_s": 15.0, "omega_rad_s": 6.26, "v_m_s": 1.63, "a_c_m_s2": 10.2}]}
+    ctx.update(over)
+    return ctx
+
+
+def test_the_reader_is_asked_to_predict_before_the_measurement_is_revealed():
+    """A worksheet built from a video should stop before the reveal — that is the one thing
+    the medium buys that a textbook cannot. Every prediction has to be about THIS clip's data
+    and must never carry its own answer on the student page."""
+    import analysis.material_seed as S
+    p = S._predict_first(_pedagogy_ctx())
+    for tier in ("basic", "intermediate"):
+        assert p[tier], f"{tier} has no prediction"
+    for tier, items in p.items():
+        for it in items:
+            assert it["prompt"] and it["answer"]
+            assert G.vocab_issues(it["prompt"]) == [], it["prompt"]
+    # A decelerating clip must not be handed the accelerating prediction, or the answer is wrong.
+    assert "fewer" in p["basic"][0]["answer"].lower()
+    assert "more" in S._predict_first(_pedagogy_ctx(motion="accelerating"))["basic"][0]["answer"].lower()
+    assert "quarter" in p["intermediate"][0]["answer"].lower()   # the square law, pre-committed
+
+
+def test_misconceptions_stay_inside_the_kinematics_fence():
+    """The material never names a cause (rule 8b), so the dynamics misconceptions are out of
+    reach. The ones we DO pose have to survive the gate that grades the passage they sit in."""
+    import analysis.material_seed as S
+    m = S._misconceptions(_pedagogy_ctx())
+    assert all(m[t] for t in ("basic", "intermediate", "advanced"))
+    for tier, items in m.items():
+        for it in items:
+            assert it["misconception"] and it["question"] and it["answer"]
+            assert G.vocab_issues(it["question"]) == [], (tier, it["question"])
+            assert G.vocab_issues(it["answer"]) == [], (tier, it["answer"])
+    # A uniform clip has no tangential acceleration, so it must not be asked to compare the two.
+    uni = S._misconceptions(_pedagogy_ctx(motion="uniform"))["advanced"]
+    assert not any("along the direction of travel" in i["question"] for i in uni), uni
+
+
+def test_transfer_moves_the_idea_off_this_one_object():
+    """One clip binds the concept to one object. The transfer prompt has to name a DIFFERENT
+    setting, and must not invent numbers for a scene we never measured."""
+    import analysis.material_seed as S
+    import re as _re
+    t = S._transfer(_pedagogy_ctx())
+    for tier, items in t.items():
+        for it in items:
+            assert G.vocab_issues(it["question"]) == [], (tier, it["question"])
+            # No fabricated measurement: only bare ratios ("three times") are allowed.
+            nums = _re.findall(r"\d+\.\d+", it["question"])
+            assert not nums, (tier, nums)
+
+
+def test_advanced_worked_examples_fade_after_the_first():
+    """Expertise reversal: the first example is the model, the rest are completion problems."""
+    import analysis.material_seed as S
+    adv = S._worked_examples(_pedagogy_ctx(alpha=-0.204, omega_i=9.32, omega_f=6.26,
+                                           a_t=-0.0532, fit_dt=15.0))["advanced"]
+    assert len(adv) >= 2, adv
+    assert not adv[0].get("fade"), "the first example must stay fully worked"
+    assert all(e.get("fade") for e in adv[1:]), "every later example should fade"
+
+
 def test_a_number_the_quality_policy_dictates_counts_as_grounded():
     """Found on turntable-2. On a clip with too few revolutions to verify the within-turn
     detail, the writer is INSTRUCTED to say "this clip covers only 1.47 revolutions" — and was
@@ -480,7 +550,7 @@ def test_tier_spec_never_hands_the_writer_banned_vocabulary():
     from analysis import material_tiers as T
     from analysis import quality_signals as Q
     for tier, spec in T.TIERS.items():
-        for field in ("seed_fields", "forbidden", "figures"):
+        for field in ("seed_fields", "forbidden", "figures", "sentences"):
             hits = G._vocab_scan(G._TRACKING_RE, spec[field], "tracking")
             hits += G._vocab_scan(G._READING_RE, spec[field], "reading-level")
             assert not hits, f"{tier}.{field} asks for banned vocabulary: {hits}"

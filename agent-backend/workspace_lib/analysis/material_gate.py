@@ -587,6 +587,60 @@ RELATION_CUES = [
 ]
 
 
+def syllables(word):
+    w = re.sub(r"[^a-z]", "", word.lower())
+    if not w:
+        return 0
+    groups = re.findall(r"[aeiouy]+", w)
+    n = len(groups)
+    if w.endswith("e") and not w.endswith(("le", "ie")) and n > 1:
+        n -= 1
+    return max(1, n)
+
+
+def flesch(text):
+    """(reading ease, Flesch-Kincaid grade, n_words, n_sentences) for a passage.
+
+    Lives here, beside the element-interactivity counters, so the offline difficulty tool and
+    the live gate score identically. Reading grade is REPORTED, never enforced: the measured
+    ladder that holds across every clip is element interactivity, and the basic tier
+    legitimately scores the highest grade because plain words in long explanatory sentences is
+    what that tier is for. It is surfaced so a tier that drifts into genuinely unreadable
+    sentence lengths is visible rather than assumed fine (see `readability`)."""
+    words = re.findall(r"[A-Za-z]+", text)
+    sentences = [s for s in re.split(r"[.!?]+", text) if s.strip()]
+    nw, ns = len(words), max(1, len(sentences))
+    if nw == 0:
+        return (None, None, 0, 0)
+    wps, spw = nw / ns, sum(syllables(w) for w in words) / nw
+    return (round(206.835 - 1.015 * wps - 84.6 * spw, 1),
+            round(0.39 * wps + 11.8 * spw - 15.59, 1), nw, len(sentences))
+
+
+# A basic-tier passage is meant to be read by the weakest reader in the room, and it was
+# scoring the HIGHEST reading grade of the three tiers. Decomposing that across the trusted
+# set shows why, and it is not the vocabulary: syllables per word barely move between tiers
+# (1.41 basic / 1.43 intermediate / 1.51 advanced), while sentence length does — 15.8 words at
+# basic against 10.1 at intermediate. Basic reads hard because it EXPLAINS in long sentences
+# where the other tiers state in short ones. So sentence length is the one actionable lever,
+# and the threshold sits between the two (a looser 22 would never have fired at all).
+# A WARNING, never a gate failure — this is a style signal, not a correctness one.
+BASIC_MAX_WORDS_PER_SENTENCE = 14.0
+
+
+def readability(text, tier=None):
+    """Per-tier readability block for the gate report, plus a warning when the BASIC tier's
+    sentences run long enough to be a barrier in themselves."""
+    ease, grade, nw, ns = flesch(text)
+    out = {"flesch_ease": ease, "fk_grade": grade, "words": nw, "sentences": ns,
+           "words_per_sentence": round(nw / max(1, ns), 1)}
+    if tier == "basic" and ns and out["words_per_sentence"] > BASIC_MAX_WORDS_PER_SENTENCE:
+        out["warning"] = (f"basic tier averages {out['words_per_sentence']} words per sentence "
+                          f"(target ≤ {BASIC_MAX_WORDS_PER_SENTENCE:g}); plain words in long "
+                          f"sentences still read hard")
+    return out
+
+
 def quantities_in(text):
     t = text.lower()
     return [name for name, cues in QUANTITIES.items() if any(re.search(c, t) for c in cues)]

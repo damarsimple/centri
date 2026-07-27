@@ -29,32 +29,10 @@ import argparse, json, re, pathlib, sys
 # The EI counters (QUANTITIES / RELATION_CUES / quantities_in / relations_in) live in the
 # shared gate module so this tool and material_gate.cross_tier_issues score identically.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "workspace_lib"))
+# Readability (flesch/syllables) moved to the gate module alongside the EI counters, so the
+# live run reports the same numbers this offline tool does.
 from analysis.material_gate import (  # noqa: E402
-    QUANTITIES, RELATION_CUES, quantities_in, relations_in)
-
-
-def syllables(word):
-    w = re.sub(r"[^a-z]", "", word.lower())
-    if not w:
-        return 0
-    groups = re.findall(r"[aeiouy]+", w)
-    n = len(groups)
-    if w.endswith("e") and not w.endswith(("le", "ie")) and n > 1:
-        n -= 1
-    return max(1, n)
-
-
-def flesch(text):
-    words = re.findall(r"[A-Za-z]+", text)
-    sentences = [s for s in re.split(r"[.!?]+", text) if s.strip()]
-    nw, ns = len(words), max(1, len(sentences))
-    syl = sum(syllables(w) for w in words)
-    if nw == 0:
-        return (None, None, 0, 0)
-    wps, spw = nw / ns, syl / nw
-    ease = 206.835 - 1.015 * wps - 84.6 * spw
-    grade = 0.39 * wps + 11.8 * spw - 15.59
-    return (round(ease, 1), round(grade, 1), nw, len(sentences))
+    QUANTITIES, RELATION_CUES, flesch, quantities_in, relations_in, syllables)
 
 
 def passage(d):

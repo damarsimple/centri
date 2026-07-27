@@ -124,6 +124,17 @@ TIERS = {
                    "falls on one circle. There is NO data table and NO graph of speed or "
                    "acceleration over time for this reader — do not mention any table or any "
                    "'graph/plot of speed/acceleration over time'.",
+        # Plain WORDS are not the same as plain SENTENCES. Measured across the trusted set, the
+        # basic passage scored the HIGHEST reading grade of the three tiers — not from hard
+        # vocabulary but from long explanatory sentences, which is the wrong burden to hand the
+        # reader who has the least fluency. Short sentences are the one readability lever that
+        # is actually actionable at this tier (material_gate.readability reports the result).
+        "sentences": "SHORT SENTENCES — this is the hardest constraint at this tier. One idea "
+                     "per sentence; aim for about 12 words and never run past 20. Prefer two "
+                     "short sentences to one long one joined by a comma, a dash or 'and'. "
+                     "Explaining something is not a reason to lengthen the sentence: explain it "
+                     "in three short sentences instead. This tier's reader is the least fluent, "
+                     "and sentence length costs them far more than word length does.",
         "test": "Could a learner who has never seen the equations follow every sentence, "
                 "holding one idea at a time?",
     },
@@ -157,6 +168,9 @@ TIERS = {
                    "frequency), one graph of the turn-rate (angular velocity) over time, and "
                    "the traced circular path. Do not mention tangential-speed graphs, "
                    "angular-acceleration graphs or a summary panel.",
+        "sentences": "Keep sentences to one clear idea each; under about 25 words. A "
+                     "substitution or a relation may run longer, but the prose around it "
+                     "should not.",
         "test": "Does the passage coordinate a handful of interacting quantities through the "
                 "standard relations, applied to this object's numbers?",
     },
@@ -186,6 +200,8 @@ TIERS = {
                    "angular acceleration and how the scene was sized), graphs of angular "
                    "velocity and centripetal acceleration over time, and the traced circular "
                    "path. (There is no combined summary panel — do not mention one.)",
+        "sentences": "Sentence length may carry real subordination here — this reader can "
+                     "hold a qualified claim — but never pad: every clause must do work.",
         "test": "Does the passage integrate several quantities AND their change over time, and "
                 "reason about proportionality, limits, or what the measurement does/doesn't pin down?",
     },
@@ -317,6 +333,7 @@ SYSTEM_TMPL = (
     "6. The element interactivity AND the Bloom objective must both point to {tier} — if they "
     "disagree, rewrite.\n"
     "7. WRITER'S TEST for this tier: {test}\n"
+    "7b. SENTENCE LENGTH at this tier: {sentences}\n"
     "8. Teach the PHYSICS, not the measurement pipeline. This is a physics lesson about the "
     "object's motion, never a tracking/analysis report. Do NOT use any of these words: "
     + G.TRACKING_VOCAB_HUMAN + ". Never write a figure filename (e.g. omega_t.png). Refer to "
@@ -892,7 +909,12 @@ def main():
             if len(cand_issues) < len(issues):
                 obj, issues = cand, cand_issues
         materials[tier] = obj
-        gate_report[tier] = {"passed": not issues, "issues": issues}
+        # Readability is REPORTED, never enforced: the ladder that actually holds across the
+        # trusted set is element interactivity, and the basic tier legitimately scores the
+        # highest reading grade. What IS actionable is sentence length at that tier, and the
+        # warning surfaces it instead of leaving it assumed fine.
+        gate_report[tier] = {"passed": not issues, "issues": issues,
+                             "readability": G.readability(G._passage(obj), tier)}
         cross_regen_used[tier] = False
 
     # Cross-tier pass: titles equal, distinct worked instants, element interactivity rising.
@@ -912,7 +934,8 @@ def main():
                 cross_regen_used[tier] = True
                 if len(cand_issues) <= len(gate_report[tier]["issues"]):
                     materials[tier] = cand
-                    gate_report[tier] = {"passed": not cand_issues, "issues": cand_issues}
+                    gate_report[tier] = {"passed": not cand_issues, "issues": cand_issues,
+                                         "readability": G.readability(G._passage(cand), tier)}
         cross = G.cross_tier_issues(materials, seed, TIER_ANCHORS, unreliable=unreliable)
 
     for tier, obj in materials.items():
