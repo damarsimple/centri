@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 
 from . import quality_signals
-from .common import canonical_omega, dedup_display_name
+from .common import SIGN_NOTE, canonical_omega, dedup_display_name, motion_along_travel
 
 DATA = Path("analysis_output/data")
 N_TIMELINE = 4  # time-anchored samples across the active window
@@ -164,13 +164,55 @@ FORMULA_TEX = {
     "stop":          r"0 = \omega_{1} + \alpha\,t",
 }
 
-# Tier bridge appended to the last section — deterministic, no LLM.
+# WS-4: each level is a STAIRCASE of three graded steps, not one jump. The steps are named
+# here (deterministically — never by the writer) and printed as a strip at the top of the
+# level, so a reader can see which rung they are on and what the next one asks. Three
+# documents, three graded steps inside each; the machine keys and filenames are unchanged.
+TIER_STEPS = {
+    "basic": [
+        {"title": "Which quantities we use",
+         "goal": "Name how far out the object sits, how long one lap takes and how many "
+                 "laps it makes each second."},
+        {"title": "What each one means",
+         "goal": "Say in your own words what each of those three numbers is measuring."},
+        {"title": "Which idea joins them",
+         "goal": "Explain why a wider circle, or a faster sweep, needs a stronger inward pull."},
+    ],
+    "intermediate": [
+        {"title": "Read the graph, then meet the equation",
+         "goal": "Describe in words what the turn-rate graph does, then recognise "
+                 "a_c = ω²·r as the compact way to say it."},
+        {"title": "Put this clip's numbers in",
+         "goal": "Work out the speed and the inward acceleration at one instant, and move "
+                 "between period and frequency."},
+        {"title": "How long to slow from this speed to that one",
+         "goal": "Read two turn rates off the graph and say how long the object took to "
+                 "fall between them."},
+    ],
+    "advanced": [
+        {"title": "Compare two moments",
+         "goal": "Take two instants and account for the difference in ω, v and a_c "
+                 "between them."},
+        {"title": "Compare the phases of the motion",
+         "goal": "Say how the parts of the clip differ from one another, and by how much."},
+        {"title": "Which claims does this video actually support?",
+         "goal": "Separate what the measurement pins down from what it only suggests, "
+                 "and say why."},
+    ],
+}
+
+# The bridge BETWEEN levels, appended to the last section. It names the step it hands over
+# to (A3 -> B1, B3 -> C1) rather than advertising the next document in general, so the three
+# editions read as one staircase instead of three separate documents.
 TIER_BRIDGE = {
-    "basic": "Ready for more? The intermediate edition puts numbers to these ideas: it "
-             "measures the turn rate and the inward pull and shows exactly how they are linked.",
-    "intermediate": "Ready for more? The advanced edition adds how the spin changes over "
-                    "time — the angular acceleration — and reasons about what the measurement "
-                    "can and cannot pin down.",
+    "basic": "Ready for more? Step 1 of the intermediate edition picks up exactly where "
+             "step 3 leaves off: it reads the turn-rate graph in words, and then meets "
+             "a_c = ω²·r as the compact way to write down what you have just explained.",
+    "intermediate": "Ready for more? Step 1 of the advanced edition picks up exactly where "
+                    "step 3 leaves off: instead of reading the fall off the graph, it "
+                    "compares two moments directly, turns the difference into a single "
+                    "rate — the angular acceleration — and then asks how far that rate can "
+                    "be trusted.",
     "advanced": "",
 }
 
@@ -215,13 +257,18 @@ def _objectives(ctx):
         "Move between period and frequency with T = 1/f = 2π/ω.",
         "Read the turn-rate graph and tie its value back to the tabulated numbers.",
     ]
+    # Written at high-school reading level (WS-2.1): the ideas are unchanged, but the terms a
+    # physics teacher flagged — "calibration", "scale-free", the ⟨·⟩ average notation and the
+    # name of the inequality — are said in plain words here and stated formally only in the
+    # teacher copy (`_teacher_notes`).
     adv = [
-        "Fit and interpret the angular acceleration α = Δω/Δt and the signed "
-        "tangential acceleration a_t = α·r.",
+        "Fit and interpret the angular acceleration α = Δω/Δt and the tangential "
+        "acceleration a_t = α·r, and say what a negative value of each one means.",
         "Track how ω, v and a_c evolve across the clip using ω(t) = ω₀ + αt.",
-        "Explain the ω² sensitivity of a_c and why plugging the clip-average ω does "
-        "not reproduce the average a_c (⟨ω²⟩ > ⟨ω⟩²).",
-        "State which measured quantities are independent of the calibration.",
+        "Explain why a_c follows the SQUARE of the turn rate, and why putting the clip's "
+        "average turn rate into a_c = ω²·r does not give back the average a_c.",
+        "Say which of the reported quantities would be wrong if the scene had been sized "
+        "wrongly, and which would be unaffected.",
     ]
     return {"basic": basic, "intermediate": inter, "advanced": adv}
 
@@ -332,6 +379,39 @@ def _worked_examples(ctx):
             "interpret": "Frequency counts laps per second; the period times one lap. Either one "
                          "gives the other.",
         })
+    # ---- intermediate, step 3 (WS-4 B3): squeeze the graph harder ----
+    # "How long to slow from this speed to that one", answered by READING the measurement, not
+    # by computing it from a fitted rate: the angular acceleration and everything built on it
+    # stay at the advanced level, which is where the step-3 -> step-1 bridge hands over. Two
+    # timeline instants far enough apart that the fall is real, never a rounding artifact.
+    if not ctx["unreliable"] and len(tl) >= 2 and ctx["motion"] in ("decelerating", "accelerating"):
+        # A sub-interval, not the whole clip: "how long did the WHOLE thing take" is the clip
+        # length the reader already has, which would make step 3 easier than step 2 rather
+        # than harder. Two named instants inside the record is the real step up from B2's
+        # single instant, and it sets up C1's compare-two-moments directly.
+        a, b = tl[0], (tl[-2] if len(tl) >= 3 else tl[-1])
+        w_a, w_b = abs(a["omega_rad_s"]), abs(b["omega_rad_s"])
+        dt = _shown(b["t_s"]) - _shown(a["t_s"])
+        faster, slower = (a, b) if w_a >= w_b else (b, a)
+        drop = abs(_shown(w_a) - _shown(w_b))
+        if dt > 0 and drop > 0.05 * max(w_a, w_b):
+            verb = "slow" if ctx["motion"] == "decelerating" else "speed up"
+            out["intermediate"].append({
+                "title": f"How long did it take to {verb} from one turn rate to the other?",
+                "given": f"The turn-rate graph reads ω = {_g(abs(faster['omega_rad_s']))} rad/s "
+                         f"at t = {_g(faster['t_s'])} s and ω = "
+                         f"{_g(abs(slower['omega_rad_s']))} rad/s at t = {_g(slower['t_s'])} s.",
+                "formula": "time taken = later time − earlier time",
+                "formula_tex": r"\Delta t = t_{2} - t_{1}",
+                "substitute": f"{_g(_shown(b['t_s']))} − {_g(_shown(a['t_s']))}",
+                "substitute_tex": rf"\Delta t = {_g(_shown(b['t_s']))} - "
+                                  rf"{_g(_shown(a['t_s']))} = {_g(dt)}",
+                "result": f"≈ {_g(dt)} s",
+                "interpret": f"So the {obj} took about {_g(dt)} s to change its turn rate by "
+                             f"{_g(drop)} rad/s. You read that straight off the measurement. The "
+                             f"advanced edition turns the same fall into a single rate and then "
+                             f"asks how far that rate can be trusted.",
+            })
 
     # ---- advanced ----
     aa_ok = all(isinstance(ctx[k], (int, float)) for k in ("alpha", "omega_i", "omega_f", "a_t"))
@@ -339,14 +419,18 @@ def _worked_examples(ctx):
         al, oi, of_, at = ctx["alpha"], ctx["omega_i"], ctx["omega_f"], ctx["a_t"]
         out["advanced"].append({
             "title": "Fit the angular acceleration",
-            "given": f"ω runs from {_g(oi)} rad/s to {_g(of_)} rad/s over {_g(fit_dt)} s "
-                     f"of turning.",
+            # oi/of_ are SPEEDS (see the aa_out block): quoting a signed range here next to
+            # the unsigned clip-average ω elsewhere is what made "ω runs from −9.51 to −0.03"
+            # sit beside "clip-average ω = 5.7" in the same edition.
+            "given": f"The turn rate goes from {_g(oi)} rad/s to {_g(of_)} rad/s over "
+                     f"{_g(fit_dt)} s of turning.",
             "formula": "α = Δω/Δt", "formula_tex": FORMULA_TEX["alpha"],
             "substitute": f"({_g(of_)} − {_g(oi)}) / {_g(fit_dt)}",
             "substitute_tex": rf"\alpha = \dfrac{{{_g(of_)} - {_g(oi)}}}{{{_g(fit_dt)}}} = {_g(al)}",
             "result": f"α ≈ {_g(al)} rad/s²",
-            "interpret": ("The negative sign encodes the slow-down: it loses about "
-                          f"{_g(abs(al), 2)} rad/s of spin every second."
+            "interpret": ("The minus sign says the turn rate is falling — it is not a value "
+                          f"below nothing: the {obj} loses about {_g(abs(al), 2)} rad/s of "
+                          f"spin every second."
                           if al < 0 else
                           f"It gains about {_g(abs(al), 2)} rad/s of spin every second."),
         })
@@ -357,30 +441,40 @@ def _worked_examples(ctx):
             "substitute": f"a_t = {_g(al)} × {_g(r)}",
             "substitute_tex": rf"a_{{\mathrm{{t}}}} = {_g(al)} \times {_g(r)} = {_g(at)}",
             "result": f"a_t ≈ {_g(at)} m/s²",
-            "interpret": ("It points against the direction of travel — that is what coasting "
-                          "down means in vector language." if at < 0 else
+            "interpret": ("The minus sign is a direction: it points against the way the "
+                          f"{obj} is travelling, which is what coasting down means in vector "
+                          "language." if at < 0 else
                           "It points along the direction of travel, speeding the object up."),
         })
-        # "Why the averages don't close" — the honest-data example (Jensen), only when we have
-        # an omega range to build ⟨ω²⟩ from and the mean a_c to compare against.
+        # "Why the averages don't close" — the honest-data example. It compares exactly two
+        # numbers the reader can already see: the shortcut (average ω)²·r, and the MEASURED
+        # average a_c. The old version compared the shortcut against a third value modelled
+        # from the fit endpoints — a different averaging window from the one the mean ω comes
+        # from, so on both fan clips it printed the inequality backwards (19.2 "greater than"
+        # 20.6) and then called the further number "closer to the measured".
+        # Averages are written in WORDS, never as ⟨ω⟩ (WS-2.1): the angle-bracket notation and
+        # the name of the inequality are teacher-copy material, the idea is not.
         om_c, a_c_mean = ctx["omega"], ctx["a_c"]
-        if all(isinstance(x, (int, float)) for x in (om_c, a_c_mean, oi, of_, r)):
-            om2_avg = (oi * oi + oi * of_ + of_ * of_) / 3.0   # time-avg of ω² for linear ω(t)
+        naive = om_c * om_c * r if all(isinstance(x, (int, float))
+                                       for x in (om_c, a_c_mean, r)) else None
+        # Only claim the shortcut undershoots when it demonstrably does on THIS clip: mean a_c
+        # averages per-frame radii, so a wandering orbit could in principle close the gap.
+        if naive is not None and naive < a_c_mean:
             out["advanced"].append({
-                "title": "Why the clip-average ω doesn't reproduce the average a_c",
-                "given": f"Clip-average ω = {_g(om_c)} rad/s; measured average a_c = "
-                         f"{_g(a_c_mean)} m/s².",
-                "formula": "⟨ω²⟩ ≥ ⟨ω⟩²",
-                "formula_tex": FORMULA_TEX["omega2_avg"],
-                "substitute": f"{_g(om_c)}² × {_g(r)} = {_g(om_c*om_c*r)}  vs  "
-                              f"⟨ω²⟩·r = {_g(om2_avg*r)}",
-                "substitute_tex": rf"\langle\omega\rangle^{{2}} r = {_g(om_c*om_c*r)}"
-                                  rf"\quad\text{{vs}}\quad \langle\omega^{{2}}\rangle r = {_g(om2_avg*r)}",
-                "result": f"⟨ω²⟩·r ≈ {_g(om2_avg*r)} m/s², closer to the "
-                          f"measured {_g(a_c_mean)}",
-                "interpret": "Squaring the average is not the same as averaging the squares "
-                             "whenever the speed changes, so plugging the mean ω falls short. "
-                             "Each identity is still exact at a single instant.",
+                "title": "Why the average turn rate doesn't reproduce the average inward pull",
+                "given": f"Average turn rate ω = {_g(om_c)} rad/s and r = {_g(r)} m; the "
+                         f"measured average inward acceleration is {_g(a_c_mean)} m/s².",
+                "formula": "(average ω)²·r, compared with the measured average a_c",
+                "formula_tex": r"(\text{average }\omega)^{2} r \;<\; "
+                               r"\text{average } a_{\mathrm{c}}",
+                "substitute": f"(average ω)²·r = {_g(om_c)}² × {_g(r)} = {_g(naive)}",
+                "substitute_tex": rf"({_g(om_c)})^{{2}} \times {_g(r)} = {_g(naive)}",
+                "result": f"{_g(naive)} m/s² — short of the measured {_g(a_c_mean)} m/s²",
+                "interpret": "Squaring the average is not the same as averaging the squares. "
+                             "Whenever the turn rate changes, the average of ω² is larger than "
+                             "the square of the average ω, so this shortcut always undershoots "
+                             "the real average inward pull. Each identity is still exact at a "
+                             "single instant.",
             })
         # Extrapolated stopping time — only for a decelerating clip that has NOT yet stopped.
         if ctx["motion"] == "decelerating" and not ctx["comes_to_rest"] and al and of_ > 0:
@@ -492,10 +586,17 @@ def _check_understanding(ctx):
             })
     if isinstance(ctx["px_per_m"], (int, float)):
         out["advanced"].append({
-            "question": f"The absolute a_c depends on the calibration ({_g(ctx['px_per_m'], 5)} px/m). "
-                        f"Which reported quantities are calibration-independent?",
-            "answer": "ω, α, T and f — all the angular ones; r, v, a_c and a_t scale with "
-                      "the calibration.",
+            # Plain words, no "calibration" and no pixel count: same idea, a reading level a
+            # high-school student actually has (WS-2.1).
+            "question": "Every length here is worked out from one measured size in the scene — "
+                        "a real object of known width, used to turn on-screen size into metres. "
+                        "If that size were 10% too big, which of the reported quantities would "
+                        "be wrong, and which would be unaffected?",
+            "answer": "The turn rate ω, the angular acceleration α, the period T and the "
+                      "frequency f would be unaffected — they are angles and times, and an "
+                      "angle does not depend on how big we think the scene is. The radius r, "
+                      "the speed v and both accelerations a_c and a_t would each be 10% out, "
+                      "because every one of them is built from that size.",
         })
     return out
 
@@ -526,13 +627,127 @@ def _honesty(ctx):
              "not the same as averaging the squares, so the two differ slightly whenever the "
              "speed changes. Each identity is exact at a single instant." + period_note)
     px = ctx["px_per_m"]
-    cal_line = (f" Absolute values of r, v, a_c and a_t all scale with the calibration "
-                f"({_g(px, 5)} px per metre); the angular quantities ω, α, T and f are "
-                f"scale-free and independent of it." if isinstance(px, (int, float)) else "")
-    adv = (inter + " Formally ⟨ω²⟩ ≥ ⟨ω⟩² for any varying "
-           "ω (a Jensen inequality), so the inward acceleration built from ⟨ω²⟩ "
-           "exceeds the one from the mean ω squared." + cal_line)
+    # One plain sentence for what used to be two named ideas ("calibration-independent" and
+    # "scale-free" say the same thing twice), and the formal inequality is gone from the
+    # student edition entirely — it is stated in the teacher copy instead (WS-2.1).
+    cal_line = (" One more thing worth knowing: every length here — the radius, the speed and "
+                "both accelerations — is worked out from a single measured size in the scene, "
+                "so all of them would be out by the same proportion if that size were wrong. "
+                "The turn rate, the angular acceleration, the period and the frequency are "
+                "angles and times, so they do not depend on it at all."
+                if isinstance(px, (int, float)) else "")
+    adv = inter + cal_line
     return {"basic": basic, "intermediate": inter, "advanced": adv}
+
+
+def _claims_review(ctx):
+    """WS-4 step C3 — "which claims does this video actually support?", as a TASK.
+
+    The advanced level's distinguishing job is comparison and judgement, not intermediate with
+    more numbers. So the honesty argument stops being a paragraph of vocabulary the reader is
+    asked to absorb and becomes something to DO: each claim is graded well-supported / supported
+    only under a stated assumption / not supported, and the verdicts print in the teacher copy
+    only, exactly like the answer key. Every item is built from what this clip actually
+    measured, so the list is never generic.
+    """
+    obj, r, T = ctx["obj"], ctx["r"], ctx["T"]
+    items = []
+    turn = ctx.get("turning_dur") or ctx.get("dur")
+    if isinstance(ctx["f"], (int, float)) and isinstance(turn, (int, float)):
+        items.append({
+            "claim": f"“The {obj} went round about {round(_shown(ctx['f'], 2) * _shown(turn))} "
+                     f"times while it was turning.”",
+            "verdict": "Well supported",
+            "why": "Counting laps is what the measurement does most directly: the swept angle "
+                   "is accumulated frame by frame, and a miscount would have to lose a whole "
+                   "revolution to matter.",
+        })
+    if isinstance(T, (int, float)):
+        items.append({
+            "claim": f"“Every lap took {_g(T)} s.”",
+            "verdict": "Not supported as stated",
+            "why": f"{_g(T)} s is the average lap over the whole clip. The turn rate is "
+                   f"changing, so early laps and late laps take visibly different times; the "
+                   f"average describes the spin as a whole, not any one lap.",
+        })
+    if ctx["unreliable"]:
+        # Name a real instant from this clip's own timeline — "at t = 2 s" is nonsense on a
+        # clip shorter than that, and the whole point of the task is that it is not generic.
+        tl = ctx.get("tl") or []
+        at = f"At t = {_g(tl[1]['t_s'])} s" if len(tl) > 1 else "At any single instant"
+        items.append({
+            "claim": f"“{at} the turn rate was exactly the value on the graph.”",
+            "verdict": "Not supported",
+            "why": "The circle is seen at a slant rather than face-on, so the value at any "
+                   "single instant carries a once-per-turn wobble that is the viewing angle, "
+                   "not the object. Only the trend across the clip is reliable.",
+        })
+    else:
+        items.append({
+            "claim": "“The turn rate fell at a perfectly steady rate.”",
+            "verdict": "Supported only as a model",
+            "why": "A steady rate of change is the simplest curve that fits the measured "
+                   "angles well, and it is what every prediction here assumes. It is a good "
+                   "description, not a fact the video establishes on its own.",
+        })
+    if ctx["motion"] == "decelerating" and not ctx.get("comes_to_rest"):
+        items.append({
+            "claim": f"“The {obj} came to a stop shortly after the clip ended.”",
+            "verdict": "Supported only under a stated assumption",
+            "why": "It rests entirely on the slow-down staying steady after the last frame we "
+                   "have. Nothing in the video shows what happened next.",
+        })
+    if isinstance(r, (int, float)) and isinstance(ctx["px_per_m"], (int, float)):
+        items.append({
+            "claim": f"“The inward acceleration was {_g(ctx['a_c'])} m/s².”",
+            "verdict": "Supported, but only as well as the scene was sized",
+            "why": "Every value in metres rests on one measured real-world size in the scene. "
+                   "The turn rate, the period and the frequency would survive an error there; "
+                   "this number would not.",
+        })
+    return {"basic": [], "intermediate": [], "advanced": items}
+
+
+def _teacher_notes(ctx):
+    """Per-tier notes that print ONLY in the teacher copy (report.py renders these when
+    ``with_answers``).
+
+    Where an idea has a formal name or notation above the reading level of the worksheet, the
+    student meets the idea in plain words and the exact statement lives here — so lowering the
+    reading level does not cost the teacher the precision they need to field a question about
+    it. This is re-routing, not deletion: nothing that was said before has been dropped.
+    """
+    out = {"basic": [], "intermediate": [], "advanced": []}
+    om_c, a_c_mean, r = ctx["omega"], ctx["a_c"], ctx["r"]
+    averaging = {
+        "title": "The averaging caveat, formally",
+        "tex": FORMULA_TEX["omega2_avg"],
+        "body": ("The student edition says only that squaring an average is not the same as "
+                 "averaging the squares. Formally this is Jensen's inequality applied to the "
+                 "squaring function, which is convex: for any turn rate that varies, "
+                 "⟨ω²⟩ ≥ ⟨ω⟩², with "
+                 "equality only when ω is constant. That is why a_c built from the average of "
+                 "ω² exceeds the a_c built from the square of the average ω, and why every "
+                 "identity in the material is verified at a single instant instead."),
+    }
+    if all(isinstance(x, (int, float)) for x in (om_c, a_c_mean, r)):
+        averaging["body"] += (f" Here: ⟨ω⟩²r = {_g(om_c*om_c*r)} m/s², against a measured "
+                              f"⟨a_c⟩ = ⟨ω²⟩r of {_g(a_c_mean)} m/s².")
+    out["intermediate"].append(averaging)
+    out["advanced"].append(dict(averaging))
+    px = ctx["px_per_m"]
+    if isinstance(px, (int, float)):
+        out["advanced"].append({
+            "title": "Which quantities depend on the calibration",
+            "body": (f"The scene is calibrated at {_g(px, 5)} pixels per metre, from a "
+                     f"reference object of known size. ω, α, T and f are calibration-"
+                     f"independent (scale-free): they are angles and times, so a wrong "
+                     f"reference size leaves them untouched. r, v, a_c and a_t are all built "
+                     f"through that scale, so a k% error in the reference length moves each of "
+                     f"them by k%. The student edition states this in plain words and does not "
+                     f"use the word 'calibration'."),
+        })
+    return out
 
 
 def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
@@ -587,23 +802,23 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
 
     aa_out = None
     if aa and aa.get("motion_type"):
-        mt = aa["motion_type"]
-        # SIGNED tangential acceleration a_t = alpha*r (A3). New pipeline runs store this
-        # signed already; older stats.json still hold the magnitude, so re-sign from alpha
-        # here to be robust to either — a_t must carry alpha's sign (negative decelerating).
-        alpha_v = aa.get("alpha_rad_s2")
-        a_t_v = aa.get("a_t_mean_m_s2")
-        if isinstance(a_t_v, (int, float)) and isinstance(alpha_v, (int, float)):
-            a_t_v = math.copysign(abs(a_t_v), alpha_v)
+        # Everything the reader sees is resolved ALONG THE DIRECTION OF TRAVEL: alpha is
+        # d|omega|/dt (negative = slowing, whichever way round it turns), a_t carries that
+        # same sign, and the endpoint omegas are speeds — so they agree with the unsigned
+        # canonical omega the rest of the document quotes instead of contradicting it with
+        # a stray "-9.51 -> -0.03 rad/s" beside a "clip average 5.7 rad/s".
+        along = motion_along_travel(stats)
+        mt = along.get("motion_type") or aa["motion_type"]
         aa_out = {
             "motion_type": mt,
-            "alpha_rad_s2": alpha_v,
+            "alpha_rad_s2": along.get("alpha", aa.get("alpha_rad_s2")),
             "alpha_r2": aa.get("alpha_r2"),
-            "omega_initial": aa.get("omega_initial"),
-            "omega_final": aa.get("omega_final"),
-            "a_t_mean_m_s2": a_t_v,
+            "omega_initial": along.get("omega_initial", aa.get("omega_initial")),
+            "omega_final": along.get("omega_final", aa.get("omega_final")),
+            "a_t_mean_m_s2": along.get("a_t", aa.get("a_t_mean_m_s2")),
             "impulsive_start": bool(aa.get("impulsive_start")),
             "relation": "alpha = d(omega)/dt ; a_t = alpha * r",
+            "sign_note": SIGN_NOTE if mt in ("accelerating", "decelerating") else "",
             "plain": {
                 "accelerating": "the object is speeding up at a steady angular acceleration alpha",
                 "decelerating": "the object is slowing down (coasting) at a steady angular deceleration",
@@ -709,8 +924,12 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
             "px_per_m": calib.get("px_per_m"),
             "reference_physical_size_m": calib.get("physical_size_m"),
             "reference_source": calib.get("physical_size_source"),
-            "caveat": "absolute SI scale depends on the reference size; relative kinematics "
-                      "(omega, alpha, period, ratios) are scale-free and robust",
+            # Plain wording: this string is quoted straight into the writer's fact sheet, and a
+            # fact sheet that says "scale-free" is how "scale-free" reached the student (8c).
+            "caveat": "every value in metres (radius, speed, both accelerations) is only as "
+                      "right as that reference size, and all of them are out by the same "
+                      "proportion if it is wrong; the turn rate, angular acceleration, period "
+                      "and frequency are angles and times, so they do not depend on it",
         },
         "measured_radius_m": summ.get("mean_r_m"),
         "consistency_note": {
@@ -721,8 +940,9 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
                 "the summary r, omega, v, a_c are time-AVERAGES over the clip. For "
                 "non-uniform motion DO NOT verify a_c = omega^2*r by plugging the mean "
                 "omega: mean(a_c) = mean(omega^2)*r is strictly greater than "
-                "(mean omega)^2*r (Jensen). To show a relation numerically, use a single "
-                "timeline instant, where every identity closes exactly."),
+                "(mean omega)^2*r, because squaring an average is not the same as averaging "
+                "the squares. To show a relation numerically, use a single timeline instant, "
+                "where every identity closes exactly."),
         },
         "validation_flags": stats.get("validation_flags", []),
         "measurement_quality": measurement_quality,
@@ -733,6 +953,13 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
         "worked_examples": _worked_examples(ctx),
         "check_understanding": _check_understanding(ctx),
         "measurement_honesty": _honesty(ctx),
+        # Teacher-copy only (report.py renders these when with_answers): the formal statement
+        # of anything the student edition now says in plain words.
+        "teacher_notes": _teacher_notes(ctx),
+        # WS-4: the three graded steps inside this level, the advanced step-3 judgement task,
+        # and the bridge onto the first step of the next level.
+        "tier_steps": TIER_STEPS,
+        "claims_review": _claims_review(ctx),
         "tier_bridge": TIER_BRIDGE,
         "formula_tex": FORMULA_TEX,
     }

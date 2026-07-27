@@ -55,11 +55,20 @@ SECTIONS = ["Scenario", "The variables we measured", "How the variables are rela
 # basic-only scaffolding — render/report._MATERIAL_ORDER puts it first, and run_material_eval
 # scores only the shared five, so it is excluded from BERTScore by construction.
 SECTIONS_BASIC = ["What these words mean"] + SECTIONS
+# Intermediate reads the turn-rate graph IN WORDS before it meets the equation, so the formula
+# arrives as the compact way to say something the reader has already seen — the review's
+# "interpret before you calculate". Same five sections, one swap: the over-time reading moves
+# ahead of the relations. render/report._MATERIAL_ORDER carries the same order to the PDF.
+SECTIONS_INTERMEDIATE = ["Scenario", "The variables we measured",
+                         "What the video shows over time", "How the variables are related",
+                         "Reading the figures"]
 _NWORD = {5: "five", 6: "six"}
 
 
 def _sections_for(tier):
-    return SECTIONS_BASIC if tier == "basic" else SECTIONS
+    if tier == "basic":
+        return SECTIONS_BASIC
+    return SECTIONS_INTERMEDIATE if tier == "intermediate" else SECTIONS
 
 # Per-tier worked instants: indices into the seed's 4-point timeline. Distinct instants
 # per tier stop advanced ≈ intermediate (both verifying at the same moment). Basic gets
@@ -100,7 +109,12 @@ TIERS = {
                      "in words that a bigger circle or a faster sweep needs a stronger inward "
                      "pull; do NOT state a centripetal-acceleration or speed NUMBER there.",
         "figures": "Three pictures: (1) a still of the object on its "
-                   "circular path with the radius marked from the centre; (2) a simple graph of "
+                   "circular path with four things marked and named IN WORDS (no symbols): how "
+                   "far out it sits from the centre, how fast it travels along the circle, how "
+                   "fast it sweeps round the centre, and the inward pull that keeps it on the "
+                   "circle — only two of these carry a number (how far out it sits, in metres, "
+                   "and the turn rate as turns each second), and the other two are named "
+                   "arrows with no value, so do not invent one; (2) a simple graph of "
                    "HOW MANY TURNS the object has completed as time passes — a line that climbs "
                    "from zero, whose SHAPE tells the story (a straight line = a steady spin, a "
                    "line that bends flatter = slowing down, a line that steepens = speeding up); "
@@ -125,11 +139,19 @@ TIERS = {
                        "together, shown to hold for THIS object. Tangential speed (v) is NOT a "
                        "headline variable at this tier: do NOT build on v=omega*r or a_c=v^2/r, "
                        "and do NOT list v as a measured variable; v may appear at most as a "
-                       "one-clause aside if it truly aids intuition.",
-        "forbidden": "Do NOT make the motion's change over time the main point (one sentence "
-                     "of context is fine), NO angular-acceleration value or timeline, NO "
-                     "scale/calibration-caveat discussion, NO tangential-speed derivation as a "
-                     "core relation.",
+                       "one-clause aside if it truly aids intuition.\n"
+                       "READ THE GRAPH BEFORE THE EQUATION. The sections are ordered so that "
+                       "'What the video shows over time' comes BEFORE 'How the variables are "
+                       "related': first describe IN WORDS what the turn-rate graph does (where "
+                       "it is high, where it falls, what that means for the object), with no "
+                       "formula at all; only then introduce the relation, as the compact way "
+                       "to say something the reader has already seen in the picture. Do not "
+                       "put an equation in the over-time section, and do not open the relations "
+                       "section as if the reader has met nothing yet — refer back to what the "
+                       "graph showed.",
+        "forbidden": "NO angular-acceleration value and no time-by-time table of the spin, NO "
+                     "discussion of how the scene was sized, NO tangential-speed derivation as "
+                     "a core relation.",
         "figures": "A marked-up still with the radius, a short data table of the core "
                    "measurements (radius, angular velocity, centripetal acceleration, period, "
                    "frequency), one graph of the turn-rate (angular velocity) over time, and "
@@ -141,11 +163,17 @@ TIERS = {
     "advanced": {
         "bloom": "Analyze / Evaluate",
         "interactivity": "high",
+        # The three phrases a physics teacher flagged as beyond a high-school reader
+        # (calibration-independent, scale-free, Jensen) were in the student worksheet because
+        # THIS SPEC asked for them. The idea is unchanged; only the wording is (rule 8c).
         "seed_fields": "everything intermediate uses PLUS angular acceleration (alpha, "
                        "a_t=alpha*r), the spin-up/coast-down timeline (time evolution), the "
-                       "squared sensitivity a_c proportional to omega^2, and the calibration "
-                       "caveat (relative kinematics are scale-free; absolute a_c depends on "
-                       "the reference size).",
+                       "squared sensitivity a_c proportional to omega^2, and the scale caveat "
+                       "stated in PLAIN WORDS: every length here (the radius, the speed, both "
+                       "accelerations) rests on one measured real-world size for the scene, so "
+                       "all of them would be out by the same proportion if that size were "
+                       "wrong; the turn rate, the angular acceleration, the period and the "
+                       "frequency are angles and times, so they are unaffected.",
         "forbidden": "Do not merely restate the intermediate content — the job here is the "
                      "higher-order integration over time and at limits. ELEMENT-INTERACTIVITY "
                      "FLOOR: you MUST wire together, each with this object's numbers at its "
@@ -154,10 +182,10 @@ TIERS = {
                      "change in ω moves a_c much more). Restating the intermediate relation set "
                      "alone, without α, the time evolution, and the ω² sensitivity, is a "
                      "FAILURE at this tier.",
-        "figures": "A marked-up still, the full measurements table (including angular "
-                   "acceleration and the calibration), graphs of angular velocity and "
-                   "centripetal acceleration over time, and the traced circular path. (There "
-                   "is no combined summary panel — do not mention one.)",
+        "figures": "A marked-up still, the full measurements table (which also lists the "
+                   "angular acceleration and how the scene was sized), graphs of angular "
+                   "velocity and centripetal acceleration over time, and the traced circular "
+                   "path. (There is no combined summary panel — do not mention one.)",
         "test": "Does the passage integrate several quantities AND their change over time, and "
                 "reason about proportionality, limits, or what the measurement does/doesn't pin down?",
     },
@@ -206,10 +234,17 @@ def _facts(seed, tier=None):
     aa = seed.get("angular_acceleration")
     if aa:
         lines.append(f"motion type: {aa['motion_type']} — {aa.get('plain','')}")
+        # alpha, a_t and the two omegas below are all quoted ALONG THE DIRECTION OF TRAVEL:
+        # the omegas are speeds and a negative alpha/a_t means losing speed. Whether the
+        # object speeds up or slows down is settled by `motion type` above — the writer must
+        # never re-derive it from a sign.
         lines.append(f"  alpha = {round(aa['alpha_rad_s2'],3)} rad/s^2 "
-                     f"(fit R^2={round(aa['alpha_r2'],5)}), omega "
+                     f"(fit R^2={round(aa['alpha_r2'],5)}), turn rate "
                      f"{round(aa['omega_initial'],2)} -> {round(aa['omega_final'],2)} rad/s, "
                      f"mean tangential accel a_t = {round(aa['a_t_mean_m_s2'],2)} m/s^2")
+        if aa.get("sign_note"):
+            lines.append(f"  sign convention (state this in plain words if you print a "
+                         f"negative value): {aa['sign_note']}")
     else:
         lines.append("motion type: approximately uniform (no angular-acceleration block)")
     if seed.get("timeline"):
@@ -221,11 +256,14 @@ def _facts(seed, tier=None):
     if cn:
         lines.append("consistency note: report radius as the fitted orbit radius r; verify "
                      "v=omega*r and a_c=omega^2*r at a SINGLE timeline instant, never with the "
-                     "summary means (Jensen).")
+                     "summary means (squaring an average is not the same as averaging the "
+                     "squares, so the means do not close).")
     cal = seed.get("calibration_note", {})
     if cal:
-        lines.append(f"calibration note: scale from a reference of "
-                     f"{cal.get('reference_physical_size_m')} m; {cal.get('caveat')}")
+        # Deliberately NOT called a "calibration" note here — that word is banned in the
+        # passage (rule 8c), and a fact sheet that uses it invites the model to echo it.
+        lines.append(f"scale note: the scene was sized from a real object "
+                     f"{cal.get('reference_physical_size_m')} m across; {cal.get('caveat')}")
     # Angle-at-time milestones are the BASIC tier's ground truth ("after ~0.2 s it has swept a
     # quarter turn, 90°"). Only the basic passage narrates them, beside the "turns completed vs
     # time" graph. The framing is motion-aware so a decelerating clip is NOT narrated as steady:
@@ -291,12 +329,21 @@ SYSTEM_TMPL = (
     + G.DYNAMICS_VOCAB_HUMAN + ". The inward effect is named ONLY as the 'centripetal "
     "acceleration' (you may call it an 'inward pull'); the speeding-up or slowing-down has NO "
     "named cause — never a motor, brake, friction, or force.\n"
+    "8c. WRITE FOR A HIGH-SCHOOL READER at every tier, advanced included. Do NOT use any of "
+    "these words or notations: " + G.READING_LEVEL_VOCAB_HUMAN + ". Keep the IDEA and say it "
+    "in plain words: instead of 'which quantities are calibration-independent' write 'the "
+    "angle measurements do not depend on how we sized the scene, but the values in metres "
+    "do'; instead of 'scale-free' say the same thing once, in those plain words, and do not "
+    "name it twice; instead of naming an inequality say 'squaring an average is not the same "
+    "as averaging the squares'. Write averages in words ('the average turn rate'), never as "
+    "⟨ω⟩. The formal statement of any of these belongs in the teacher copy, not here.\n"
     "9. Plain Unicode ONLY — never LaTeX or backslashes. PREFER the actual Unicode characters "
     "ω, α, π, ², · (not the spelled-out words 'omega'/'alpha'); write subscripts as plain "
     "ASCII a_c, a_t. NEVER emit $...$, \\omega, \\times, or any backslash: a stray backslash "
     "makes the JSON invalid and unparseable.\n"
     "{quality_policy}\n"
     "{anchor_policy}\n"
+    "{steps_policy}"
     "{definitions_policy}"
     "{hints}"
     "Return ONLY a JSON object (no markdown fences, no prose outside JSON) with keys: "
@@ -312,6 +359,27 @@ def _section_spec(tier):
     secs = _sections_for(tier)
     return ("sections (an object with EXACTLY these " + _NWORD[len(secs)] + " string keys, in "
             "order: " + ", ".join(f'"{h}"' for h in secs) + ")")
+
+
+def _steps_policy(tier, seed):
+    """WS-4: this level is a staircase of three graded steps, not one jump.
+
+    The step titles are printed deterministically at the top of the document (from the seed),
+    so the passage must climb them in order — otherwise the reader is handed a map that does
+    not match the terrain. The demand rises across the three; it never rises inside one."""
+    steps = (seed.get("tier_steps") or {}).get(tier) or []
+    if not steps:
+        return ""
+    lines = "".join(f"  Step {i}: {s['title']} — {s['goal']}\n"
+                    for i, s in enumerate(steps, 1))
+    return (
+        "THIS LEVEL IS A STAIRCASE OF THREE GRADED STEPS. The reader is shown these three step "
+        "titles at the top of the document, so your passage must move through them IN THIS "
+        "ORDER, and the demand must rise between steps, never inside one:\n" + lines +
+        "Each step has to be reachable from the one before: open a step by referring back to "
+        "what the previous step established, and never use an idea before its own step "
+        "introduces it. Do NOT print the step titles or the word 'Step' yourself — they are "
+        "already on the page; just follow the order.\n")
 
 
 def _definitions_policy(tier):
@@ -750,6 +818,7 @@ def _generate(tier, facts, seed, frame, prior_issues=None):
     system = SYSTEM_TMPL.format(tier=tier, tier_upper=tier.upper(),
                                 quality_policy=quality_policy,
                                 anchor_policy=anchor_policy,
+                                steps_policy=_steps_policy(tier, seed),
                                 definitions_policy=_definitions_policy(tier),
                                 section_spec=_section_spec(tier), hints=HINTS,
                                 motion_policy=_motion_policy(seed), **spec)

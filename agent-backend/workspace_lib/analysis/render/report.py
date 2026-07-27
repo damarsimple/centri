@@ -30,7 +30,7 @@ import re
 RENDER_QUESTIONS = os.environ.get("PI_RENDER_QUESTIONS", "0") == "1"
 from pathlib import Path
 
-from ..common import canonical_omega, dedup_display_name
+from ..common import SIGN_NOTE, canonical_omega, dedup_display_name, motion_along_travel
 
 DATA = Path("analysis_output/data")
 REPORT = Path("analysis_output/report")
@@ -57,8 +57,10 @@ FIGURES = [
 FIG_META = {
     "annotated_image.png": (0.62, "A single video frame with the fitted circular orbit "
                                   "and the radius marked from the centre of rotation."),
-    "annotated_image_basic.png": (0.62, "A frame from the video showing the object on its "
-                                        "circular path, with the radius marked from the centre."),
+    "annotated_image_basic.png": (0.80, "The object on its circular path. Four things are "
+                                        "marked: how far out it sits from the centre, how fast "
+                                        "it travels along the circle, how fast it sweeps round, "
+                                        "and the inward pull that keeps it on the circle."),
     "trajectory_basic.png": (0.55, "The path the object traced — every tracked point falls on "
                                    "one circle."),
     "angle_points_basic.png": (0.62, "How many turns the object has completed as time passes. "
@@ -251,24 +253,29 @@ def _measurements_table(stats, level="full", unreliable=False) -> str:
     ]
     # Non-uniform spins (fan spin-up, turntable coast-down) additionally report the
     # angular acceleration and the tangential acceleration it produces.
-    if aa.get("motion_type") in ("accelerating", "decelerating"):
-        # SIGNED a_t (A3): re-sign from alpha so an older stats.json holding the magnitude
-        # still renders the physically-correct negative in a deceleration (a_t opposes motion).
-        alpha_v, a_t_v = aa.get("alpha_rad_s2"), aa.get("a_t_mean_m_s2")
-        if isinstance(a_t_v, (int, float)) and isinstance(alpha_v, (int, float)):
-            a_t_v = math.copysign(abs(a_t_v), alpha_v)
+    # Everything in these rows is resolved along the direction of travel (see
+    # common.motion_along_travel): the trend is read from the SPEED, not from the sign the
+    # tracker happened to give the rotation, and the endpoint omegas are speeds so they
+    # cannot contradict the unsigned clip-average two rows above.
+    along = motion_along_travel(stats)
+    sign_note = ""
+    if along:
         rows[1:1] = [
-            (f"Motion type", aa["motion_type"].capitalize()),
-            ("Angular acceleration", si(aa.get("alpha_rad_s2"), 2, r"rad/s^2")),
-            ("Tangential acceleration", si(a_t_v, 2, r"m/s^2")),
-            (r"$\omega$ initial $\rightarrow$ final",
-             f"{num(aa.get('omega_initial'), 2)} $\\rightarrow$ "
-             f"{num(aa.get('omega_final'), 2)} rad/s"),
+            (f"Motion type", along["motion_type"].capitalize()),
+            ("Angular acceleration", si(along.get("alpha"), 2, r"rad/s^2")),
+            ("Tangential acceleration", si(along.get("a_t"), 2, r"m/s^2")),
+            (r"Turn rate, start $\rightarrow$ end",
+             f"{num(along.get('omega_initial'), 2)} $\\rightarrow$ "
+             f"{num(along.get('omega_final'), 2)} rad/s"),
         ]
+        # The explanation travels with the number, so a minus sign is never left to be
+        # guessed at (and is never mistaken for "less than nothing").
+        sign_note = ("\n\n\\parbox{0.86\\linewidth}{\\footnotesize\\itshape "
+                     + tex_escape(SIGN_NOTE) + "}")
     body = " \\\\\n".join(f"{k} & {v}" for k, v in rows)
     return ("\\begin{tabular}{ll}\n\\toprule\n"
             "\\rowcolor{accent!12}\\textbf{Quantity} & \\textbf{Value} \\\\\n\\midrule\n"
-            + body + " \\\\\n\\bottomrule\n\\end{tabular}")
+            + body + " \\\\\n\\bottomrule\n\\end{tabular}" + sign_note)
 
 
 def _figures_block() -> str:
@@ -292,6 +299,20 @@ _MATERIAL_ORDER = [
     "What the video shows over time",
     "Reading the figures",
 ]
+# Intermediate reads the turn-rate graph in words BEFORE it meets the equation, so the formula
+# lands as the compact way to say what the reader has already seen rather than as the thing to
+# be understood first. Mirrors material_tiers.SECTIONS_INTERMEDIATE — the two must not drift.
+_MATERIAL_ORDER_INTERMEDIATE = [
+    "Scenario",
+    "The variables we measured",
+    "What the video shows over time",
+    "How the variables are related",
+    "Reading the figures",
+]
+
+
+def _material_order(tier=None):
+    return _MATERIAL_ORDER_INTERMEDIATE if tier == "intermediate" else _MATERIAL_ORDER
 
 
 def _inline_figure(name: str) -> str:
@@ -419,6 +440,65 @@ def _honesty_block(text) -> str:
             + tex_escape(text) + "\n\\end{minipage}}\\par\\medskip")
 
 
+def _steps_block(steps) -> str:
+    """WS-4: the three graded steps this level is built from, printed near the top.
+
+    Each level used to be a single jump, with nothing telling a reader where they were in it.
+    Naming the rungs — and what each one leaves you able to do — is what makes the step size
+    visible; the bridge at the end of the level then names the rung it hands over to."""
+    if not steps:
+        return ""
+    def _titled(s):
+        # A step title that is already a question keeps its "?" — appending "." to it gives
+        # the doubled "support?." that the first render showed.
+        t = (s.get("title") or "").strip()
+        return t if t.endswith(("?", ".", "!")) else t + "."
+    rows = "\n".join(
+        f"  \\item \\textbf{{{tex_escape(_titled(s))}}} {tex_escape(s.get('goal'))}"
+        for s in steps)
+    return ("\\subsection*{How this level is built}\n"
+            "Three steps, each one reachable from the one before:\n"
+            "\\begin{enumerate}[leftmargin=*,itemsep=3pt]\n" + rows + "\n\\end{enumerate}")
+
+
+def _claims_block(items, with_answers: bool = False) -> str:
+    """WS-4 step C3: the honesty argument as a task instead of as vocabulary.
+
+    The student gets the claims to judge; the verdict and the reasoning print in the teacher
+    copy only, so the exercise is not answered on the page the student is working from."""
+    if not items:
+        return ""
+    rows = []
+    for it in items:
+        line = f"  \\item {tex_escape(it.get('claim'))}"
+        if with_answers:
+            line += ("\\\\\n  {\\small\\itshape\\color{inkgray}"
+                     + tex_escape(f"{it.get('verdict')} — {it.get('why')}") + "}")
+        rows.append(line)
+    return ("\\subsection*{Which of these does the video actually support?}\n"
+            "For each claim, decide whether the measurement establishes it, establishes it "
+            "only under an assumption you should state, or does not establish it at all.\n"
+            "\\begin{enumerate}[leftmargin=*,itemsep=4pt]\n" + "\n".join(rows)
+            + "\n\\end{enumerate}")
+
+
+def _teacher_notes_block(notes) -> str:
+    """Notes that print ONLY in the teacher copy: the formal statement of an idea the student
+    edition now gives in plain words (an inequality by name, the calibration dependence). The
+    reading level of the worksheet came down; what the teacher has to hand did not."""
+    if not notes:
+        return ""
+    out = ["\\subsection*{Teacher's notes}"]
+    for n in notes:
+        parts = [f"\\noindent\\textbf{{{tex_escape(n.get('title'))}}}\\\\"]
+        if n.get("tex"):
+            parts.append(f"\\[{n['tex']}\\]")     # seeded LaTeX — trusted, bypasses tex_escape
+        if n.get("body"):
+            parts.append(tex_escape(n["body"]))
+        out.append("\n\n".join(parts) + "\n\n\\medskip")
+    return "\n\n".join(out)
+
+
 def _cyu_block(items, bridge=None, with_answers: bool = False) -> str:
     """Check-your-understanding questions plus the one-line tier bridge (Part B section 9).
     The answer key prints ONLY in the teacher edition (``with_answers``): printing it in the
@@ -487,16 +567,22 @@ def _material_block(material, stats=None, unreliable=False, seed=None, with_answ
             return blk.get(tier) if tier else None
         return blk
     objectives = _objectives_block(_seed_for("objectives"))
+    steps = _steps_block(_seed_for("tier_steps"))
+    claims = _claims_block(_seed_for("claims_review"), with_answers)
     relations = _relations_block(_seed_for("relations_display"))
     worked = _worked_examples_block(_seed_for("worked_examples"))
     honesty = _honesty_block(_seed_for("measurement_honesty"))
     cyu = _cyu_block(_seed_for("check_understanding"), _seed_for("tier_bridge"), with_answers)
+    teacher = _teacher_notes_block(_seed_for("teacher_notes")) if with_answers else ""
 
-    ordered = [h for h in _MATERIAL_ORDER if h in sections]
-    ordered += [h for h in sections if h not in _MATERIAL_ORDER]  # tolerate extras
+    order = _material_order(tier)
+    ordered = [h for h in order if h in sections]
+    ordered += [h for h in sections if h not in order]  # tolerate extras
     out = []
     if objectives:                       # canonical skeleton §2: objectives before Scenario
         out.append(objectives)
+    if steps:                            # WS-4: the staircase, before the reader starts climbing
+        out.append(steps)
     worked_done = False
     for h in ordered:
         body = (sections.get(h) or "").strip()
@@ -522,8 +608,12 @@ def _material_block(material, stats=None, unreliable=False, seed=None, with_answ
         out.append(worked)
     if honesty:                          # §8 honesty box, then §9 CYU + tier bridge
         out.append(honesty)
+    if claims:                           # WS-4 step C3 — advanced only; empty elsewhere
+        out.append(claims)
     if cyu:
         out.append(cyu)
+    if teacher:                          # teacher copy only — never in the student edition
+        out.append(teacher)
     return "\n\n".join(out)
 
 
