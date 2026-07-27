@@ -168,36 +168,81 @@ FORMULA_TEX = {
 # here (deterministically — never by the writer) and printed as a strip at the top of the
 # level, so a reader can see which rung they are on and what the next one asks. Three
 # documents, three graded steps inside each; the machine keys and filenames are unchanged.
+# `after` names the section this step actually ENDS at, so report.py can print the step's
+# checkpoint there. A staircase printed only as a map at the top tells the reader where the
+# rungs are without ever making them stand on one; the checkpoint is what turns the map into
+# something you have to climb. `check` is the question that has to be answerable to go on —
+# its answer prints in the teacher copy only, like every other answer.
 TIER_STEPS = {
     "basic": [
-        {"title": "Which quantities we use",
-         "goal": "Name how far out the object sits, how long one lap takes and how many "
-                 "laps it makes each second."},
-        {"title": "What each one means",
-         "goal": "Say in your own words what each of those three numbers is measuring."},
+        {"title": "What the words mean",
+         "goal": "Say what the radius, the period and the turn rate each measure.",
+         "after": "What these words mean",
+         "check": "Without looking back: which of the three tells you how long one lap takes, "
+                  "and which tells you how far out the object sits?",
+         "answer": "The period is the time for one lap. The radius is how far out it sits."},
+        {"title": "What this clip's numbers are",
+         "goal": "Read this object's own radius, period and turns-per-second off the table "
+                 "and the picture.",
+         "after": "The variables we measured",
+         "check": "Point to where each of those three numbers appears in the picture or the "
+                  "text above. Which one is NOT marked on the picture?",
+         "answer": "The radius is marked on the picture; the period and the turns-per-second "
+                   "come from the text. (The picture marks the turn rate as turns per second.)"},
         {"title": "Which idea joins them",
-         "goal": "Explain why a wider circle, or a faster sweep, needs a stronger inward pull."},
+         "goal": "Explain why a wider circle, or a faster sweep, needs a stronger inward pull.",
+         "after": "How the variables are related",
+         "check": "Two objects sweep round at the same rate, one on a small circle and one on "
+                  "a big one. Which needs the stronger inward pull?",
+         "answer": "The one on the bigger circle."},
     ],
     "intermediate": [
-        {"title": "Read the graph, then meet the equation",
-         "goal": "Describe in words what the turn-rate graph does, then recognise "
-                 "a_c = ω²·r as the compact way to say it."},
-        {"title": "Put this clip's numbers in",
-         "goal": "Work out the speed and the inward acceleration at one instant, and move "
-                 "between period and frequency."},
-        {"title": "How long to slow from this speed to that one",
-         "goal": "Read two turn rates off the graph and say how long the object took to "
-                 "fall between them."},
+        {"title": "Read the graph in words",
+         "goal": "Describe what the turn-rate graph does, with no formula at all.",
+         "after": "What the video shows over time",
+         "check": "In one sentence, and without using a symbol: what does the turn-rate graph "
+                  "do from the start of the clip to the end?",
+         "answer": "It falls — the object sweeps round more slowly as the clip goes on "
+                   "(or rises, on a clip that speeds up)."},
+        {"title": "Meet the equation, and put this clip's numbers in",
+         "goal": "Recognise a_c = ω²·r as the compact way to say what you just described, and "
+                 "evaluate it at one instant.",
+         "after": "How the variables are related",
+         "check": "If the turn rate at some instant were half what you used, what would the "
+                  "inward acceleration be?",
+         "answer": "A quarter of it — a_c follows the SQUARE of the turn rate."},
+        {"title": "How long to slow from this rate to that one",
+         "goal": "Read two turn rates off the graph and say how long the object took to fall "
+                 "between them.",
+         "after": "Reading the figures",
+         "check": "You read that time off the graph rather than calculating it. What would you "
+                  "need to know to calculate it instead?",
+         "answer": "How fast the turn rate itself is changing — the angular acceleration, "
+                   "which is what the advanced edition measures."},
     ],
     "advanced": [
         {"title": "Compare two moments",
-         "goal": "Take two instants and account for the difference in ω, v and a_c "
-                 "between them."},
+         "goal": "Take two instants and account for the difference in ω, v and a_c between them.",
+         "after": "How the variables are related",
+         "check": "Between your two instants the turn rate fell by some factor. By what factor "
+                  "did the inward acceleration fall, and why is it not the same factor?",
+         "answer": "By the SQUARE of that factor, because a_c = ω²·r and only ω changed."},
         {"title": "Compare the phases of the motion",
-         "goal": "Say how the parts of the clip differ from one another, and by how much."},
+         "goal": "Say how the parts of the clip differ from one another, and by how much.",
+         "after": "What the video shows over time",
+         "check": "Which part of the clip would give the most misleading answer if you "
+                  "described the whole clip by its average alone?",
+         "answer": "The part furthest from the average — on a clip that slows, the fast opening "
+                   "stretch; the average understates it and overstates the end."},
         {"title": "Which claims does this video actually support?",
-         "goal": "Separate what the measurement pins down from what it only suggests, "
-                 "and say why."},
+         "goal": "Separate what the measurement pins down from what it only suggests, and "
+                 "say why.",
+         "after": "__CLAIMS__",
+         "check": "Of the claims you just judged, which one would a longer clip settle, and "
+                  "which would still be unsettled however long the clip ran?",
+         "answer": "A longer clip settles what happens after the last frame (the stopping "
+                   "time). It never settles the real-world scale — that rests on the measured "
+                   "size in the scene, not on the length of the recording."},
     ],
 }
 
@@ -489,6 +534,15 @@ def _worked_examples(ctx):
                 "interpret": "This assumes the slow-down stays steady — a stated assumption, and "
                              "a good check on how far the model can be trusted.",
             })
+
+    # ---- fade the advanced examples (expertise reversal) ---------------------
+    # A fully worked example is what a NOVICE needs; for a reader who already has the schema it
+    # stops helping and starts replacing the practice that would build it. The standard remedy
+    # is fading: keep the first one worked in full as the model, then hand the reader the last
+    # step of each one that follows. `fade` tells report.py to withhold the result from the
+    # student edition — the teacher copy still prints it, like every other answer.
+    for e in out["advanced"][1:]:
+        e["fade"] = True
     return out
 
 
@@ -527,18 +581,9 @@ def _check_understanding(ctx):
                         f"number mean?",
             "answer": f"One complete lap takes about {_g(T)} s.",
         })
-    # THE circular-motion misconception (Part B #5): learners expect a released object to fly
-    # radially OUTWARD ("centrifugal throw"). It actually continues along the tangent — the
-    # direction it was already moving — the inward pull merely stops. A conceptual item, no
-    # numbers, so it fits the basic tier and confronts the misconception head-on.
-    out["basic"].append({
-        "question": f"Suppose the {obj} suddenly came loose while spinning. Which way would it "
-                    f"head off — straight outward from the centre, or straight ahead in the "
-                    f"direction it was already moving?",
-        "answer": f"Straight ahead, along the direction it was already moving (the tangent). "
-                  f"Nothing flings it outward — the inward pull simply stops, so it carries on "
-                  f"in a straight line.",
-    })
+    # The tangential-release item used to live here; it now sits in `_misconceptions` with the
+    # rest of the documented circular-motion misconceptions, printed under its own heading so a
+    # teacher can see at a glance which ones the material confronts.
 
     if isinstance(f, (int, float)) and isinstance(T, (int, float)):
         out["intermediate"].append({
@@ -638,6 +683,204 @@ def _honesty(ctx):
                 if isinstance(px, (int, float)) else "")
     adv = inter + cal_line
     return {"basic": basic, "intermediate": inter, "advanced": adv}
+
+
+def _predict_first(ctx):
+    """Predict-Observe-Explain: one prediction per tier, printed BEFORE the measurement it is
+    about, with the answer in the teacher copy only.
+
+    This is the affordance the medium actually gives us. A textbook cannot stop before the
+    reveal; a video can, and a worksheet built from a video should. Every prediction below is
+    about something the reader is about to see in THIS clip's own data, so it is checkable
+    against the page rather than against an opinion — and each targets the specific intuition
+    that the measurement is about to correct.
+    """
+    obj, mt, tl = ctx["obj"], ctx["motion"], ctx["tl"]
+    out = {"basic": [], "intermediate": [], "advanced": []}
+    trend = {"decelerating": ("fewer", "more"), "accelerating": ("more", "fewer")}.get(mt)
+    if trend:
+        got, _other = trend
+        out["basic"].append({
+            "prompt": f"Before you read on. In a moment you will see a graph of how many turns "
+                      f"the {obj} has completed as time passes. As the clip goes on, do you "
+                      f"think it completes MORE turns each second, FEWER, or the same number? "
+                      f"Write down your guess, then check it against the graph.",
+            "answer": f"{got.capitalize()} — the {obj} is "
+                      + ("slowing down" if mt == "decelerating" else "speeding up") +
+                      ", so the line "
+                      + ("bends flatter" if mt == "decelerating" else "steepens") + ".",
+        })
+    else:
+        out["basic"].append({
+            "prompt": f"Before you read on. In a moment you will see a graph of how many turns "
+                      f"the {obj} has completed as time passes. Do you expect that line to be "
+                      f"straight, or to bend? Write down your guess, then check it.",
+            "answer": "Straight — this clip turns at a steady rate, so the same number of "
+                      "turns accumulates in every second.",
+        })
+    # Intermediate predicts the SQUARE law before meeting a_c = ω²·r — the single most
+    # commonly mis-predicted relation in circular motion.
+    out["intermediate"].append({
+        "prompt": f"Before you read on. You are about to meet the rule linking the turn rate "
+                  f"to the inward acceleration. Suppose the {obj} swept round at HALF the turn "
+                  f"rate, on the same circle. Would the inward acceleration be half as big, a "
+                  f"quarter as big, or unchanged? Commit to an answer before you read the next section.",
+        "answer": "A quarter as big. The inward acceleration follows the SQUARE of the turn "
+                  "rate, so halving ω divides a_c by four — most readers predict 'half'.",
+    })
+    if len(tl) > 1 and not ctx["unreliable"]:
+        a, b = tl[0], tl[-1]
+        wa, wb = abs(a["omega_rad_s"]), abs(b["omega_rad_s"])
+        if wa and wb and abs(wa - wb) > 0.05 * max(wa, wb):
+            hi, lo = (a, b) if wa >= wb else (b, a)
+            out["advanced"].append({
+                "prompt": f"Before you read on. At t = {_g(hi['t_s'])} s the turn rate is "
+                          f"{_g(abs(hi['omega_rad_s']))} rad/s; at t = {_g(lo['t_s'])} s it is "
+                          f"{_g(abs(lo['omega_rad_s']))} rad/s. Without computing anything: is "
+                          f"the inward acceleration at the second instant more or less than "
+                          f"half the first? Predict, then verify from the data below.",
+                "answer": f"Less than half. The turn rate falls by a factor of "
+                          f"{_g(abs(hi['omega_rad_s']) / abs(lo['omega_rad_s']), 2)}, so a_c "
+                          f"falls by the SQUARE of that — "
+                          f"{_g((abs(hi['omega_rad_s']) / abs(lo['omega_rad_s'])) ** 2, 2)}.",
+            })
+    return out
+
+
+def _misconceptions(ctx):
+    """The documented circular-motion misconceptions this material can confront.
+
+    NOTE THE FENCE. This is a kinematics lesson — it describes HOW the object moves and never
+    names a cause (material_gate.DYNAMICS_VOCAB). That rules out the misconception cluster
+    that lives in the dynamics: centrifugal force as a real outward push, centripetal force as
+    an extra force rather than a net one, "what keeps it moving". The three below are the ones
+    that can be posed honestly WITHOUT naming a force, and they are the ones a kinematics
+    treatment is actually equipped to correct. The rest need the fence moved, which is a
+    teaching decision, not a code change.
+    """
+    obj, r = ctx["obj"], ctx["r"]
+    tangent = {
+        "misconception": "a released object flies radially outward",
+        "question": f"Suppose the {obj} suddenly came loose while spinning. Which way would it "
+                    f"head off — straight outward from the centre, or straight ahead in the "
+                    f"direction it was already moving?",
+        "answer": "Straight ahead, along the direction it was already moving (the tangent). "
+                  "Nothing flings it outward — the inward pull simply stops, so it carries on "
+                  "in a straight line.",
+    }
+    steady_but_accelerating = {
+        "misconception": "constant speed means no acceleration",
+        "question": f"Imagine the {obj} went round at a perfectly steady rate, never speeding "
+                    f"up or slowing down. Would its inward (centripetal) acceleration be zero?",
+        "answer": "No. Going round a circle means the direction of travel is changing every "
+                  "instant, and that change IS an acceleration. Something can have an "
+                  "acceleration while its speed never changes.",
+    }
+    omega_is_not_v = {
+        "misconception": "same turn rate means same speed",
+        "question": f"Two markers sit on the same turning object, one near the centre and one "
+                    f"out at {_g(r)} m. They complete a lap in the same time. Do they travel "
+                    f"at the same speed along their circles?",
+        "answer": "No. Same turn rate, different circles: the outer one covers a much longer "
+                  "path in the same time, so it travels faster. Turn rate and speed are "
+                  "different things.",
+    }
+    two_accelerations = {
+        "misconception": "the inward acceleration is what speeds the object up or slows it down",
+        "question": "This clip has an inward acceleration and, because the spin is changing, "
+                    "an acceleration along the direction of travel. Which of the two changes "
+                    "the object's SPEED, and which changes only its direction?",
+        "answer": "The one along the direction of travel (a_t) changes the speed. The inward "
+                  "one (a_c) changes only the direction — it is at right angles to the motion, "
+                  "so it turns the object without making it faster or slower.",
+    }
+    out = {"basic": [tangent, steady_but_accelerating],
+           "intermediate": [omega_is_not_v, steady_but_accelerating],
+           "advanced": [two_accelerations]}
+    if ctx["motion"] == "uniform":
+        # a_t is zero here, so the two-accelerations item has nothing to point at.
+        out["advanced"] = [steady_but_accelerating]
+    return out
+
+
+def _transfer(ctx):
+    """One prompt that moves the same physics to a DIFFERENT setting.
+
+    A single clip binds the concept to a single object: a learner who only ever meets circular
+    motion on a turntable tends to file it under "turntables". Transfer needs a second context,
+    and we have one video — so the second context is posed qualitatively, with no invented
+    numbers, which is also what keeps it honest.
+    """
+    obj = ctx["obj"]
+    return {
+        "basic": [{
+            "question": f"Everything you have just read about the {obj} is also true of a "
+                        f"child sitting on a playground roundabout. Which part of the "
+                        f"roundabout would give the child the fastest ride — near the middle, "
+                        f"or out at the edge? Say why, in the words you have just learned.",
+            "answer": "Out at the edge. Every part of the roundabout sweeps round at the same "
+                      "rate, but the edge is on a bigger circle, so it covers more distance in "
+                      "the same time.",
+        }],
+        "intermediate": [{
+            "question": "A bicycle wheel turns at the same rate as this object, but its rim is "
+                        "three times further from the centre. Compare the speed along the path "
+                        "and the inward acceleration at the rim with the values you worked out "
+                        "here.",
+            "answer": "The speed is three times larger (v = ω·r, and only r changed). The "
+                      "inward acceleration is also three times larger (a_c = ω²·r) — note it "
+                      "is NOT nine times, because it is the turn rate that is squared, not the "
+                      "radius.",
+        }],
+        "advanced": [{
+            "question": "A satellite in a circular orbit sweeps round at the same rate for "
+                        "years. Which of the methods you used here would still apply to it, "
+                        "and which would fail — and what does that tell you about what this "
+                        "measurement really rests on?",
+            "answer": "The relations (a_c = ω²·r, T = 2π/ω) transfer unchanged: they are "
+                      "geometry, and hold for any circular motion. What fails is the technique. "
+                      "There is no object of known size beside it to set the real-world scale, "
+                      "and no slowing-down stretch to fit a rate of change to. The physics is "
+                      "general; the method depends on the scene.",
+        }],
+    }
+
+
+def _placement(ctx):
+    """A short self-check so the reader CHOOSES a level instead of being handed one.
+
+    Three fixed reading levels with nobody deciding which one a given student gets is
+    differentiated materials, not differentiated instruction. This does not diagnose anyone —
+    it states what this level assumes and names the neighbouring level in both directions, so
+    a reader who is in the wrong place can move.
+    """
+    assumes = {
+        "basic": ["you have met the idea of a circle's radius",
+                  "you can read a simple graph of one thing against time"],
+        "intermediate": ["you can substitute numbers into a formula and keep the units straight",
+                         "you can read a value off a graph at a given time",
+                         "you know that squaring a number is not the same as doubling it"],
+        "advanced": ["you can work with a rate of change (something per second, per second)",
+                     "you can compare two moments of a motion and account for the difference",
+                     "you are willing to argue about what a measurement does and does not show"],
+    }
+    neighbours = {
+        "basic": (None, "intermediate"),
+        "intermediate": ("basic", "advanced"),
+        "advanced": ("intermediate", None),
+    }
+    out = {}
+    for tier, items in assumes.items():
+        down, up = neighbours[tier]
+        note = []
+        if down:
+            note.append(f"If more than one of those is new to you, start with the {down} "
+                        f"edition — it covers the same clip.")
+        if up:
+            note.append(f"If all of them are already easy, go straight to the {up} edition; "
+                        f"this one will not stretch you.")
+        out[tier] = {"assumes": items, "note": " ".join(note)}
+    return out
 
 
 def _claims_review(ctx):
@@ -961,6 +1204,14 @@ def build_seed(stats: dict, csv_path: Path | None = None) -> dict:
         "tier_steps": TIER_STEPS,
         "claims_review": _claims_review(ctx),
         "tier_bridge": TIER_BRIDGE,
+        # ── the reader DOES something, rather than only reads ──
+        # A worksheet built from a video should stop before the reveal, confront what the
+        # reader probably believes, and move the idea to a second setting — none of which a
+        # passage of expository prose does on its own.
+        "predict_first": _predict_first(ctx),
+        "misconceptions": _misconceptions(ctx),
+        "transfer": _transfer(ctx),
+        "placement": _placement(ctx),
         "formula_tex": FORMULA_TEX,
     }
 

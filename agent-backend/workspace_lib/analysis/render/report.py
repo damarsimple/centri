@@ -390,15 +390,23 @@ def _relations_block(relations) -> str:
             + "\n\\end{enumerate}")
 
 
-def _worked_examples_block(examples) -> str:
+def _worked_examples_block(examples, with_answers: bool = False) -> str:
     """Worked examples in the house Given/Formula/Substitute/Result/Interpret format.
     Intermediate/advanced carry seeded LaTeX (`*_tex`) rendered as display math; basic is
-    symbol-free (words + one arithmetic line)."""
+    symbol-free (words + one arithmetic line).
+
+    An example marked ``fade`` is a COMPLETION problem: the student edition shows the setup and
+    the substitution and stops, leaving the last step to the reader. A fully worked example is
+    what a novice needs and what stops helping once the schema is there, so the advanced level
+    keeps the first worked in full as a model and fades the rest (expertise reversal). The
+    teacher copy prints every result."""
     if not examples:
         return ""
     out = ["\\subsection*{Worked examples}"]
     for i, e in enumerate(examples, 1):
-        parts = [f"\\noindent\\textbf{{Example {i} — {tex_escape(e.get('title'))}}}\\\\"]
+        faded = bool(e.get("fade")) and not with_answers
+        label = " --- \\textit{your turn}" if faded else ""
+        parts = [f"\\noindent\\textbf{{Example {i} — {tex_escape(e.get('title'))}}}{label}\\\\"]
         given = e.get("given")
         if given:
             parts.append(f"\\textit{{Given:}} {tex_escape(given)}")
@@ -408,7 +416,10 @@ def _worked_examples_block(examples) -> str:
             if ftex:
                 parts.append(f"\\[{ftex}\\]")
             if stex:
-                parts.append(f"\\[{stex}\\]")
+                # A faded example shows the substitution and stops at the "=" — the reader
+                # supplies the number the full version would have handed them.
+                parts.append(f"\\[{stex.rsplit('=', 1)[0].rstrip() + ' = {}'}\\]"
+                             if faded and "=" in stex else f"\\[{stex}\\]")
         else:
             # Basic: no symbols — show the formula-in-words and the arithmetic line as text.
             line = tex_escape(e.get("formula") or "")
@@ -419,9 +430,12 @@ def _worked_examples_block(examples) -> str:
         res = e.get("result")
         interp = e.get("interpret")
         tail = ""
-        if res and (ftex or stex):   # basic already folded result into the line above
+        if faded:
+            tail += ("\\textbf{Result:} \\rule{3cm}{0.4pt}\\quad{\\small\\itshape work out the "
+                     "last step yourself.} ")
+        elif res and (ftex or stex):   # basic already folded result into the line above
             tail += f"\\textbf{{Result:}} {tex_escape(res)}. "
-        if interp:
+        if interp and not faded:       # the interpretation would give the answer away
             tail += f"\\textit{{{tex_escape(interp)}}}"
         if tail:
             parts.append(tail)
@@ -440,6 +454,94 @@ def _honesty_block(text) -> str:
             + tex_escape(text) + "\n\\end{minipage}}\\par\\medskip")
 
 
+def _sentence_case(s: str) -> str:
+    """Close a label with a full stop unless it already ends in punctuation — a step titled
+    "Which claims does this video actually support?" must not render as "…support?."."""
+    s = (s or "").strip()
+    return s if s.endswith(("?", ".", "!", ":")) else s + "."
+
+
+def _placement_block(p) -> str:
+    """"Is this the right level for you?" — printed before anything else.
+
+    Three fixed levels with nobody deciding which one a reader gets is differentiated
+    materials, not differentiated instruction. This does not test anyone; it states what the
+    level assumes and names the neighbouring level in both directions, so a reader in the
+    wrong place can move under their own steam."""
+    if not p or not p.get("assumes"):
+        return ""
+    items = "\n".join(f"  \\item {tex_escape(a)}" for a in p["assumes"])
+    note = f"\n\n{tex_escape(p.get('note', ''))}" if p.get("note") else ""
+    return ("\\subsection*{Is this the right level for you?}\n"
+            "This edition assumes:\n"
+            "\\begin{itemize}[leftmargin=*,itemsep=1pt]\n" + items + "\n\\end{itemize}" + note)
+
+
+def _predict_block(items, with_answers: bool = False) -> str:
+    """Predict-Observe-Explain, printed BEFORE the measurement it is about.
+
+    A textbook cannot stop before the reveal; a video can, and this is the one thing the medium
+    buys us that ordinary material does not have. The answer prints in the teacher copy only —
+    a prediction whose answer is on the same page is not a prediction."""
+    if not items:
+        return ""
+    body = []
+    for it in items:
+        body.append(tex_escape(it.get("prompt")))
+        if with_answers and it.get("answer"):
+            body.append("{\\small\\itshape\\color{inkgray}Answer: "
+                        + tex_escape(it["answer"]) + "}")
+    return ("\\par\\medskip\\noindent\n"
+            "\\colorbox{accent!6}{%\n"
+            "\\begin{minipage}{\\dimexpr\\linewidth-2\\fboxsep\\relax}\n"
+            "\\textbf{\\textcolor{accent!70!black}{Predict first.}} "
+            + "\n\n".join(body) + "\n\\end{minipage}}\\par\\medskip")
+
+
+def _checkpoint_block(step, n: int, with_answers: bool = False) -> str:
+    """The rung of the staircase, printed where that step actually ends.
+
+    Naming three steps at the top of the document tells a reader where the rungs are without
+    ever making them stand on one. This is the difference between a signpost and a scaffold:
+    each step closes with something that has to be answerable before the next one starts."""
+    if not step or not step.get("check"):
+        return ""
+    ans = ""
+    if with_answers and step.get("answer"):
+        ans = ("\\\\[2pt]{\\small\\itshape\\color{inkgray}Answer: "
+               + tex_escape(step["answer"]) + "}")
+    return ("\n\n\\par\\noindent\n"
+            "\\colorbox{accent!5}{%\n"
+            "\\begin{minipage}{\\dimexpr\\linewidth-2\\fboxsep\\relax}\n"
+            f"\\textbf{{\\textcolor{{accent!70!black}}{{Check before you go on --- step {n}: "
+            f"{tex_escape(_sentence_case(step.get('title')))}}}}} "
+            + tex_escape(step["check"]) + ans + "\n\\end{minipage}}\\par\\medskip")
+
+
+def _qa_list_block(heading: str, items, with_answers: bool = False, lead: str = "",
+                   show_label: bool = False) -> str:
+    """A question list with the answers held back for the teacher copy — shared by the
+    misconception set and the transfer prompt."""
+    if not items:
+        return ""
+    rows = []
+    for q in items:
+        line = "  \\item "
+        if show_label and q.get("misconception"):
+            line += ("{\\scriptsize\\color{inkgray}[" + tex_escape(q["misconception"])
+                     + "]}\\\\\n  ")
+        line += tex_escape(q.get("question"))
+        if with_answers and q.get("answer"):
+            line += ("\\\\\n  {\\small\\itshape\\color{inkgray}Answer: "
+                     + tex_escape(q["answer"]) + "}")
+        rows.append(line)
+    out = f"\\subsection*{{{tex_escape(heading)}}}\n"
+    if lead:
+        out += tex_escape(lead) + "\n"
+    return out + ("\\begin{enumerate}[leftmargin=*,itemsep=4pt]\n" + "\n".join(rows)
+                  + "\n\\end{enumerate}")
+
+
 def _steps_block(steps) -> str:
     """WS-4: the three graded steps this level is built from, printed near the top.
 
@@ -448,13 +550,9 @@ def _steps_block(steps) -> str:
     visible; the bridge at the end of the level then names the rung it hands over to."""
     if not steps:
         return ""
-    def _titled(s):
-        # A step title that is already a question keeps its "?" — appending "." to it gives
-        # the doubled "support?." that the first render showed.
-        t = (s.get("title") or "").strip()
-        return t if t.endswith(("?", ".", "!")) else t + "."
     rows = "\n".join(
-        f"  \\item \\textbf{{{tex_escape(_titled(s))}}} {tex_escape(s.get('goal'))}"
+        f"  \\item \\textbf{{{tex_escape(_sentence_case(s.get('title')))}}} "
+        f"{tex_escape(s.get('goal'))}"
         for s in steps)
     return ("\\subsection*{How this level is built}\n"
             "Three steps, each one reachable from the one before:\n"
@@ -567,22 +665,44 @@ def _material_block(material, stats=None, unreliable=False, seed=None, with_answ
             return blk.get(tier) if tier else None
         return blk
     objectives = _objectives_block(_seed_for("objectives"))
-    steps = _steps_block(_seed_for("tier_steps"))
+    placement = _placement_block(_seed_for("placement"))
+    tier_steps = _seed_for("tier_steps") or []
+    steps = _steps_block(tier_steps)
+    predict = _predict_block(_seed_for("predict_first"), with_answers)
     claims = _claims_block(_seed_for("claims_review"), with_answers)
     relations = _relations_block(_seed_for("relations_display"))
-    worked = _worked_examples_block(_seed_for("worked_examples"))
+    worked = _worked_examples_block(_seed_for("worked_examples"), with_answers)
     honesty = _honesty_block(_seed_for("measurement_honesty"))
+    misconceptions = _qa_list_block(
+        "Common traps", _seed_for("misconceptions"), with_answers,
+        lead="Each of these catches out most readers the first time. Answer before you check.",
+        show_label=with_answers)
+    transfer = _qa_list_block(
+        "The same physics somewhere else", _seed_for("transfer"), with_answers,
+        lead="Nothing below is in this video. If the idea only works on the object you just "
+             "watched, it has not been understood yet.")
     cyu = _cyu_block(_seed_for("check_understanding"), _seed_for("tier_bridge"), with_answers)
     teacher = _teacher_notes_block(_seed_for("teacher_notes")) if with_answers else ""
+
+    # A step's checkpoint prints where that step actually ENDS, so the staircase is something
+    # the reader climbs rather than a map they are shown once and never stand on.
+    checks = {}
+    for i, st in enumerate(tier_steps, 1):
+        if st.get("after") and st.get("check"):
+            checks.setdefault(st["after"], []).append((i, st))
 
     order = _material_order(tier)
     ordered = [h for h in order if h in sections]
     ordered += [h for h in sections if h not in order]  # tolerate extras
     out = []
+    if placement:                        # "is this the right level for you?" comes first of all
+        out.append(placement)
     if objectives:                       # canonical skeleton §2: objectives before Scenario
         out.append(objectives)
     if steps:                            # WS-4: the staircase, before the reader starts climbing
         out.append(steps)
+    if predict:                          # POE — before ANY of the measurement is revealed
+        out.append(predict)
     worked_done = False
     for h in ordered:
         body = (sections.get(h) or "").strip()
@@ -604,12 +724,20 @@ def _material_block(material, stats=None, unreliable=False, seed=None, with_answ
         # §6 worked examples sit right after the concepts/relations section.
         if h == "How the variables are related" and worked:
             out.append(worked); worked_done = True
+        for n, st in checks.get(h, []):
+            out.append(_checkpoint_block(st, n, with_answers))
     if worked and not worked_done:       # relations section absent — don't drop the examples
         out.append(worked)
     if honesty:                          # §8 honesty box, then §9 CYU + tier bridge
         out.append(honesty)
     if claims:                           # WS-4 step C3 — advanced only; empty elsewhere
         out.append(claims)
+        for n, st in checks.get("__CLAIMS__", []):
+            out.append(_checkpoint_block(st, n, with_answers))
+    if misconceptions:                   # confront what the reader probably already believes
+        out.append(misconceptions)
+    if transfer:                         # then move the idea off this one object
+        out.append(transfer)
     if cyu:
         out.append(cyu)
     if teacher:                          # teacher copy only — never in the student edition
