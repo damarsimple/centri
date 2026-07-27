@@ -25,3 +25,7 @@ Apply them when creating a new weekly deck and when editing an existing one.
    replace internal shorthand (module / gate / function names, "seed", "manifest") with plain-language
    descriptions, and give every slide an explicit one-line takeaway. Assume no spoken explanation and
    no reliance on the presenter or a prior slide.
+6. **Short, regular frame titles.** `\frametitle` / `\begin{frame}{...}` is a plain slide title — a
+   concise noun or verb phrase (e.g. "Verifying each measurement", "The accuracy limit: the marker"),
+   *not* a full sentence. The sentence-style summary belongs in the one-line takeaway (rule #5), not
+   in the title.
