@@ -1,0 +1,7 @@
+# lab2-only overlay: the tracked docker-compose.yml publishes the API on the
+# primary box IPs (10.0.0.1 / 192.168.1.13), which do not exist on this host.
+# Use explicitly:  docker compose -f docker-compose.yml -f compose.lab2.yml ...
+services:
+  api:
+    ports: !override
+      - "10.0.0.2:8088:8000"

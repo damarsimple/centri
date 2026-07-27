@@ -1,0 +1,22 @@
+{
+  "tracked_object": {
+    "visual_cues": [
+      "orange knob"
+    ]
+  },
+  "reference_geometry": {
+    "label": "orange knob",
+    "physical_size": 0.05
+  },
+  "object_name": "orange knob",
+  "scene_title": "an orange knob on a park exercise wheel",
+  "rotation_center_frac": [
+    0.5063,
+    0.5089
+  ],
+  "tracking_mode": "object",
+  "display_w": 1080,
+  "display_h": 1920,
+  "video_w": 1080,
+  "video_h": 1920
+}
