@@ -218,6 +218,17 @@ def _first_frame():
 # NOT "tangential velocity", which is our jargon, not the students').
 _QUANTITY_NAMES = {"r": "RADIUS", "v": "LINEAR SPEED",
                    "ω": "ANGULAR SPEED", "a_c": "CENTRIPETAL ACCELERATION"}
+# Basic tier: the SAME four arrows, named in plain words instead of symbols. The picture a
+# beginner sees should carry MORE of the explanation than the one an advanced reader sees, not
+# less — the beginner has the least text to fall back on. Keeping the no-symbols rule is what
+# still separates this tier, so nothing here is a letter (and the on-frame glyphs are replaced
+# by a plain dot, see `plain=` in fig_annotated_image).
+_QUANTITY_NAMES_PLAIN = {
+    "r": "how far out it sits\nfrom the centre",
+    "v": "how fast it travels\nalong the circle",
+    "ω": "how fast it sweeps\nround the centre",
+    "a_c": "the inward pull that\nkeeps it on the circle",
+}
 
 
 def _halo(lw=3.0, color=None):
@@ -234,8 +245,15 @@ def _hex_bgr(h):
     return (int(h[4:6], 16), int(h[2:4], 16), int(h[0:2], 16))
 
 
-def _symbol(ax, xy, text, color, fontsize=17):
-    """The bare SYMBOL, drawn beside its arrow (never on it) in the arrow's own colour."""
+def _symbol(ax, xy, text, color, fontsize=17, plain=False):
+    """The bare SYMBOL, drawn beside its arrow (never on it) in the arrow's own colour.
+
+    ``plain=True`` (basic tier, whose rule is no symbols anywhere) draws a small filled dot in
+    the same place instead: the leader line still has something to land on, so each arrow is
+    still unambiguously joined to its own worded callout, without a letter on the picture."""
+    if plain:
+        ax.plot([xy[0]], [xy[1]], "o", color=color, ms=8, mec="white", mew=1.6, zorder=8)
+        return
     ax.text(xy[0], xy[1], text, color=color, fontsize=fontsize, fontweight="bold",
             va="center", ha="center", zorder=8, path_effects=_halo(3.5, color))
 
@@ -269,7 +287,8 @@ def _place_callouts(ax, items, W, H):
                                         (0.14 if side == "left" else -0.14)))
 
 
-def fig_annotated_image(stats, scene, cols=None):
+def fig_annotated_image(stats, scene, cols=None, plain=False,
+                        out_name="annotated_image.png"):
     """First cropped frame with the fitted orbit and the four circular-motion quantities marked in
     the convention of the P-MAGIC teaching diagram (`image_rotating.png`): every quantity gets its
     own coloured arrow, the SYMBOL sits beside the arrow, and the descriptive name + value live in a
@@ -278,13 +297,23 @@ def fig_annotated_image(stats, scene, cols=None):
     Linear speed v (straight tangent) and angular speed ω (small curved arc) are DIFFERENT arrows —
     the earlier single "curved tangential ω arrow" conflated the two, which is exactly what the
     reference diagram separates. All four arrows spring from one point: the object's real position
-    in the first frame, so the picture reads as "this object, here, right now"."""
+    in the first frame, so the picture reads as "this object, here, right now".
+
+    ``plain=True`` draws the SAME four arrows for the basic tier, but names them in words instead
+    of symbols and quotes only the two values that tier is allowed to meet (the radius in metres
+    and the turn rate as turns per second — never rad/s, never an acceleration). It used to get a
+    stripped frame showing only the radius, which put the least explanation in front of the reader
+    with the least text to fall back on."""
     cal = stats["calibration"]
     cx, cy = cal.get("cx_px"), cal.get("cy_px")
     r_fit_px = cal.get("r_fit_px")
     r_m = cal.get("r_fit_m")
     summ = stats.get("summary") or {}
     a_c, v_m_s = summ.get("mean_ac"), summ.get("mean_v")
+    names = _QUANTITY_NAMES_PLAIN if plain else _QUANTITY_NAMES
+    # Turns per second is the ONLY rate the basic tier may see as a number (rad/s is banned
+    # there), so the turn-rate callout switches unit with the tier rather than dropping out.
+    turns_per_s = (stats.get("period_and_frequency") or {}).get("frequency_hz")
     frame = _first_frame()
     H, W = (frame.shape[0], frame.shape[1]) if frame is not None else (1000, 1000)
     # Colours adapted to this clip's footage, from the same module and the same frames the video
@@ -359,9 +388,9 @@ def fig_annotated_image(stats, scene, cols=None):
                                     shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["r"])), zorder=5)
         r_sym = (cx + rx * 0.52 * r_fit_px + ry * 0.15 * r_fit_px,
                  cy + ry * 0.52 * r_fit_px - rx * 0.15 * r_fit_px)
-        _symbol(ax, r_sym, "r", pal["r"])
+        _symbol(ax, r_sym, "r", pal["r"], plain=plain)
         if r_m is not None:
-            calls.append((r_sym, _QUANTITY_NAMES["r"], _fmt(r_m, 3, "m"), base["r"]))
+            calls.append((r_sym, names["r"], _fmt(r_m, 3, "m"), base["r"]))
 
         # v — straight tangent arrow at the object, pointing the way it travels.
         vlen = 0.78 * r_fit_px
@@ -370,9 +399,11 @@ def fig_annotated_image(stats, scene, cols=None):
                                     lw=2.8, shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["v"])), zorder=5)
         v_sym = (px_ + tx * 0.70 * vlen + ux * 0.24 * r_fit_px,
                  py_ + ty * 0.70 * vlen + uy * 0.24 * r_fit_px)
-        _symbol(ax, v_sym, "v", pal["v"])
-        if v_m_s is not None:
-            calls.append((v_sym, _QUANTITY_NAMES["v"], _fmt(v_m_s, 2, "m/s") + avg, base["v"]))
+        _symbol(ax, v_sym, "v", pal["v"], plain=plain)
+        if plain:
+            calls.append((v_sym, names["v"], "", base["v"]))
+        elif v_m_s is not None:
+            calls.append((v_sym, names["v"], _fmt(v_m_s, 2, "m/s") + avg, base["v"]))
 
         # a_c — straight arrow from the object toward the centre (stopped short of the centre mark).
         ax.annotate("", xy=(px_ - ux * 0.62 * r_fit_px, py_ - uy * 0.62 * r_fit_px),
@@ -381,9 +412,11 @@ def fig_annotated_image(stats, scene, cols=None):
                                     lw=2.8, shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["ac"])), zorder=5)
         ac_sym = (px_ - ux * 0.36 * r_fit_px + tx * 0.24 * r_fit_px,
                   py_ - uy * 0.36 * r_fit_px + ty * 0.24 * r_fit_px)
-        _symbol(ax, ac_sym, "$a_c$", pal["ac"])
-        if a_c is not None:
-            calls.append((ac_sym, _QUANTITY_NAMES["a_c"], _fmt(a_c, 2, "m/s²") + avg, base["ac"]))
+        _symbol(ax, ac_sym, "$a_c$", pal["ac"], plain=plain)
+        if plain:
+            calls.append((ac_sym, names["a_c"], "", base["ac"]))
+        elif a_c is not None:
+            calls.append((ac_sym, names["a_c"], _fmt(a_c, 2, "m/s²") + avg, base["ac"]))
 
         # ω — a SMALL curved arc curling the way it spins. This is the angular quantity: it is about
         # the turning, not about a direction of travel, which is why it is a separate mark from v
@@ -408,19 +441,26 @@ def fig_annotated_image(stats, scene, cols=None):
                                     lw=2.8, shrinkA=0, shrinkB=0,
                                     connectionstyle=f"arc3,rad={-0.35 * s}",
                                     path_effects=_halo(4.5, pal["w"])), zorder=5)
-        _symbol(ax, w_sym, "ω", pal["w"])
-        if omega_val is not None:
-            calls.append((w_sym, _QUANTITY_NAMES["ω"],
+        _symbol(ax, w_sym, "ω", pal["w"], plain=plain)
+        if plain:
+            val = (f"about {_fmt(turns_per_s, 2)} turns each second"
+                   if isinstance(turns_per_s, (int, float)) else "")
+            calls.append((w_sym, names["ω"], val, base["w"]))
+        elif omega_val is not None:
+            calls.append((w_sym, names["ω"],
                           _fmt(abs(omega_val), 2, "rad/s") + avg, base["w"]))
 
         _place_callouts(ax, calls, W, H)
     ax.set_xlim(-g, W + g)
     ax.set_ylim(H, 0)
     ax.set_aspect("equal")
-    ax.set_title(_title(scene, "Scene geometry", width=52))
+    # The plain title must not restate the object — `_title` already appends the scene, and
+    # "What the red phone is doing — red phone on black circular base" says it twice.
+    ax.set_title(_title(scene, "What each arrow means" if plain else "Scene geometry",
+                        width=52))
     ax.axis("off")
     fig.tight_layout()
-    fig.savefig(PLOTS / "annotated_image.png")
+    fig.savefig(PLOTS / out_name)
     plt.close(fig)
 
 
@@ -466,34 +506,16 @@ def fig_trajectory(stats, cols, scene):
     return xp, yp
 
 
-def fig_annotated_image_basic(stats, scene):
-    """Basic-tier annotated frame: just the circular path + the radius, in plain
-    language. No axis/pixel jargon, no vectors — one idea (it goes in a circle, this
-    far out). Reuses first_frame.jpg written by fig_annotated_image."""
-    cal = stats["calibration"]
-    cx, cy = cal.get("cx_px"), cal.get("cy_px")
-    r_fit_px = cal.get("r_fit_px")
-    obj = stats.get("object_name") or scene or "object"
-    frame = _first_frame()
-    fig, ax = plt.subplots(figsize=(6, 6))
-    if frame is not None:
-        ax.imshow(frame)
-    if None not in (cx, cy) and r_fit_px:
-        ax.add_patch(plt.Circle((cx, cy), r_fit_px, fill=False, color="#00E676", lw=2.5))
-        ax.plot([cx], [cy], "+", color="#00E676", ms=14, mew=2)
-        # radius as a labelled arrow from the centre outward (plain words, no symbol). Drawn to
-        # the LEFT to match the main annotated frame — pointing right lands it on the calibration
-        # ruler that often sits off to the side, drawing the eye to a prop nothing mentions (C5).
-        ax.annotate("", xy=(cx - r_fit_px, cy), xytext=(cx, cy),
-                    arrowprops=dict(arrowstyle="->", color="#00E676", lw=2.2))
-        ax.text(cx - r_fit_px / 2, cy, f"radius {_fmt(cal.get('r_fit_m'), 3, 'm')}",
-                color="white", fontsize=12, va="bottom", ha="center",
-                bbox=dict(fc="black", ec="none", alpha=0.6, pad=2))
-    ax.set_title(_title(scene, f"The {obj} moves in a circle"))
-    ax.axis("off")  # a novice doesn't need pixel coordinates
-    fig.tight_layout()
-    fig.savefig(PLOTS / "annotated_image_basic.png")
-    plt.close(fig)
+def fig_annotated_image_basic(stats, scene, cols=None):
+    """Basic-tier annotated frame — the SAME marked-up still the other two tiers get, with every
+    label in plain words instead of symbols.
+
+    It used to draw only the circular path and the radius: one idea, and the least explanation of
+    the three tiers in front of the reader with the least text to fall back on. The figure is
+    where a basic reader does most of the work, so it is the last thing that should be stripped
+    down. What still separates the tier is the no-symbols rule, which `plain=True` keeps."""
+    fig_annotated_image(stats, scene, cols, plain=True,
+                        out_name="annotated_image_basic.png")
 
 
 def fig_trajectory_basic(stats, cols, scene):
@@ -614,7 +636,8 @@ def _smooth_1rev(t, y, stats):
 
 
 def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
-                 hline=None, hline_lbl=None, smooth_trend=False, note=None):
+                 hline=None, hline_lbl=None, smooth_trend=False, note=None,
+                 uncorrected_col=None):
     t = cols.get("time_s")
     y = cols.get(col)
     labels = stats.get("phases", {}).get("phase_labels") or []
@@ -622,12 +645,27 @@ def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
         labels = []
     fig, ax = plt.subplots(figsize=(8, 5))
     _shade_phases(ax, t, labels)
-    if smooth_trend:
-        # Diagnosed per-revolution artifact on a clip long enough to average it out: show the
-        # raw values faintly and the 1-revolution trend boldly (the real physics).
-        ax.plot(t, y, color=colour, lw=0.8, alpha=0.22)
+    # Where we adjust a curve, draw BOTH: the measurement as it came off the video, and what
+    # we corrected it to. The honesty box used to have to make that argument in prose while
+    # the figure beside it drew a single confident line — and the figure is what a student
+    # looks at. Two adjustments qualify, and each names itself in the legend.
+    pre = cols.get(uncorrected_col) if uncorrected_col else None
+    if pre is not None and np.isfinite(np.asarray(pre, float)).any():
+        # (1) The camera-angle correction. The clip was filmed at a slant, so the object
+        # appears to race and stall once per turn; that is the camera position, not the object.
+        # Neutral grey for the "before": it has to be legible enough to read the ripple off,
+        # but it must never compete with the coloured curve that IS the measurement.
+        ax.plot(t, pre, color="#78909C", lw=0.9, alpha=0.9, zorder=2,
+                label="what came off the video")
+        ax.plot(t, y, color=colour, lw=2.0, zorder=3,
+                label="after correcting for the camera angle")
+        ax.legend(fontsize=8, loc="best")
+    elif smooth_trend:
+        # (2) A diagnosed per-revolution artifact on a clip long enough to average it out:
+        # the raw values faint, the one-revolution average bold (the real physics).
+        ax.plot(t, y, color=colour, lw=0.8, alpha=0.30, label="what we measured")
         ax.plot(t, _smooth_1rev(t, y, stats), color=colour, lw=2.6,
-                label="1-revolution trend")
+                label="after averaging over one turn")
         ax.legend(fontsize=8, loc="best")
     else:
         ax.plot(t, y, color=colour, lw=1.6)
@@ -777,10 +815,28 @@ def _annotation_manifest(stats):
                      "and value",
             "annotations": img}
     if r_m is not None:
+        # The basic frame now carries the SAME four marks, named in words and quoting only the two
+        # values that tier may meet (the radius, and the turn rate as turns per second — never
+        # rad/s, never an acceleration value). Keep this list in step with the `plain=True` branch
+        # of fig_annotated_image: the material writer describes the overlays from HERE, so a
+        # manifest that still promises "just the radius" makes the prose contradict the picture.
+        basic_ann = [{"label": "how far out it sits from the centre", "value": _fmt(r_m, 3, "m"),
+                      "target": "double-headed arrow from the centre out to the circular path"},
+                     {"label": "how fast it travels along the circle",
+                      "target": "straight arrow at the object, along the direction it travels"},
+                     {"label": "the inward pull that keeps it on the circle",
+                      "target": "straight arrow from the object pointing inward toward the centre"}]
+        f_hz = (stats.get("period_and_frequency") or {}).get("frequency_hz")
+        basic_ann.insert(2, {
+            "label": "how fast it sweeps round the centre",
+            **({"value": f"about {_fmt(f_hz, 2)} turns each second"}
+               if isinstance(f_hz, (int, float)) else {}),
+            "target": "small curved arrow showing which way it turns"})
         man["annotated_image_basic.png"] = {
-            "shows": "the same photo with just the circular path and how far out the object sits",
-            "annotations": [{"label": "how far out it sits", "value": _fmt(r_m, 3, "m"),
-                             "target": "arrow from the centre outward"}]}
+            "shows": "the same photo of the object on its circular path, with how far out it "
+                     "sits, how fast it travels along the circle, how fast it sweeps round, and "
+                     "the inward pull each marked and named in words (no symbols)",
+            "annotations": basic_ann}
 
     # The basic "turns completed vs time" curve. Described qualitatively (no numbers to quote)
     # so its narration is driven by the grounded motion type, and by the SHAPE the render draws:
@@ -866,22 +922,28 @@ def main() -> int:
     ac_hline_lbl = "clip average" if _omega_is_clip_avg else "stable mean"
 
     fig_annotated_image(stats, scene, cols)
-    fig_annotated_image_basic(stats, scene)  # simplified frame for the basic tier
+    fig_annotated_image_basic(stats, scene, cols)  # same frame, worded labels (basic tier)
     traj_x, traj_y = fig_trajectory(stats, cols, scene)
     fig_trajectory_basic(stats, cols, scene)  # single-colour path for the basic tier
     fig_angle_points_basic(stats, cols, scene, unreliable=diagnosed)  # angle-at-time dots
     # ω(t) with phase bands == the "annotated graph"
+    # On a clip whose camera angle was corrected, kinematics.csv carries the pre-correction
+    # series too — the ω(t) and a_c(t) plots then draw the measurement and the correction
+    # together. a_c is where the difference is largest, because it follows ω squared.
     _series_plot("annotated_graph.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity & phases",
                  TRACE["omega"], hline=stable_omega, hline_lbl=omega_hline_lbl,
-                 smooth_trend=diagnosed, note=per_instant_note)
+                 smooth_trend=diagnosed, note=per_instant_note,
+                 uncorrected_col="omega_rad_s_uncorrected")
     _series_plot("omega_t.png", cols, stats, scene, "omega_rad_s",
                  "angular velocity (rad/s)", "Angular velocity", TRACE["omega"],
-                 hline=stable_omega, hline_lbl=omega_hline_lbl, smooth_trend=diagnosed, note=per_instant_note)
+                 hline=stable_omega, hline_lbl=omega_hline_lbl, smooth_trend=diagnosed,
+                 note=per_instant_note, uncorrected_col="omega_rad_s_uncorrected")
     _series_plot("ac_t.png", cols, stats, scene, "ac_m_s2",
                  "centripetal acceleration (m/s^2)", "Centripetal acceleration",
                  TRACE["ac"], hline=ac_hline, hline_lbl=ac_hline_lbl,
-                 smooth_trend=diagnosed, note=per_instant_note)
+                 smooth_trend=diagnosed, note=per_instant_note,
+                 uncorrected_col="ac_m_s2_uncorrected")
     _series_plot("radius_t.png", cols, stats, scene, "r_m",
                  "radius (m)", "Orbit radius", TRACE["r"], hline=mean_r,
                  hline_lbl="mean", smooth_trend=diagnosed, note=per_instant_note)
