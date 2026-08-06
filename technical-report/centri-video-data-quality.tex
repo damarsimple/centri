@@ -39,7 +39,13 @@ report's first edition missed; marker extent identified as the new limit; \textt
 angle-dependent box quality --- shown by a second-detector ablation to be a property of the footage
 rather than of the tracker --- a trust channel that no longer infers health from the absence of a
 diagnosis; a dropped camera frame now detected from timestamps; and a null distribution for the
-phase-lock statistic, which retracts the claim that \texttt{turntable-3}'s ripple is angle-locked}}
+phase-lock statistic, which retracts the claim that \texttt{turntable-3}'s ripple is angle-locked}\\[0.2em]
+\normalsize \textbf{rev.\ 2026-08-06: the ceiling fans re-shot with a marker, replacing two
+synthesized orbits with one measured trajectory (\S\ref{sec:fan4656}); \texttt{turntable-3}
+withdrawn after three radial teleports this report's own gate could not see
+(\S\ref{sec:tt3-jumps}); a sticky-lock defect in the colour tracker that cost two clips 12--73\% of
+their coverage (\S\ref{sec:stickylock}); and a \textbf{retraction} --- ``an affine ellipse needs
+no un-projection'' is false, and cost a $19.6\%$ ripple on the new clip (\S\ref{sec:affine-retract})}}
 
 \begin{document}
 \maketitle
@@ -145,6 +151,7 @@ tool (\S\ref{sec:survey-bugs}).
 \section{Diagnostic method}
 
 \subsection{Detection gate}
+\label{sec:detection-gate}
 
 For each clip, from the cached trajectory: coverage, the per-frame step distribution, and the
 coefficient of variation of the detected bounding-box area. A rigid object's apparent size is
@@ -158,6 +165,17 @@ below ${\sim}90^\circ$ the point is unambiguous, above $180^\circ$ the spin is a
 unrecoverable at that frame rate. 4029 peaks at $55^\circ$/frame. A pixel threshold cannot
 distinguish a fast object from a teleporting one; only comparison against the physical
 expectation ($\omega r/\mathrm{fps}$) can.
+
+\textbf{Amended 2026-08-06: angular alone is not sufficient either.} The paragraph above is
+right that a fixed pixel bound is wrong, and wrong to conclude that an angular bound is
+therefore right. An angular gate is blind to \emph{radial} displacement by construction, and
+\texttt{turntable-3}'s three $604$--$713$\,px teleports are largely radial: this gate scored that
+clip $\mathtt{Jmp} = 0$ while the marker was flipping between two positions $728$\,px apart, and
+$27\%$ of its taught $a_c$ was the consequence (\S\ref{sec:tt3-jumps}). \textbf{The gate needs
+both bounds --- angular \emph{and} radial --- each relative to the clip's own local median rather
+than to a constant.} A rigid marker on a rigid rig should also hold its radius: a radius CV above
+${\sim}0.1$, or any frame beyond twice the median radius, convicts on its own and needs no
+threshold tuning at all.
 
 \subsection{The harmonic fingerprint}
 \label{sec:fingerprint}
@@ -310,8 +328,11 @@ one, so both are documented as the \emph{context handed to the agent}.
 
 \subsection{Corpus}
 
-Eleven templates, ten distinct videos, approximately six distinct phenomena. Two duplications
-matter for any claim of generality:
+Twelve templates, eleven distinct videos, approximately six distinct phenomena. \textbf{Five
+clips carry material as of rev.\ 2026-08-06} --- \texttt{roundabout-4046},
+\texttt{computerfan-4029}, \texttt{turntable-1}, \texttt{turntable-2} and the re-shot
+\texttt{fan-4656}; the rest are parked, superseded or withdrawn (Table~\ref{tab:corpus}). Two
+duplications matter for any claim of generality:
 
 \begin{itemize}
   \item \texttt{base-template-flick} and \texttt{basetemplate-turntable-3} are the
@@ -346,18 +367,32 @@ roundabout-4046 & black ball & 100 & 0 & 0.23 & \ok & 18.6 & 1.124 & $27.1^\circ
 bicycle & red object & 100 & 0 & 0.18 & \ok & 6.4 & 1.035 & $15.0^\circ$ & 2.96 & 0.141 & \textcolor{warn}{unexplained} \\
 turntable-1 & red phone & 100 & 0 & 0.17 & \ok & 2.6 & 1.035 & $14.9^\circ$ & 0.76 & 0.159 & clean (noise) \\
 turntable-2 & red phone & 100 & 0 & 0.21 & \ok & 1.4 & 1.020 & $11.3^\circ$ & --- & --- & \textcolor{warn}{\textbf{too short}} \\
-turntable-3 & red phone & 100 & 0 & 0.24 & \ok & 1.8 & 1.002 & $3.8^\circ$ & --- & --- & \textcolor{warn}{\textbf{too short}} \\
+turntable-3 & red phone & 100 & \textbf{3}$^\P$ & 0.24 & \ok & 1.8 & 1.002 & $3.8^\circ$ & --- & --- & \textcolor{warn}{\textbf{WITHDRAWN}} \\
 flick & red phone & \multicolumn{10}{l}{\emph{byte-identical to turntable-3 --- same clip}} \\
-fan-4027 & fan blade & 100 & 0 & 0.00 & \ok & 26.1 & 1.000 & $0.0^\circ$ & 2.23 & 0.121 & synthesized \\
-fan-4028 & fan blade & 100 & 0 & 0.00 & \ok & 62.5 & 1.000 & $0.0^\circ$ & 18.98 & 0.114 & synthesized \\
-computerfan-4029 & red marker & 86.9$^\ddag$ & 0$^\S$ & 0.30 & \ok & 6.7 & 1.021 & $11.8^\circ$ & 1.40 & \textbf{0.088} & \textbf{clean} \\
+fan-4027 & fan blade & 100 & 0 & 0.00 & \ok & 26.1 & 1.000 & $0.0^\circ$ & 2.23 & 0.121 & superseded \\
+fan-4028 & fan blade & 100 & 0 & 0.00 & \ok & 62.5 & 1.000 & $0.0^\circ$ & 18.98 & 0.114 & superseded \\
+\textbf{fan-4656} & yellow card & \textbf{99.99} & \textbf{0} & 0.43 & \ok & \textbf{190.8} & 1.215 & $34.5^\circ$ & 0.21 & --- & \textbf{measured} \\
+computerfan-4029 & red marker & 99.3$^\ddag$ & 0$^\S$ & 0.30 & \ok & 6.7 & 1.021 & $11.8^\circ$ & 1.40 & \textbf{0.088} & \textbf{clean} \\
 fan-doll & fan blade & 100 & 93 & 0.61 & \susp & --- & --- & --- & --- & --- & wrong object \\
 roundabout-4048 & black knob & 100$^\ast$ & 137 & 2.08 & \susp & --- & --- & --- & --- & --- & \textbf{archived} \\
 \bottomrule
 \end{tabular}}
-\caption{The corpus under one diagnostic. $^\ddag$4029's missing 13\% is one contiguous run at the end where the fan leaves frame. $^\S$Its 153 ``jumps'' were real 4\,rev/s motion mis-flagged by a fixed 100\,px threshold; the angular step peaks at $55^\circ$/frame. $^\ast$4048 reports \texttt{track\_coverage: 1.0}
-while being wrong in $\sim$38\% of frames: \textbf{coverage is not correctness}. ``Jmp'' counts
-frame-to-frame steps over 100\,px; ``aCV'' is the coefficient of variation of detected box area.}
+\caption{The corpus under one diagnostic, \textbf{as of rev.\ 2026-08-06}.
+$^\ddag$4029's coverage was $86.9\%$ until the sticky-lock fix (\S\ref{sec:stickylock}) recovered
+$102$ frames; the ``missing 13\%'' explanation in earlier revisions --- one contiguous run where
+the fan leaves frame --- was \textbf{wrong}, and the frames were being discarded by our own
+temporal gate. $^\S$Its 153 ``jumps'' were real 4\,rev/s motion mis-flagged by a fixed 100\,px
+threshold; the angular step peaks at $55^\circ$/frame. $^\P$turntable-3's three jumps are
+$604$--$713$\,px and were scored $0$ by the angular gate that replaced the pixel one: they are
+largely \emph{radial}, and the tangential component lands at $85$--$86^\circ$ against a
+$90^\circ$ bound (\S\ref{sec:tt3-jumps}). $^\ast$4048 reports \texttt{track\_coverage: 1.0}
+while being wrong in $\sim$38\% of frames: \textbf{coverage is not correctness}.
+``Jmp'' counts frame-to-frame steps over 100\,px; ``aCV'' is the coefficient of variation of
+detected box area --- high on fan-4656 because the card is a large rotating rectangle, which is
+why its size is read with \texttt{minAreaRect} and not from the axis-aligned box.
+\textbf{Corpus status:} the five clips carrying material are roundabout-4046, computerfan-4029,
+turntable-1, turntable-2 and fan-4656. turntable-3 is withdrawn, fan-4027/4028 are superseded by
+fan-4656, and fan-doll/roundabout-4048 were never usable.}
 \label{tab:corpus}
 \end{table}
 
@@ -661,8 +696,11 @@ and $\theta$ needs no correction.}
 \label{fig:turntable1}
 \end{figure}
 
-\textbf{Verdict: GOLD (as-is).} A negative control: tilted $14.9^\circ$ yet affine, so $\theta$ is
-already correct and a gate must provably \emph{not} fire on it.
+\textbf{Verdict: GOLD (as-is).} A negative control: tilted $14.9^\circ$ yet affine, and round to
+$3.4\%$, so $\theta$ is correct to within the noise and a gate must provably \emph{not} fire on
+it. (Tightened 2026-08-06: the original wording said $\theta$ ``needs no correction'' \emph{because}
+the view is affine. That reasoning is retracted in \S\ref{sec:affine-retract}; the verdict is
+unchanged, but it rests on the clip being nearly \emph{round}, not on it being affine.)
 
 \subsection{turntable-2, turntable-3 / flick --- undecidable, not clean}
 \label{sec:corpus-tt}
@@ -822,11 +860,74 @@ already spread the bad sample thin. We report this because our first measurement
 on raw unsmoothed gradients, suggested it accounted for the whole feature; on the delivered signal it
 does not. The correction is worth having as a data-integrity guard, not as a diagnosis.
 
-\textbf{Verdict: GOLD for time-averages, \und{} per-instant.} Cleared of perspective by the static
-hub offset, and now cleared of any tracker-specific defect, but carrying a ripple of $\approx 17\%$
-of mean $\omega$ that no mechanism we can test accounts for, over too few revolutions to characterise
-(\S\ref{sec:phaselocknull}). The pipeline now says so rather than inferring health from the absence
-of a diagnosis (\S\ref{sec:trustchannel}).
+\textbf{Verdict (superseded 2026-08-06): WITHDRAWN.} The verdict below stood until a jump sweep
+found that the tracked point teleports. It is kept for the record, then overturned.
+
+\begin{quote}
+\emph{GOLD for time-averages, \und{} per-instant. Cleared of perspective by the static hub offset,
+and now cleared of any tracker-specific defect, but carrying a ripple of $\approx 17\%$ of mean
+$\omega$ that no mechanism we can test accounts for, over too few revolutions to characterise
+(\S\ref{sec:phaselocknull}).}
+\end{quote}
+
+\subsubsection{turntable-3 withdrawn: three teleports this report's own gate could not see}
+\label{sec:tt3-jumps}
+
+The tracked marker's median step is $\mathbf{1.44}$\,px. Three times it moves
+$\mathbf{604}$, $\mathbf{614}$ and $\mathbf{713}$\,px in a single frame, at $t = 0.85$, $1.74$
+and $2.07$\,s, flipping between two positions $728$\,px apart. \textbf{One of those lands inside
+the active window}, so $18$ of $106$ active samples are contaminated. The $21$-frame smoothing
+spreads each step into a symmetric ramp ($\approx\pm12$ frames), which is why they render as
+mountains rather than steps --- and why $\omega$ climbs $0 \to 10.2$\,rad/s over an interval in
+which the tracked position is frozen to $0.1$\,px.
+
+\textbf{Effect on the delivered numbers: mean $a_c$ $7.45 \to 5.85$, max $31.06 \to 18.12$.} The
+worksheets taught $7.45$, which is $\mathbf{27\%}$ above the jump-free value. The clip is
+withdrawn from the corpus rather than repaired.
+
+\paragraph{Why the gate in \S\ref{sec:detection-gate} scored this clip \texttt{Jmp = 0}.}
+This is the more useful finding, because it is about the instrument rather than the clip.
+
+\begin{itemize}
+  \item \textbf{The jumps are radial, not tangential.} The marker's orbit radius is $296$\,px
+  median; across these three frames it goes $244 \to 687$, $581 \to 241$, $241 \to 576$\,px. The
+  gate measures \emph{angle swept per frame}. A displacement along the radius sweeps almost no
+  angle, so an angular gate is blind to it \emph{by construction}.
+  \item \textbf{And they land just under the threshold anyway.} The three frames sweep $86.0$,
+  $86.1$ and $85.0^\circ$ --- against a gate that fires above $90^\circ$. Even the tangential
+  component missed, by four degrees.
+  \item \textbf{The gate this replaced would have caught all three.} The original fixed
+  $100$\,px rule flags exactly these three frames and nothing else on this clip. It was replaced
+  (\S\ref{sec:detection-gate}) because it falsely accused \texttt{computerfan-4029}, where a
+  correctly tracked marker moves $131$\,px per frame.
+\end{itemize}
+
+So the corpus was swept with a gate that could not see this failure mode, and the previous gate
+could not see the other one. \textbf{Neither bound is sufficient alone: a step is suspicious if
+it is large in \emph{angle} or large \emph{radially}, and ``large'' has to be relative to the
+clip's own local median, not a fixed pixel count.} A cheap sufficient statistic that would have
+caught it independently: this clip's radius has $\mathrm{CV} = 0.386$ and $55$ frames sit beyond
+twice the median radius --- on a rigid marker on a rigid turntable, that alone convicts.
+
+\textbf{Nothing in the delivered pipeline rejects a jump.} The sweep that found these was written
+by hand. A guard remains unbuilt, and it is the top engineering recommendation of this revision
+(\S\ref{sec:recs}).
+
+\paragraph{Two effects that were never separated, and now cannot be.}
+\begin{enumerate}
+  \item The sensor validation was run on \texttt{job\_turntable-3-RECT} ($r_{\mathrm{fit}} =
+  0.1477$\,m) while the shipped worksheets came from the unrectified workspace ($0.2037$\,m) --- a
+  $38\%$ radius gap. Since $a_c \propto r$, rectification and jump-rejection may be
+  double-counting one error or may be two independent ${\sim}30\%$ errors.
+  \item The mid-coast speed-up ($v: 0.73 \to 1.92$\,m/s during a coast-down) sits \emph{outside}
+  every jump-contaminated window and remains unexplained.
+\end{enumerate}
+
+\textbf{The cost of the withdrawal is larger than the clip.} \texttt{turntable-3} was the only
+clip with a paired inertial trace (\texttt{IMG\_3075.csv}), so the project's single sensor-based
+validation goes with it. The nearest replacement --- \texttt{fan-4656}'s blade-pass cross-check
+(\S\ref{sec:fan4656}) --- is independent of both the marker and the tracker, but it is
+video-derived, not a sensor. That is a weaker claim and is reported as one.
 
 \subsection{fan-4027, fan-4028 --- the synth fabricates the ends; measurement makes them SILVER}
 \label{sec:fans}
@@ -996,6 +1097,112 @@ and teachable, but the per-frame \emph{trajectory} is reconstructed from the rat
 blurred, identical-blade rotor exposes no resolvable point to track. Teach the numbers freely;
 present the orbit as a model, never as measured data (\S\ref{sec:golden}).
 
+\textbf{Superseded 2026-08-06.} Both clips are withdrawn from the corpus and replaced by
+\texttt{fan-4656} (\S\ref{sec:fan4656}), which carries a marker large enough to track. The
+verdict above was never wrong --- the rate really is measured, the trajectory really is
+reconstructed --- but a SILVER clip whose orbit is drawn on the frame as though it were observed
+is a standing invitation to misread it, and the fix was one piece of card.
+
+\subsection{fan-4656 --- the re-shoot: a measured orbit, and a rate validated without a sensor}
+\label{sec:fan4656}
+
+\textbf{Scene.} The same five-blade ceiling fan, re-shot with a \textbf{yellow card taped along
+one blade}. $1920\times1080$ at $59.94$\,fps, $230$\,s, $13{,}781$ frames --- $2.3\times$ longer
+than any clip previously processed, and the only clip in the corpus that spins up, holds a speed,
+changes speed setting, coasts, \emph{and} comes to rest inside the recording.
+
+\textbf{Context handed to the agent.} \texttt{tracking\_mode: color}; cue \texttt{"yellow
+marker"}; \texttt{tracking\_config} $\{$\texttt{hsv\_lo} $[10,90,90]$, \texttt{hsv\_hi}
+$[35,255,255]$, \texttt{roi\_radius: 330}, \texttt{min\_area: 300}$\}$ --- and deliberately
+\textbf{no} \texttt{max\_step} (\S\ref{sec:stickylock}).
+
+\paragraph{Detection.} The marker blob covers $11$--$12$k px against a next-largest in-ROI blob of
+$\mathbf{11}$\,px: a separation of roughly $1000{:}1$. Coverage is $\mathbf{99.99\%}$ with
+$\mathbf{100\%}$ of detections on the orbit and \textbf{zero} steps above $8\times$ the clip's
+median. The marker sweeps at most $34.3^\circ$/frame against the $180^\circ$ Nyquist limit --- a
+$5\times$ margin, where the old \texttt{frequency}-mode fans had no resolvable point at all.
+
+Three of the four re-shot takes were rejected on measurement, not taste: one is $2.7$\,s of a
+face; one is handheld portrait with wooden ceiling louvres inside the marker's hue band, giving
+only $37\%$ of detections on the orbit; one jumps to a wooden window frame $22$ times.
+
+\paragraph{The rate, validated without a sensor.} $\omega$ was measured a second time by an
+\textbf{entirely independent route}: the intensity of a single $12\times12$\,px patch at $0.6r$,
+Fourier-transformed, dominant peak divided by five blades. This uses \emph{no marker and no
+tracker}.
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\begin{tabular}{lrrr}
+\toprule
+Window & Marker track (rad/s) & Blade-pass FFT (rad/s) & Difference \\
+\midrule
+$10$--$22$\,s  & $11.043$ & $11.678$ & $-5.44\%^\dag$ \\
+$44$--$56$\,s  & $7.288$  & $7.224$  & $+0.88\%$ \\
+$78$--$90$\,s  & $6.199$  & $6.190$  & $\mathbf{+0.16\%}$ \\
+$112$--$124$\,s & $6.172$ & $6.170$  & $\mathbf{+0.03\%}$ \\
+$146$--$158$\,s & $5.046$ & $4.997$  & $+0.99\%$ \\
+$180$--$192$\,s & $1.331$ & $1.335$  & $-0.34\%$ \\
+\midrule
+$214$--$226$\,s & $\mathbf{0.016}$ & $\mathbf{4.690}$ & \emph{see below} \\
+\bottomrule
+\end{tabular}
+\caption{Two unrelated measurement principles agreeing to under $1\%$ on every steady window.
+$^\dag$The first row spans the spin-up, so $\omega$ changes across the window and the two methods
+average it differently; it is not a disagreement about a value.}
+\label{tab:bladepass}
+\end{table}
+
+\textbf{The last row is a result, not a failure.} The fan is stationary. The marker track says so;
+the blade-pass FFT reports $4.69$\,rad/s anyway. That is the \texttt{frequency}-mode rate floor
+--- the defect that made \texttt{fan-4027}/\texttt{4028} unsafe --- measured directly, on the same
+frames, against a method that gets it right. It is the strongest single argument for the re-shoot,
+and it could not have been made without a clip that comes to rest on camera.
+
+\textbf{This does not replace a sensor.} Both legs are video. What Table~\ref{tab:bladepass}
+establishes is that the \emph{marker-tracking} leg is not introducing rate error --- a narrower
+claim than the withdrawn \texttt{turntable-3} gyroscope comparison made, and the honest one now
+available (\S\ref{sec:tt3-jumps}).
+
+\paragraph{Geometry: a single clean tilt.} The orbit fits an ellipse with semi-axes
+$260.0/214.2$\,px, axis ratio $\mathbf{0.823}$ --- about $34.5^\circ$ off face-on. Decomposing the
+radial residual against orbital phase gives $1/\mathrm{rev} = 4.1$\,px against $2/\mathrm{rev} =
+19.3$\,px: almost pure tilt, with negligible decentering. This is the cleanest instance of the
+$2/\mathrm{rev}$ signature in the corpus, and the clip on which the false ``affine ellipses need
+no un-projection'' claim finally bit (\S\ref{sec:affine-retract}).
+
+\paragraph{Scale: the card is the ruler.} No ruler is legible at ceiling distance, and none was
+needed. Three tape measurements --- hub to card inner edge $31$\,cm, card $25\times18.5$\,cm, hub
+to blade tip ${\approx}51$\,cm --- initially disagreed with the pixels by up to $38\%$. Two facts
+resolved it, both confirmed against the footage:
+
+\begin{enumerate}
+  \item \textbf{The card lies along the blade}, its long axis $4.2^\circ$ off radial (median over
+  $166$ frames), so its $25$\,cm runs radially: the card covers a \emph{span}, not a point.
+  \item \textbf{The card's outer edge is the blade tip.} Predicted $R_c + L/2 = 260.0 + 69.5 =
+  329.5$\,px against a blade-tip ellipse semi-major of $319.3$\,px measured independently from
+  $800$ tip points --- agreeing to $3.2\%$.
+\end{enumerate}
+
+So the card occupies the outer $25$\,cm of the blade: inner edge $31$\,cm, \textbf{centre
+${\approx}44$\,cm}, outer edge at the tip. Least-squares over the two directly-measured spans
+gives $\mathrm{px\_per\_m} = \mathbf{591}$, and the chain closes: $r_{\mathrm{fit}} = 0.4400$\,m
+against a tape reading of $0.44$.
+
+\textbf{A $40\%$ calibration error was caught by that reconciliation.} The sidecar first read the
+$31$\,cm as hub-to-card-\emph{centre} when it is hub-to-card-\emph{inner-edge}, giving
+$\mathrm{px\_per\_m} = 839$ against the correct $591$ --- every SI length $29\%$ too small, and
+$a_c$ with it. The general lesson restates Eq.~\eqref{eq:calib}: \emph{``distance to the marker'' is
+ambiguous the moment the marker is larger than a point}, and the two spans that form
+$\mathrm{px\_per\_m}$ must describe the same one.
+
+\textbf{Verdict: GOLD for rate; GOLD for scale to ${\pm}5\%$.} $\omega$, $T$, $f$ and every ratio
+are scale-free and independently cross-checked to under $1\%$. The SI values rest on
+$\mathrm{px\_per\_m}$ bounded at $556$--$615$ by its two anchors. The first clip in this corpus
+whose orbit is measured, whose rate is corroborated, and whose scale is derived from more than
+one span.
+
 \subsection{computerfan-4029 --- clean; our own gate accused it falsely}
 \label{sec:4029}
 
@@ -1027,7 +1234,12 @@ $180^\circ$ aliasing limit, and all statistics are restricted to the active burs
 \caption{The formulas of \S\ref{sec:howcomputed} on \texttt{computerfan-4029}: centre $c$ at the fan
 hub, tracked point $p$ on the red blade marker (\texttt{color} mode, per frame). The angular step
 $\omega r/\mathrm{fps}=55^\circ$ stays well below the $180^\circ$ aliasing limit, so the
-$131$\,px pixel steps are real $4$\,rev/s motion --- not the teleports the fixed-pixel gate alleged.}
+$131$\,px pixel steps are real $4$\,rev/s motion --- not the teleports the fixed-pixel gate alleged.
+\emph{Provenance:} rendered from the pre-sticky-lock run \texttt{job\_computerfan-4029} (coverage
+$86.9\%$), which is archived; the coverage and kinematics quoted elsewhere in this report come from
+its successor \texttt{job\_computerfan-4029-2} ($99.3\%$). The two share footage, hub and orbit
+radius, so the geometry drawn here is the geometry that clip still has --- but the numbers in this
+caption are the earlier run's.}
 \label{fig:frame4029}
 \end{figure} Coverage 86.9\%, ``153 steps over 100\,px'', step p99 of
 268.9\,px against a median of 6.7\,px. The gate called it \susp{} and an earlier draft of this
@@ -1230,8 +1442,177 @@ undo. The rectification did nothing on four clips because \emph{nothing was wron
 Tilt does not predict this. All five clips are tilted, three of them by $15$--$27^\circ$. Tilt
 determines only that the orbit \emph{images} as an ellipse; whether that ellipse is an affine or
 a projective image of the circle depends on the camera's distance relative to the orbit --- 4046
-was shot close with a wide phone lens, the others flatter. \textbf{An affine ellipse needs no
-un-projection: $\theta$ read from a correctly-centred ellipse is already right.}
+was shot close with a wide phone lens, the others flatter.
+
+\subsubsection*{Retraction (2026-08-06): ``an affine ellipse needs no un-projection'' is false}
+\label{sec:affine-retract}
+
+The sentence that closed this subsection --- \emph{``An affine ellipse needs no un-projection:
+$\theta$ read from a correctly-centred ellipse is already right''} --- \textbf{is wrong, and is
+withdrawn.} It conflates two different things: the \emph{hub offset} question (is there
+perspective convergence to undo?) and the \emph{foreshortening} question (is the image angle the
+true angle?). A near-zero hub offset settles the first and says nothing about the second.
+
+The arithmetic is immediate. A circle spun uniformly and imaged affinely with axis ratio $k$
+gives image points $(r\cos\phi,\; kr\sin\phi)$, so
+\[
+\theta = \operatorname{atan2}(k\sin\phi,\ \cos\phi),
+\qquad
+\frac{d\theta}{d\phi} = \frac{k}{\cos^{2}\phi + k^{2}\sin^{2}\phi},
+\]
+which swings between $k$ and $1/k$ \emph{twice per revolution}. The image angular velocity of a
+perfectly uniform spin therefore ripples by $\pm\tfrac{1}{2}(1/k - k)$ --- and that ripple is a
+$2/\mathrm{rev}$ signature, exactly the one \S\ref{sec:fingerprint} attributes to tilt.
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\begin{tabular}{lrrr}
+\toprule
+Clip & Axis ratio & $\omega$ swing & Ripple \\
+\midrule
+turntable-3 ($3.8^\circ$)      & 0.998 & $0.998$--$1.002\times$ & $0.2\%$ \\
+turntable-2                    & 0.980 & $0.980$--$1.020\times$ & $2.0\%$ \\
+turntable-1                    & 0.966 & $0.966$--$1.035\times$ & $3.4\%$ \\
+\textbf{fan-4656} ($34.5^\circ$) & \textbf{0.823} & $0.823$--$1.215\times$ & $\mathbf{19.6\%}$ \\
+\bottomrule
+\end{tabular}
+\caption{Why the false claim survived. Every clip this report was written about is round to
+within $3.5\%$, so the error it licensed was smaller than the noise it sat in. The re-shot fan is
+the first clip tilted enough for it to bite.}
+\label{tab:affine-ripple}
+\end{table}
+
+\textbf{Why it went unnoticed, and what that says about the method.} The claim was not tested; it
+was \emph{inferred} from the observation that rectification did nothing on four clips. But those
+four did nothing because they were nearly round (Table~\ref{tab:affine-ripple}), not because
+affine images need no correction. The evidence was consistent with the true rule and with the
+false one, and the report chose the false one because it was the tidier story. This is the same
+error as \S\ref{sec:method-note}, one level up: \emph{a statistic that cannot distinguish two
+hypotheses is not evidence for either.}
+
+\textbf{The correction, in code.} \texttt{rectify()} gated only on hub offset, having measured
+\texttt{axis\_ratio} two lines earlier and discarded it, so a centred-but-tilted orbit was
+returned untouched. It now takes an \textbf{affine branch}: when the hub offset is below
+$20$\,px \emph{and} the axis ratio is below $0.95$, the ellipse is circularised from its own
+conic --- no vanishing line is needed, and the map preserves handedness, so the sign of $\omega$
+and the reported rotation direction cannot flip. On \texttt{fan-4656} the radial residual falls
+$7.29\% \to 3.41\%$. The blast radius is exactly one clip: \texttt{roundabout-4046} (hub offset
+$95.7$\,px) stays on the perspective path, \texttt{turntable-2} ($0.992$) is round enough to skip,
+\texttt{turntable-1} has no hub mark at all.
+
+\textbf{The rule, restated correctly.} \emph{Hub offset selects the \underline{method}}
+(projective if large, affine if small); \emph{axis ratio decides whether there is anything to
+\underline{do}}. The original subsection heading stands --- perspective is still not systematic,
+and the hub offset still predicts which clip needs un-projection. What was wrong is the inference
+that the remaining clips needed nothing at all.
+
+\subsection{A temporal gate that could not let go}
+\label{sec:stickylock}
+
+The colour tracker accepts a \texttt{max\_step} bound: once locked, only candidates within that
+radius of the previous centroid are eligible, which is what stops a marker jumping to a
+same-coloured blade. The bound is right. Its release was not.
+
+\textbf{When no candidate fell inside the bound, the frame was emitted as a miss --- and the lock
+was left untouched.} So one step longer than \texttt{max\_step} froze the reference point at a
+stale position, and the marker could only be re-acquired when its orbit carried it back within
+\texttt{max\_step} of that frozen point: \emph{once per revolution}. A brief occlusion, a blurred
+frame that fell under \texttt{min\_area}, or a genuine speed-up all triggered it.
+
+The cost, measured:
+
+\begin{center}
+\footnotesize
+\begin{tabular}{lrrl}
+\toprule
+Clip & Coverage (sticky) & Coverage (fixed) & Note \\
+\midrule
+\texttt{fan-4656} (\texttt{max\_step: 90}) & $26.9\%$ & $\mathbf{92.6\%}$ & the config that exposed it \\
+\texttt{computerfan-4029} (\texttt{max\_step: 300}) & $86.9\%$ & $\mathbf{99.3\%}$ & shipped this way for weeks \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{computerfan-4029} is the instructive row: it is a \textbf{corpus clip that had been
+scored, reported and taught from} at $86.9\%$ coverage, and nothing flagged it, because a
+temporal gate discarding frames looks exactly like an object that is hard to see. The $102$
+recovered frames all lie on the orbit, and recovering them moved its mean $a_c$ by
+$\mathbf{+21\%}$ ($35.84 \to 43.29$\,m/s$^2$).
+
+\textbf{The fix} is a \texttt{relock\_after} count (default $5$): a lock that has explained
+nothing for that many consecutive frames is dropped, and the next frame re-acquires on score
+alone. On every frame the old code already had, the new code returns the \emph{identical} point
+--- maximum positional difference $0.0000$\,px --- so the change is provably additive. The tracker
+now also reports \texttt{n\_relocks}, which is the diagnostic that was missing: a healthy clip
+relocks zero times, and a large count means the bound is too tight for the motion.
+
+\textbf{Coverage is not correctness, restated.} \S\ref{sec:coverage} makes that point about a
+tracker that reports high coverage while following the wrong object. This is its mirror: a
+tracker reporting \emph{low} coverage while following the right one, and being believed.
+
+\subsection{A guard that asked the wrong witness: overlays drawn one crop offset low}
+\label{sec:cropbounds}
+
+\S\ref{sec:coordbug} recorded a trajectory that had been mis-declared into the wrong coordinate
+space, and the guard added to catch it: the contract measures the trajectory against the centre
+under each reading of \texttt{coordinate\_space} and keeps the self-consistent one, because a
+trajectory and a centre in the same space trace a steady radius. That guard has now failed in the
+direction it could not see, on \texttt{computerfan-4029-2}.
+
+\textbf{What shipped.} Every frame overlay for the clip --- including
+\texttt{annotated\_image\_basic.png}, which is embedded in all three student worksheets --- placed
+the ``centre of rotation'' on a fan \emph{blade}. The orbit circle ran off the fan onto the desk,
+and the $r$, $v$ and $a_c$ arrows sat at the bottom of that circle, nowhere near the marker they
+label. A student reading the basic tier was shown an inward pull pointing at the table.
+
+\textbf{What did not happen.} No taught number was wrong. The trajectory and the centre were
+displaced \emph{together}, so every relative quantity survived intact. Fitting the marker directly
+off the cropped video (RANSAC, $650$ inliers, radius CV $0.014$) gives a centre of
+$(552.8, 574.4)$ and a radius of $306.9$\,px against the shipped $305.3$\,px --- $0.5\%$. After the
+fix, \texttt{mean\_omega} is unchanged to thirteen significant digits. Exactly one number moved:
+\texttt{cy\_px}, from $902.4$ to $574.4$, which is \texttt{roi\_crop.y\_off} $=328$ to the pixel.
+
+\textbf{Why the guard chose wrong.} The radius test compares the trajectory against the centre, so
+it is only ever as good as the centre it is handed. Here Step 5 supplied a \texttt{bootstrap}
+estimate sitting $260$\,px from the hub. Both readings were therefore bad --- radius spread $0.462$
+as declared against $0.243$ untouched --- and the test did what it was written to do: it took the
+better of two wrong answers, and left the trajectory in display space. A RANSAC refit then moved
+the centre onto that trajectory. The result was internally consistent, correct in every physical
+quantity, and wrong only against the picture.
+
+\textbf{Why nothing downstream caught it.} \texttt{verify\_figures.py} was built for this exact bug
+class --- it recomputes the plotted extent from \texttt{kinematics.csv} and fails a figure drawn in
+full-frame coordinates. But \texttt{kinematics.csv} was itself in the wrong space, so the check
+compared the error against itself and passed. It verified consistency, not correctness. This is
+the tracker-checker lesson (\S\ref{sec:golden}) in a new place: \textbf{a self-consistent frame of
+reference cannot be audited from inside itself}, and every check we had lived inside it. The one
+witness outside it was the video, and nothing was asking it.
+
+\textbf{The fix} is a precondition that never consults the centre. A trajectory measured on the
+cropped video is bounded by that video's own frame by construction --- a detector cannot report a
+centroid at a pixel the file does not contain. So points outside the crop rectangle \emph{prove}
+display space, whatever \texttt{coordinate\_space} claims and wherever the centre sits. On this
+clip the trajectory reaches $y = 1384$ in a crop $1244$ tall. The bound is deliberately
+asymmetric: it fires only when decisive ($>4$\,px, $\geq 3$ points, so one freak detection cannot
+flip it) and is otherwise silent, leaving the radius test in charge for clips whose trajectory
+fits inside the crop --- which is most of them, since a small crop offset hides a display-space
+orbit completely (turntable-1, turntable-2). It is a proof where it applies and an abstention
+everywhere else, which is the opposite shape from the statistic it now outranks.
+
+\textbf{Blast radius, measured rather than argued.} At the contract boundary the trajectory and
+centre are bit-identical for five of six workspaces and changed for \texttt{4029-2} alone. Re-run
+end to end, \texttt{stats.json} and \texttt{kinematics.csv} are byte-identical (unchanged SHA-256)
+for \texttt{turntable-1}, \texttt{turntable-2}, \texttt{roundabout-4046} and
+\texttt{computerfan-4029}. The rule does fire on the latter two --- $15$ points $16$\,px outside on
+4046, $8$ points $147$\,px outside on 4029 --- but both were already being cropped, so it confirms
+a decision rather than changing one. That is the useful reading: the clips that were right were
+right \emph{for the reason the new rule states}, and only the one that was wrong moves.
+
+\textbf{What this says about the crop.} The ROI crop is fitted to contain about $99.3\%$ of the
+trajectory, not all of it. The small tail it deliberately leaves outside is what makes the rule
+work at all --- the defect was detectable only because the crop is not generous. A future change
+that padded the crop until it always contained the whole orbit would silently disarm this check.
 
 \subsection{How much phase-lock does pure noise produce? A null distribution}
 \label{sec:phaselocknull}
@@ -1378,6 +1759,7 @@ backends because its toy is semantically hard \emph{and} cream-on-cream --- whic
 switching tracker did not save it, and only a physical marker will.
 
 \subsection{Coverage is not correctness}
+\label{sec:coverage}
 
 \texttt{roundabout-4048} reports \texttt{track\_coverage: 1.0} while being wrong in
 $\sim$38\% of frames. Coverage measures whether the tracker returned a point, not whether the
@@ -1837,11 +2219,12 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
   catches it, but the general problem --- an agent-asserted fact the pipeline cannot verify --- is
   unsolved, and other such assertions exist (notably whether a trajectory was measured or
   synthesized, \S\ref{sec:fans}).
-  \item \textbf{The corpus is thin and partly duplicated.} Eleven templates reduce to $\sim$six
-  phenomena; \texttt{flick} $=$ \texttt{turntable-3}; \texttt{turntable-1/2/3} are one phenomenon;
-  \texttt{fan-4027/4028} are one physical fan; two of ten tracks are unusable. \textbf{Four
-  phenomena have data we can vouch for} (\S\ref{sec:golden}) --- and only one needed the data
-  corrected.
+  \item \textbf{The corpus is thin and partly duplicated.} Twelve templates reduce to
+  $\sim$six phenomena; \texttt{flick} $=$ \texttt{turntable-3}; \texttt{turntable-1/2/3} are one
+  phenomenon; \texttt{fan-4027/4028/4656} are one physical fan. \textbf{The five clips carrying
+  material as of rev.\ 2026-08-06 are roughly four scenes}, so between-clip variation is not
+  independent, and a finding about how much the clips differ from one another is partly a finding
+  about how narrow the scene set is.
   \item \textbf{One scale question remains open} and must not be guessed: the phone's body length
   (to settle bicycle's 12\% cross-check). The fan scale is now measured (blade tip $63.5$\,cm
   $\Rightarrow$ $559$\,px/m, \S\ref{sec:fans}), so the fans' $v$/$a_c$ are real; $\omega$/$T$/$f$ are
@@ -1868,7 +2251,37 @@ statistics computed over the wrong window --- the same error as the 4048 tilt, o
 
 \emph{Item 2 of the first edition --- implement rectification in the frozen layer, gated on the hub
 offset --- is done (\S\ref{sec:shipped}); 4046's golden numbers moved as predicted
-($r_{\mathrm{fit}}$ $0.254 \rightarrow 0.260$\,m). What follows is what remains.}
+($r_{\mathrm{fit}}$ $0.254 \rightarrow 0.260$\,m). Rev.\ 2026-08-06 completes it: the gate now
+also fires on \emph{foreshortening}, which it had been measuring and discarding
+(\S\ref{sec:affine-retract}). What follows is what remains.}
+
+\textbf{Added rev.\ 2026-08-06, in priority order.}
+
+\begin{enumerate}
+  \item[\textbf{A.}] \textbf{Build the jump guard, with two bounds.} Nothing in the delivered
+  pipeline rejects a marker that moves $500\times$ its usual step; the sweep that found
+  \texttt{turntable-3}'s teleports was written by hand. The guard needs an \emph{angular} bound
+  \emph{and} a \emph{radial} one, each relative to the clip's own local median rather than to a
+  constant --- neither alone would have caught this corpus's two known cases
+  (\S\ref{sec:tt3-jumps}). A radius CV above ${\sim}0.1$ on a rigid marker convicts without any
+  threshold tuning, and is the cheapest thing to compute.
+  \item[\textbf{B.}] \textbf{State the calibrated span in the sidecar, not in prose.} The span
+  paired with \texttt{physical\_size} is sometimes not any object's bounding box --- an orbit
+  radius, a tape mark --- and the pipeline then has nothing correct to measure. A
+  \texttt{reference\_geometry.diameter\_px} field is now honoured verbatim when present. Use it
+  whenever the reference is not a detectable object: on \texttt{fan-4656} two runs from a
+  byte-identical sidecar chose radii differing by $6\%$ before this existed
+  (\S\ref{sec:fan4656}).
+  \item[\textbf{C.}] \textbf{One clip logging its own gyroscope.} Withdrawing \texttt{turntable-3}
+  removed the corpus's only sensor-validated clip. \texttt{fan-4656}'s blade-pass cross-check
+  (\S\ref{sec:fan4656}) is independent of the marker and the tracker, but both legs are video. A
+  single re-shoot with a phone logging on the rotating object restores an external reference, and
+  \S\ref{sec:tt3-jumps} shows what that reference can see that nothing else can.
+  \item[\textbf{D.}] \textbf{Report \texttt{n\_relocks} in every run summary.} A temporal gate
+  that silently discards frames looks exactly like a hard-to-see object
+  (\S\ref{sec:stickylock}); \texttt{computerfan-4029} shipped at $86.9\%$ coverage for weeks on
+  that misreading.
+\end{enumerate}
 
 \begin{enumerate}
   \item \textbf{Capture beats correction.} Every artifact here was cheaper to prevent than to
@@ -1938,7 +2351,11 @@ Archived clip and re-shoot notes & \texttt{templates-reshoot/} \\
 
 \vspace{4pt}
 \noindent Numbers attributed to the delivered pipeline are measured on a full end-to-end run of
-\texttt{roundabout-4046} (agent-detected axle, no manual intervention); the golden set referenced
-throughout is seven clips across four phenomena, all passing their material checks.
+\texttt{roundabout-4046} (agent-detected axle, no manual intervention). \textbf{The ``golden set''
+referenced throughout is the seven-clip validation set as it stood in July 2026}, and is kept here
+because the rectification and tracker results were measured against it. It is \emph{not} the
+shipped corpus: as of 2026-08-06 that is \textbf{five clips} (Table~\ref{tab:corpus}) --- the two
+frequency-mode fans and \texttt{turntable-3} were withdrawn and \texttt{fan-4656} added --- and
+\textbf{11 of its 15 worksheets pass the material gate}, not all of them.
 
 \end{document}
