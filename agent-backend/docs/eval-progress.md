@@ -1,5 +1,13 @@
 # Evaluation-method adaptation — progress (2026-07-08)
 
+> ⚠ **Corpus superseded 2026-08-06.** Entries below are dated and describe the **7-clip / n = 21**
+> corpus. It is now **5 clips / 15 worksheets** — `fan-4027`/`fan-4028` (synthesized orbits) and
+> `turntable-3` (tracker teleports) withdrawn, `fan-4656` added — and every aggregate was
+> re-derived: BERTScore **0.799/0.824/0.828**, judge A **3.57/3.83/4.58**, judge B
+> **3.72/3.72/4.18**, **κ = 0.31** quad over 180 pairs, gate **11/15**. Read any "21 worksheets" /
+> "7 clips" below as history. **Axis 4 is the one aggregate NOT re-run.**
+> Current state: `SESSION_CHECKPOINT.md`; method: `eval-framework.md` §4a.
+
 Session goal: adapt Utami's (2025) dissertation evaluation method + tooling to Centri, and produce
 this week's method-with-preliminary-results deck. Plan: `~/.claude/plans/prancy-scribbling-thimble.md`.
 Scope agreed with user: **set up code + docs for the full #1–#4 pipeline, preliminary numbers only**
@@ -133,3 +141,116 @@ New: `tools/eval_stats.py`, `tools/build_rater_sheet.py`, `docs/eval-rubric-ika.
 `presentation/centri-weekly-2026-07-08.tex`.
 Modified: `tools/run_llm_judge.py`, `tools/generate_tier_material.py`.
 Preliminary outputs: `material_work/_eval/preliminary/`.
+
+---
+
+## Update 3 — 2026-07-31 (a second LLM judge; the κ column stops being a dash)
+
+Full record, with method, threats to validity and copy-paste reproduction:
+**`judge-reliability-2026-07-31.md`**. Summary of what changed and what it means.
+
+**Two raters, one rubric, one prompt.** `Claude Opus 5` (`claude-opus-5`, scored 2026-07-31, seven
+blind sub-agents — one clip each) now scores the same 21 worksheets on the same 12 criteria as
+`Qwen3.6-35B` (scored 2026-07-29, local endpoint, temperature 0). Both were sent the
+**byte-identical prompt**: `run_llm_judge.build_prompt()` is now the single assembly point,
+`tools/export_judge_prompts.py` freezes one file per worksheet, and
+`tools/run_judge_from_prompts.py` replays it (`--model` for an endpoint, `--from-json` for agent
+output). Without that, a score gap cannot be attributed to the judgement rather than to the
+question.
+
+**Result — the ordering reproduces, the score does not.**
+- κ = **0.34** quadratic-weighted / 0.08 unweighted over 252 pairs; exact 33%, within-1 88%.
+- Both raters put advanced top (Qwen 3.99/3.92/4.46; Claude 3.45/3.43/3.96). Claude is harsher by
+  a near-constant −0.5 at every level.
+- Best-agreed: `cognitive_demand` (κ 0.59, r 0.78) — the criterion the tier claim rests on.
+- **No agreement at all: `grounding_accuracy` (κ −0.04, r −0.05, within-1 on only 52%)**, though
+  its *means* match (3.10 vs 3.14) — a mean-only comparison would have hidden this entirely.
+- **Consequence for every future report:** quote rankings from the judge, never an absolute level.
+  "4.12/5 → 8.2/10 vs P-MAGIC's 8.2–8.6" is a property of the rater; rater B gives 7.2.
+
+**The case for the teacher panel, in one row.** On `turntable-3` advanced — the worksheet whose
+number is a known tracker artifact (7.45 vs a true 5.85) — Qwen scored grounding **5** and Claude
+**2**. A single rater reports whichever it draws.
+
+**Control: the judge is deterministic, the writer is not.** Re-running Qwen on the frozen prompts
+two days later reproduced the original **exactly** — 252/252 ratings, zero differences, κ = 1.00
+(`material_work/_eval/judge_qwen_2026-07-31/`). So the judge gap is a rater difference, not run
+noise, and the 07-29 run demonstrably had the same prompt. Contrast generation, which does not
+reproduce (checker 19/21 → 16/21). Quote single-run *judge* numbers with the run named; never
+single-run *generation* numbers.
+
+**κ implementation traps, both hit and both now pinned** (`tools/tests/test_judge_agreement.py`,
+7 tests): the expected term takes a single `1/n²` — an extra `÷n` makes κ scale with sample size;
+and zero-variance criteria are **`n/d`, not 0.0**, or "always agreed" prints as "never agreed".
+Weighting is quadratic, because 4-vs-5 on an ordinal scale is a near miss.
+
+**Open, and it blocks the human panel:** `grounding_accuracy` appears to ask two questions at once
+— "do the numbers trace to the measurement?" and "do the relations printed beside them close?" —
+which the deterministic checker separates and the rubric does not. Split it (or tighten its
+wording) **before** teachers score it, or the human κ inherits the same ambiguity.
+
+### Files touched
+New: `tools/export_judge_prompts.py`, `tools/run_judge_from_prompts.py`, `tools/judge_agreement.py`,
+`tools/tests/test_judge_agreement.py`, `docs/judge-reliability-2026-07-31.md`.
+Modified: `tools/run_llm_judge.py` (extracted `build_prompt`), `tools/build_pmagic_tables.py`
+(`--judge-dir-b`, `kappa_map`, two-rater table), `docs/eval-framework.md` (§4a).
+Outputs: `material_work/_eval/judge_claude_2026-07-31/`, `judge_qwen_2026-07-31/`,
+`judge_agreement_2026-07-31.{md,json}`, `pmagic_tables.{md,tex}`.
+
+---
+
+## Update 4 — 2026-07-31 (Axis 4 scored for the first time on the current figures)
+
+Full record: **`axis4-multimodal-2026-07-31.md`**.
+
+**The gap.** Axes 1–3 are text; Axis 4 asks whether the FIGURES are right and needs a rater that
+can see them. The only Axis-4 output that existed was dated 06-25 — before the pedagogy rework and
+before the 07-27/07-31 figure fixes — so it described figures that no longer exist. `Claude Opus 5`
+(7 blind agents, one clip each) scored all 21 worksheets on the 11 multimodal criteria.
+
+**Modalities are per TIER and absence is not failure.** The basic tier ships no table by design, so
+its four table criteria are `n/a` and excluded from every mean. Scoring an absent modality would
+penalise a tier for a figure it was built not to show.
+
+**Results by modality (basic / intermediate / advanced):** image–text 3.71 / 3.50 / 3.86;
+text–graph 3.36 / 3.14 / 3.25; text–table n/a / 3.36 / 3.25; **annotation correctness 4.29 / 4.43 /
+4.29**; all scored 3.59 / 3.40 / 3.45.
+- **No tier ladder in Axis 4** (flat, non-monotonic) — the same renderer draws all three tiers, so
+  **the difficulty claim rests on the prose alone** and Axis 4 must not be cited for it.
+- **`annotation_correctness` is the strongest row in the whole evaluation** — independent
+  confirmation that the 07-31 direction fix landed, from a rater never told a fix had happened.
+- **Weakest row is `graph_sense_physical` (2.29–2.71)**, i.e. figure-versus-physics contradiction.
+
+**The defect it caught, a same-day regression.** The `REST_WORDS` change of 07-31 printed
+"not turning" on rest bands. The segmenter marks spans INACTIVE that contain real motion, so the
+label turned a silent error into a printed falsehood: `computerfan-4029` had a band captioned
+"not turning" containing samples at **24.14 rad/s**. **11 of the 12 rest bands in the corpus
+carried a label their own curve contradicted.** Fixed by `_rest_label_is_contradicted` — the word
+is suppressed when the band's samples exceed 5% of the series max, the shading stays (a colour is
+not a claim); 7 tests in `tools/tests/test_phase_label_honesty.py`; all 7 clips re-rendered,
+`verify_figures` clean. **The segmentation itself is still wrong and is open.**
+
+**Retracted:** "the redraw introduced zero new gate failures — that is the evidence the figure work
+did not disturb the text". The gate was clean and the figure was false; the gate checks that
+annotations trace to the seed and never asks whether a band label agrees with the curve beneath it.
+**A clean gate is evidence about the gate's questions, not about the figure.**
+
+**Other open figure defects** (not regressions, found by the same run): "clip average" is really the
+turning-window mean on every time-series plot; the basic turns-vs-time graphs contradict their own
+printed captions on two clips; tabulated `a_c` never closes under `a_c = ω²r` and the intermediate
+tier asserts the false substitution; fitted-circle offsets of 9–21% of r on three clips; assorted
+render bugs (clipped table titles, overlapping callout boxes, inverted trajectory y-axis, ASCII
+`m/s^2`).
+
+**PIPELINE HAZARD, worth more than the finding.** Every workspace carries its own **frozen copy of
+`analysis/`**, and re-rendering from inside a workspace imports THAT copy, not `workspace_lib/`.
+A renderer edit plus a re-render appeared to succeed and changed nothing. Sync first:
+`for d in workspaces/job_*/; do cp workspace_lib/analysis/render/figures.py "$d/analysis/render/figures.py"; done`
+— and confirm by diffing the copies, not by re-running and hoping.
+
+### Files touched
+New: `tools/export_multimodal_prompts.py`, `tools/build_multimodal_table.py`,
+`tools/tests/test_phase_label_honesty.py`, `docs/axis4-multimodal-2026-07-31.md`.
+Modified: `tools/run_llm_judge.py` (Axis-4 rubric + `build_multimodal_prompt`),
+`workspace_lib/analysis/render/figures.py` (+ the 7 frozen workspace copies).
+Outputs: `material_work/_eval/multimodal_axis4_2026-07-31.md`, `presentation/axis4_table.tex`.
