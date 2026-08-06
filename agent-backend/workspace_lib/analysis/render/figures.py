@@ -31,7 +31,7 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..common import canonical_omega, dedup_display_name, fit_orbit_ellipse
+from ..common import canonical_omega, dedup_display_name, fit_orbit_ellipse, travel_sign
 from . import palette as _PAL
 
 DATA = Path("analysis_output/data")
@@ -58,6 +58,12 @@ PHASE_COLOURS = {
 # wording reads as a claim about the motion and is wrong on an a_c axis. The motion wording still
 # exists, in `_phase_sequence` below, for the prose.
 PHASE_WORDS = {"INCREASE": "increasing", "STABLE": "steady", "DECREASE": "decreasing"}
+# A rest band shaded grey and said nothing, so the marker jitter inside it read as physics: on
+# turntable-3 the tail reaches a_c 21.3 m/s² — 68% of that clip's largest ACTIVE value and 2.9x
+# its mean — and every negative omega in the corpus outside the two counter-clockwise fans lives
+# here. Name it. Kept OUT of PHASE_WORDS on purpose: that map also gates `_phase_significant`,
+# which drops slivers, and a rest band must stay shaded however short it is.
+REST_WORDS = {"INACTIVE": "not turning", "IDLE": "not turning"}
 TRACE = {  # per-series colour
     "omega": "#FB8C00",
     "ac": "#E53935",
@@ -149,15 +155,35 @@ def _phases_trustworthy(stats, labels) -> bool:
     return bool({str(lab).upper() for lab in (labels or [])} & {"INCREASE", "DECREASE"})
 
 
-def _shade_phases(ax, t, labels):
+def _rest_label_is_contradicted(y, s, e, ymax):
+    """True when a band the segmenter called REST plainly contains motion.
+
+    Printing "not turning" over a curve that visibly moves is worse than printing nothing: the
+    reader trusts the word over the line. This happened for real — a band labelled "not turning"
+    on `computerfan-4029` spanned samples reaching 24 rad/s, because the segmenter mis-marks
+    bursts as INACTIVE and the label made that silent error into a printed falsehood. The word is
+    suppressed whenever the data under it disagrees; fixing the SEGMENTATION is the separate,
+    deeper job. Threshold is relative to the series, so it holds for rad/s and m/s^2 alike.
+    """
+    if y is None or ymax is None or not np.isfinite(ymax) or ymax <= 0:
+        return False
+    seg = np.asarray(y, dtype=float)[s:e]
+    seg = seg[np.isfinite(seg)]
+    if seg.size == 0:
+        return False
+    return float(np.nanmax(np.abs(seg))) > max(0.05 * float(ymax), 1e-9)
+
+
+def _shade_phases(ax, t, labels, y=None):
     """Shade each motion phase AND print its plain-language word ("speeding up" / "steady" /
     "slowing down") at the band centre, so the reader sees WHERE the spin changes without
     decoding a colour key. A motion phase that survives only as a 1-2 frame despeckle sliver is
     skipped (see `_phase_significant`) so the figure agrees with the prose; every phase that IS
     drawn gets its word, with the label height staggered when adjacent bands sit close together
     (A5/C2 — the flick's short spin-up band used to draw unlabelled). INACTIVE rest bands keep
-    their grey shading but no word. Callers pass already-vetted labels (see `_phases_trustworthy`)
-    — an empty list draws nothing."""
+    their grey shading and now carry "not turning", so the jitter inside them cannot be read as
+    motion. Callers pass already-vetted labels (see `_phases_trustworthy`) — an empty list draws
+    nothing."""
     if t is None or len(t) == 0 or not labels:
         return
     n = min(len(t), len(labels))
@@ -165,6 +191,11 @@ def _shade_phases(ax, t, labels):
     trans = ax.get_xaxis_transform()  # x in data coords, y in axes fraction
     rows_y = (0.96, 0.83, 0.70)
     row, last_cx = 0, None
+    ymax = None
+    if y is not None:
+        finite = np.asarray(y, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        ymax = float(np.nanmax(np.abs(finite))) if finite.size else None
     for s, e, lab in _phase_spans(labels):
         L = str(lab).upper()
         c = PHASE_COLOURS.get(L)
@@ -175,7 +206,10 @@ def _shade_phases(ax, t, labels):
         if L in PHASE_WORDS and not _phase_significant(width):
             continue                                   # drop a sliver of a real motion phase
         ax.axvspan(t0, t1, color=c, alpha=0.12, lw=0)
-        word = PHASE_WORDS.get(L)
+        word = PHASE_WORDS.get(L) or REST_WORDS.get(L)
+        # The shading stays (it is a colour, not a claim); the WORD goes, because it is a claim.
+        if word and L in REST_WORDS and _rest_label_is_contradicted(y, s, e, ymax):
+            word = None
         if word and width >= 0.06 * total:             # wide enough that a (short) label reads
             cx = (t0 + t1) / 2
             row = (row + 1) % len(rows_y) if last_cx is not None and (cx - last_cx) < 0.2 * total else 0
@@ -355,8 +389,7 @@ def fig_annotated_image(stats, scene, cols=None, plain=False,
                     th0 = math.atan2(ys[j] - cy, xs[j] - cx)
                     px_, py_ = float(xs[j]), float(ys[j])
         ux, uy = math.cos(th0), math.sin(th0)          # outward radial unit vector
-        ccw = (omega_val or 0) >= 0
-        s = 1.0 if ccw else -1.0
+        s = travel_sign(stats)                          # never sign(omega_val) — see common
         tx, ty = -uy * s, ux * s                        # unit vector along the motion
 
         # Trace the shape the orbit ACTUALLY has in the image — a circle seen off-axis
@@ -378,16 +411,25 @@ def fig_annotated_image(stats, scene, cols=None, plain=False,
 
         calls = []   # (symbol anchor, name, value, colour) → margin callouts, placed at the end
 
-        # r — double-headed arrow from the centre, drawn PERPENDICULAR to the object's radius so it
-        # can never lie under the a_c arrow (which runs along that radius).
-        rx, ry = -uy, ux
-        if ry < 0:                                      # prefer the downward side, as in the reference
-            rx, ry = -rx, -ry
-        ax.annotate("", xy=(cx + rx * r_fit_px, cy + ry * r_fit_px), xytext=(cx, cy),
+        # r — double-headed arrow along the object's OWN radius, centre to object, because that is
+        # where the radius is. It used to be drawn PERPENDICULAR to that radius so it could not lie
+        # under the a_c arrow (which runs along the same line); the cost was an arrow labelled "r",
+        # springing from the centre of rotation, pointing at empty space.
+        # The overlap is solved the way a drawing does it: offset the dimension line sideways, with
+        # the arrow spanning exactly centre -> object. a_c keeps the true radial line.
+        # r and a_c are collinear by physics — both run along the radius. They are split
+        # SYMMETRICALLY about that line, r one side and a_c the other, so each keeps its true
+        # direction and neither hides the other.
+        rpx, rpy = -uy, ux                              # perpendicular to the radius
+        if (rpx * ty - rpy * tx) < 0:                   # r sits on the side AWAY from travel
+            rpx, rpy = -rpx, -rpy
+        r_off = 0.13 * r_fit_px
+        ax.annotate("", xy=(cx + ux * r_fit_px + rpx * r_off, cy + uy * r_fit_px + rpy * r_off),
+                    xytext=(cx + rpx * r_off, cy + rpy * r_off),
                     arrowprops=dict(arrowstyle="<|-|>", color=pal["r"], lw=2.6,
                                     shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["r"])), zorder=5)
-        r_sym = (cx + rx * 0.52 * r_fit_px + ry * 0.15 * r_fit_px,
-                 cy + ry * 0.52 * r_fit_px - rx * 0.15 * r_fit_px)
+        r_sym = (cx + ux * 0.52 * r_fit_px + rpx * (r_off + 0.13 * r_fit_px),
+                 cy + uy * 0.52 * r_fit_px + rpy * (r_off + 0.13 * r_fit_px))
         _symbol(ax, r_sym, "r", pal["r"], plain=plain)
         if r_m is not None:
             calls.append((r_sym, names["r"], _fmt(r_m, 3, "m"), base["r"]))
@@ -405,13 +447,15 @@ def fig_annotated_image(stats, scene, cols=None, plain=False,
         elif v_m_s is not None:
             calls.append((v_sym, names["v"], _fmt(v_m_s, 2, "m/s") + avg, base["v"]))
 
-        # a_c — straight arrow from the object toward the centre (stopped short of the centre mark).
-        ax.annotate("", xy=(px_ - ux * 0.62 * r_fit_px, py_ - uy * 0.62 * r_fit_px),
-                    xytext=(px_, py_),
+        # a_c — straight arrow from the object toward the centre (stopped short of the centre mark),
+        # offset to the OPPOSITE side of the radius from r.
+        acx, acy = -rpx * r_off, -rpy * r_off
+        ax.annotate("", xy=(px_ - ux * 0.62 * r_fit_px + acx, py_ - uy * 0.62 * r_fit_px + acy),
+                    xytext=(px_ + acx, py_ + acy),
                     arrowprops=dict(arrowstyle="-|>,head_width=0.32,head_length=0.6", color=pal["ac"],
                                     lw=2.8, shrinkA=0, shrinkB=0, path_effects=_halo(4.5, pal["ac"])), zorder=5)
-        ac_sym = (px_ - ux * 0.36 * r_fit_px + tx * 0.24 * r_fit_px,
-                  py_ - uy * 0.36 * r_fit_px + ty * 0.24 * r_fit_px)
+        ac_sym = (px_ - ux * 0.36 * r_fit_px + acx - rpx * 0.13 * r_fit_px,
+                  py_ - uy * 0.36 * r_fit_px + acy - rpy * 0.13 * r_fit_px)
         _symbol(ax, ac_sym, "$a_c$", pal["ac"], plain=plain)
         if plain:
             calls.append((ac_sym, names["a_c"], "", base["ac"]))
@@ -429,9 +473,9 @@ def fig_annotated_image(stats, scene, cols=None, plain=False,
         w_sym = (cx + 1.40 * r_fit_px * math.cos(th0), cy + 1.40 * r_fit_px * math.sin(th0))
         pad = 0.06 * max(W, H)
         if not (pad <= w_sym[0] <= W - pad and pad <= w_sym[1] <= H - pad):
-            th0_w = math.atan2(-ry, -rx)
+            th0_w = math.atan2(-rpy, -rpx)
             d, rr = 0.9, 0.32 * r_fit_px
-            w_sym = (cx - rx * 0.52 * r_fit_px, cy - ry * 0.52 * r_fit_px)
+            w_sym = (cx - rpx * 0.52 * r_fit_px, cy - rpy * 0.52 * r_fit_px)
         else:
             th0_w = th0
         a0, a1 = th0_w - s * d, th0_w + s * d
@@ -637,19 +681,32 @@ def _smooth_1rev(t, y, stats):
 
 def _series_plot(name, cols, stats, scene, col, ylabel, what, colour,
                  hline=None, hline_lbl=None, smooth_trend=False, note=None,
-                 uncorrected_col=None):
+                 uncorrected_col=None, magnitude=False):
     t = cols.get("time_s")
     y = cols.get(col)
+    # `magnitude` — plot the SPEED, not the tracker's signed value. theta = atan2 in image
+    # coordinates, so a clip filmed from the other side records omega negative: both ceiling
+    # fans run -11.6 -> -1.0 rad/s for a coast-DOWN. Everything else on this figure had already
+    # been resolved to a magnitude (the "clip average" line via canonical_omega, the phase-band
+    # words via |omega|) while the curve alone stayed signed — so fan-4028 shipped an average
+    # line at +5.70 floating above a curve that never rose above -1, inside a band labelled
+    # "increasing" where the curve visibly fell. The sign is not physics a reader needs; which
+    # way it goes round is carried by the arrows and by the word in the prose.
+    if magnitude:
+        y = np.abs(np.asarray(y, dtype=float)) if y is not None else y
     labels = stats.get("phases", {}).get("phase_labels") or []
     if not _phases_trustworthy(stats, labels):  # non-uniform clip mislabelled all-STABLE
         labels = []
     fig, ax = plt.subplots(figsize=(8, 5))
-    _shade_phases(ax, t, labels)
+    # Pass the series itself: a phase word must be checkable against the curve it sits over.
+    _shade_phases(ax, t, labels, y=y)
     # Where we adjust a curve, draw BOTH: the measurement as it came off the video, and what
     # we corrected it to. The honesty box used to have to make that argument in prose while
     # the figure beside it drew a single confident line — and the figure is what a student
     # looks at. Two adjustments qualify, and each names itself in the legend.
     pre = cols.get(uncorrected_col) if uncorrected_col else None
+    if pre is not None and magnitude:
+        pre = np.abs(np.asarray(pre, dtype=float))
     if pre is not None and np.isfinite(np.asarray(pre, float)).any():
         # (1) The camera-angle correction. The clip was filmed at a slant, so the object
         # appears to race and stall once per turn; that is the camera position, not the object.
@@ -857,7 +914,7 @@ def _annotation_manifest(stats):
 
     phases = _phase_sequence(stats)
     for fig in ("omega_t.png", "annotated_graph.png"):
-        man[fig] = {"shows": "angular velocity over time"}
+        man[fig] = {"shows": "angular speed over time"}
         if phases:
             man[fig]["phases"] = phases
     man["ac_t.png"] = {"shows": "centripetal acceleration over time"}
@@ -931,14 +988,15 @@ def main() -> int:
     # series too — the ω(t) and a_c(t) plots then draw the measurement and the correction
     # together. a_c is where the difference is largest, because it follows ω squared.
     _series_plot("annotated_graph.png", cols, stats, scene, "omega_rad_s",
-                 "angular velocity (rad/s)", "Angular velocity & phases",
+                 "angular speed (rad/s)", "Angular speed & phases",
                  TRACE["omega"], hline=stable_omega, hline_lbl=omega_hline_lbl,
                  smooth_trend=diagnosed, note=per_instant_note,
-                 uncorrected_col="omega_rad_s_uncorrected")
+                 uncorrected_col="omega_rad_s_uncorrected", magnitude=True)
     _series_plot("omega_t.png", cols, stats, scene, "omega_rad_s",
-                 "angular velocity (rad/s)", "Angular velocity", TRACE["omega"],
+                 "angular speed (rad/s)", "Angular speed", TRACE["omega"],
                  hline=stable_omega, hline_lbl=omega_hline_lbl, smooth_trend=diagnosed,
-                 note=per_instant_note, uncorrected_col="omega_rad_s_uncorrected")
+                 note=per_instant_note, uncorrected_col="omega_rad_s_uncorrected",
+                 magnitude=True)
     _series_plot("ac_t.png", cols, stats, scene, "ac_m_s2",
                  "centripetal acceleration (m/s^2)", "Centripetal acceleration",
                  TRACE["ac"], hline=ac_hline, hline_lbl=ac_hline_lbl,

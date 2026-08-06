@@ -65,6 +65,23 @@ def canonical_omega(stats: dict) -> tuple[float | None, bool]:
     return (abs(v) if isinstance(v, (int, float)) else None), is_clip_average
 
 
+def travel_sign(stats: dict) -> float:
+    """+1 when the object travels the way INCREASING theta points, -1 when it goes the other way.
+
+    Every arrow that has to point along the motion (the v arrow, the omega arc, the video
+    overlay) must ask THIS, never ``sign(canonical_omega(...))`` — canonical_omega returns a
+    MAGNITUDE, so that test is always True and every arrow comes out clockwise. Both ceiling
+    fans turn counter-clockwise, so all six of their worksheets shipped v and omega pointing
+    backwards along the orbit.
+
+    theta = atan2(dy, dx) in image coordinates, where the row index grows DOWNWARD, so
+    increasing theta traces right -> bottom -> left -> top: CLOCKWISE to the viewer. Hence
+    "CW" -> +1. ``rotation_direction`` is already resolved into the viewer's frame by
+    ``kinematics`` (the one sign flip), which is exactly why it is the thing to read.
+    """
+    return -1.0 if ((stats.get("summary") or {}).get("rotation_direction") or "CW") == "CCW" else 1.0
+
+
 # ── The (de)acceleration block, resolved along the direction of travel ───────
 def motion_along_travel(stats: dict) -> dict:
     """The angular-acceleration block as a READER must see it, or ``{}`` for a steady spin.

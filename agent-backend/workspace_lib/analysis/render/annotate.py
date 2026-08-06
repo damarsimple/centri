@@ -30,8 +30,16 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from ..common import dedup_display_name as _dedup
 from ..common import fit_orbit_ellipse as _fit_orbit_ellipse
+from ..common import travel_sign as _travel_sign
 from . import palette as _PAL
+
+# An arrow that asserts a DIRECTION must not be drawn from a quantity that is only noise.
+# Below this fraction of the clip's own peak |omega| the object is not meaningfully turning,
+# and the omega arc is suppressed — the same 5% convention `figures._rest_label_is_contradicted`
+# uses to decide whether a rest caption is contradicted by its own curve.
+OMEGA_DRAW_FLOOR_FRAC = 0.05
 
 DATA = Path("analysis_output/data")
 OUT_DIR = Path("analysis_output/video_annotation")
@@ -304,8 +312,10 @@ def main() -> int:
     stats = json.loads((DATA / "stats.json").read_text())
     cal, summ = stats["calibration"], stats["summary"]
     # Descriptive scene name for the on-frame label (e.g. "red phone on turntable"),
-    # falling back to object_name for older stats.json without scene_title.
-    scene_label = stats.get("scene_title") or stats.get("object_name") or ""
+    # falling back to object_name for older stats.json without scene_title. Deduped like
+    # every other display surface — this banner was the one that was not, and read
+    # "red marker on red marker" on a clip whose marker is also its scale reference.
+    scene_label = _dedup(stats.get("scene_title")) or _dedup(stats.get("object_name")) or ""
     cx, cy = cal["cx_px"], cal["cy_px"]
     r_fit_px = cal["r_fit_px"]
     # The orbit is always green now: which WAY it turns is carried by the v arrow and the ω arc,
@@ -326,6 +336,14 @@ def main() -> int:
 
     v_vals = [abs(col(r, "v_m_s")) for r in rows]
     ac_vals = [abs(col(r, "ac_m_s2")) for r in rows]
+    # Direction of travel is a property of the CLIP, not of one frame. Reading it per frame
+    # from sign(omega) let the rest tail — where omega is noise of a few thousandths — flip the
+    # v arrow and the omega arc back and forth (41 sign changes on fan-4656's stationary tail),
+    # so a stopped fan was shown turning, sometimes backwards. See common.travel_sign.
+    s_travel = _travel_sign(stats)
+    w_abs = [abs(col(r, "omega_rad_s")) for r in rows]
+    w_peak = max([x for x in w_abs if x == x] + [0.0])
+    w_floor = OMEGA_DRAW_FLOOR_FRAC * w_peak
     # Longest arrow in the clip is sized against the ORBIT, not against a fixed 60 reference pixels
     # — on a ~1400 px-tall crop that constant drew a 60 px stub barely longer than its own
     # arrowhead. Same proportions as the still figure, so the two artifacts read alike.
@@ -413,40 +431,56 @@ def main() -> int:
         # Unit vectors at the object: outward along the radius, and along the direction of travel.
         ux, uy = math.cos(theta), math.sin(theta)
         w_now = col(r, "omega_rad_s")
-        s = -1.0 if (w_now == w_now and w_now < 0) else 1.0
+        s = s_travel                     # clip-level; never sign(omega) — see common.travel_sign
         tx, ty = -uy * s, ux * s
 
-        # r — drawn PERPENDICULAR to the object's own radius. Pointing it at the object would lay it
-        # exactly under the a_c arrow (which runs along that same radius): that overlap is why the
-        # two used to be unreadable whenever the object crossed the left of the frame.
-        rx, ry = -uy, ux
-        if ry < 0:                       # prefer the downward side, as in the reference diagram
-            rx, ry = -rx, -ry
-        _vector(frame, (cx, cy), (cx + rx * r_fit_px, cy + ry * r_fit_px), palette["r"],
-                r"$r$", off_dir=(ry, -rx))
+        # r — along the object's OWN radius, centre to object, because that is where the radius
+        # is. It used to be drawn PERPENDICULAR to that radius so it could not lie under the a_c
+        # arrow (which runs along the same line); the cost was an arrow labelled "r", springing
+        # from the centre of rotation, pointing at empty space. Readers followed it, correctly,
+        # to the wrong conclusion.
+        # The overlap is solved the way a drawing does it: offset the dimension line sideways,
+        # with the arrow spanning exactly centre -> object. a_c keeps the true radial line.
+        # r and a_c are collinear by physics — both run along the radius. They are split
+        # SYMMETRICALLY about that line, r one side and a_c the other, so each keeps its true
+        # direction and neither hides the other.
+        px_, py_ = -uy, ux                                   # perpendicular to the radius
+        if (px_ * ty - py_ * tx) < 0:                        # r sits on the side AWAY from travel
+            px_, py_ = -px_, -py_
+        off = max(_p(14), 0.10 * r_fit_px)
+        _vector(frame, (cx + px_ * off, cy + py_ * off),
+                (cx + ux * r_fit_px + px_ * off, cy + uy * r_fit_px + py_ * off),
+                palette["r"], r"$r$", off_dir=(px_, py_))
 
         # v — straight tangent arrow at the object, pointing the way it travels.
         if not math.isnan(v) and abs(v) > 1e-3:
             _vector(frame, (ox, oy), (ox + tx * v * v_scale, oy + ty * v * v_scale), palette["v"],
                     r"$\vec{v}$", off_dir=(ux, uy))
-        # a_c — straight arrow from the object toward the centre.
+        # a_c — straight arrow from the object toward the centre, offset to the OPPOSITE side of
+        # the radius from r.
         if not math.isnan(ac) and abs(ac) > 1e-3:
-            _vector(frame, (ox, oy), (ox - ux * ac * ac_scale, oy - uy * ac * ac_scale), palette["ac"],
-                    r"$\vec{a}_c$", off_dir=(tx, ty))
+            acx, acy = -px_ * off, -py_ * off
+            _vector(frame, (ox + acx, oy + acy),
+                    (ox - ux * ac * ac_scale + acx, oy - uy * ac * ac_scale + acy), palette["ac"],
+                    r"$\vec{a}_c$", off_dir=(-px_, -py_))
 
         # ω — curved arrow showing the turning (direction only). Preferred spot is just OUTSIDE the
         # orbit at the object, as in the reference diagram; on a tight ROI crop that lands off the
         # frame, so it falls back to a small arc about the centre of rotation — on the opposite side
         # from the r arrow, hence clear of both r and the (radial) a_c arrow.
-        wx, wy = cx + 1.40 * r_fit_px * ux, cy + 1.40 * r_fit_px * uy
-        pad = _p(30)
-        if pad <= wx <= vw - pad and pad <= wy <= vh - pad:
-            _arc_arrow(frame, cx, cy, r_fit_px * 1.16, theta, s, palette["w"])
-        else:
-            th_w = math.atan2(-ry, -rx)
-            _arc_arrow(frame, cx, cy, r_fit_px * 0.32, th_w, s, palette["w"], span=0.9)
-            wx, wy = cx - rx * 0.52 * r_fit_px, cy - ry * 0.52 * r_fit_px
-        _label(frame, r"$\omega$", (wx, wy), palette["w"])
+        # Gated on magnitude like v and a_c: an arc is an assertion that the object IS turning,
+        # and on a stationary tail omega is noise. v and a_c were already gated; this was not,
+        # so a stopped fan kept a confident arrow whose direction came from that noise.
+        if w_now == w_now and abs(w_now) > w_floor:
+            wx, wy = cx + 1.40 * r_fit_px * ux, cy + 1.40 * r_fit_px * uy
+            pad = _p(30)
+            if pad <= wx <= vw - pad and pad <= wy <= vh - pad:
+                _arc_arrow(frame, cx, cy, r_fit_px * 1.16, theta, s, palette["w"])
+            else:
+                th_w = math.atan2(-py_, -px_)
+                _arc_arrow(frame, cx, cy, r_fit_px * 0.32, th_w, s, palette["w"], span=0.9)
+                wx, wy = cx - px_ * 0.52 * r_fit_px, cy - py_ * 0.52 * r_fit_px
+            _label(frame, r"$\omega$", (wx, wy), palette["w"])
         # Stack the static info banner above the annotated video frame.
         out.write(np.vstack([banner, frame]))
         i += 1

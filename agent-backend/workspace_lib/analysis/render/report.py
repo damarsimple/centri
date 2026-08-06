@@ -43,10 +43,10 @@ GRAPHICS_PATH = r"\graphicspath{{../plots/}{plots/}{./plots/}{analysis_output/pl
 
 # Figures embedded in the report, with widths. Only those that exist are included.
 FIGURES = [
-    ("summary_panel.png", 0.95, "Summary panel: trajectory, angular velocity, "
+    ("summary_panel.png", 0.95, "Summary panel: trajectory, angular speed, "
                                 "centripetal acceleration, and key measurements."),
     ("trajectory.png", 0.6, "Trajectory in cropped-video space with the fitted orbit."),
-    ("omega_t.png", 0.8, "Angular velocity vs.\\ time, phase regions shaded."),
+    ("omega_t.png", 0.8, "Angular speed vs.\\ time, phase regions shaded."),
     ("ac_t.png", 0.8, "Centripetal acceleration vs.\\ time."),
     ("radius_t.png", 0.8, "Orbit radius vs.\\ time."),
     ("v_t.png", 0.8, "Tangential speed vs.\\ time."),
@@ -68,7 +68,7 @@ FIG_META = {
                                      "steady spin, a line that bends flatter is slowing down, one "
                                      "that steepens is speeding up."),
     "trajectory.png":  (0.55, "The tracked path in video space with the fitted circular orbit."),
-    "omega_t.png":     (0.78, "Angular velocity $\\omega$ vs.\\ time, phase regions shaded."),
+    "omega_t.png":     (0.78, "Angular speed $|\\omega|$ vs.\\ time, phase regions shaded."),
     "ac_t.png":        (0.78, "Centripetal acceleration $a_c$ vs.\\ time."),
     "radius_t.png":    (0.70, "Orbit radius vs.\\ time."),
     "v_t.png":         (0.70, "Tangential speed vs.\\ time."),
