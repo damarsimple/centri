@@ -83,7 +83,30 @@ agent defaults to `object` and may override only with clear scene evidence.
   "tracking_mode": "frequency",
   "tracking_config": { "n_blades": 5, "ring_radius": 200, "orbit_radius_px": 250, "n_probes": 12 }
 }
+// explicit pixel span (when the calibrated span is NOT any object's bbox)
+{
+  "tracked_object":     { "visual_cues": ["yellow marker"] },
+  "reference_geometry": { "label": "hub-to-marker orbit radius",
+                          "physical_size": 0.44,      // tape: hub centre -> card centre, m
+                          "diameter_px": 260.0 },     // the SAME span in px, used verbatim
+  "rotation_center_frac": [0.47, 0.46],
+  "tracking_mode": "color",
+  "tracking_config": { "hsv_lo": [10,90,90], "hsv_hi": [35,255,255],
+                       "roi_radius": 330, "min_area": 300 }
+}
 ```
+
+> **`reference_geometry.diameter_px` (optional).** When present it is used **verbatim** and
+> nothing is measured. Use it whenever the span paired with `physical_size` is not the
+> bounding box of a detectable object — an orbit radius, a tape mark, a span across two
+> features. `px_per_m = diameter_px / physical_size`, so **the two must describe the SAME
+> span**, and stating both removes the pipeline's freedom to choose a different one.
+> Omit it and the generic bbox sizing is unchanged.
+>
+> This exists because a tilted orbit images as an ellipse, so "the orbit radius" has three
+> plausible values — semi-major, semi-minor, circle-fit median. On `fan-4656` two runs from
+> a byte-identical sidecar picked 260 px and 245 px, giving `px_per_m` 591 vs 558 and a 6%
+> swing in the taught `a_c`. Prose in `hints.md` is not a contract; this field is.
 
 > `color`/`frequency` run locally (OpenCV, no GPU) and **assume rotation is baked into
 > the pixels** (no rotation metadata) — our portrait clips are exported that way.

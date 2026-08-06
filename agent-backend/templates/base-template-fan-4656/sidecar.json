@@ -1,0 +1,10 @@
+{
+  "tracked_object": { "visual_cues": ["yellow marker"] },
+  "object_name": "yellow marker",
+  "scene_title": "yellow marker on a ceiling fan",
+  "reference_geometry": { "label": "hub-to-marker orbit radius", "physical_size": 0.44, "diameter_px": 260.0 },
+  "rotation_center_frac": [0.4699, 0.4649],
+  "tracking_mode": "color",
+  "tracking_config": { "hsv_lo": [10,90,90], "hsv_hi": [35,255,255], "roi_radius": 330, "min_area": 300 },
+  "display_w": 1920, "display_h": 1080, "video_w": 1920, "video_h": 1080
+}

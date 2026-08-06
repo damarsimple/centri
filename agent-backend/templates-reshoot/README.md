@@ -94,9 +94,96 @@ orbit radius **510 px**, axis ratio 0.96 (tilt ≈ 16.5°). Full detail in the d
 - **Tape one knob in a saturated colour that is not the rig's red** — bright green. The rig is
   red/silver/yellow, and its red cap and base are 30k+ px of the same hue as the knobs, which is
   what defeats colour tracking. One marker fixes detection AND the two-knob identity swap at once,
-  exactly as the red marker did for both fans.
+  exactly as the red marker did for `computerfan-4029`.
+  *(Corrected 2026-08-06: this line used to read "for both fans". It was wrong —
+  `computerfan-4029` is the only marker-tracked fan. `fan-4027`/`fan-4028` ran in `frequency`
+  mode with no tracked point at all, and `fan-doll` failed outright. They are parked below.)*
 - **Fill the frame with the wheel** so the knob is well over 38 px, which may also bring SAM3 in.
 - **Tape the rim diameter.** There is no object of known size in frame, so every SI value is
   provisional (ω, T, f are scale-free and unaffected).
 - Keep the framing still: the source is usable only to ~45 s; after that the operator pans and
   pulls back, and the imaged wheel diameter falls from ~1020 px to 762 px.
+
+---
+
+## base-template-fan-4027 and base-template-fan-4028 — 5-blade ceiling fans, `frequency` mode
+
+**Verdict: superseded 2026-08-06. Re-shot successfully as `templates/base-template-fan-4656`.**
+
+Not parked for a tracking failure — parked because **they never had a trajectory to fail**.
+Both ran `tracking_mode: frequency`, which recovers ω from blade-pass frequency and then
+**generates** a circular orbit from it. The tell-tales are in each directory's own `hints.md`:
+orbit axis ratio exactly 1.000, bbox area CV exactly 0.00. Between them they produced six
+worksheets built on a manufactured orbit, drawn on the frame as if it had been observed.
+
+Two independent problems, both now fixed by the reshoot rather than by a parameter:
+
+1. **No measured position.** ω, T and f were legitimate; a per-frame *position* was not, and
+   neither were v, a_c or anything drawn as a path.
+2. **The rate floor.** `frequency` mode reports rotation while the object is at rest. Measured
+   on the replacement clip's stationary tail, a blade-pass FFT returns **4.69 rad/s** on frames
+   where the marker track correctly returns **0.016** — see
+   `templates/base-template-fan-4656/NOTES.md` §3.
+
+The replacement carries a yellow card marker on one blade, tracks in `color` mode at
+**99.99% coverage with zero jumps over 190.8 revolutions**, and agrees with an independent
+blade-pass measurement of ω to **under 1%** on every steady window.
+
+`fan-4027` additionally carries the documented `diameter_px`-holds-a-RADIUS trap that halved
+every SI value on one real run (`job_fan-4027-r2`). If either clip is ever revived, read its
+`hints.md` calibration section first — and delete `analysis_output/data/api_cache.json`, or a
+cached track will silently make new footage report the old footage's numbers.
+
+### What to fix if these are ever re-shot rather than replaced
+
+- **A marker on one blade** — flat, saturated, large. That is the whole fix; it converts the clip
+  from `frequency` to `color` and gives it a real trajectory. Already proven on `fan-4656`.
+- **Get closer to face-on.** `fan-4656` still sits 34.5° off, which costs a ±19% ripple on
+  instantaneous ω and has to be rectified out.
+- **Put a ruler, or a strip of tape of known length, flat on a blade in the plane of rotation.**
+  On `fan-4656` this turned out not to be needed — the card *is* the ruler once its orientation
+  and its outer edge are pinned — but a known-length span in frame would have saved a long
+  reconciliation.
+
+---
+
+## basetemplate-turntable-3 — red phone on a turntable
+
+**Verdict: withdrawn 2026-08-06. The tracked point teleports; the published numbers were 27% wrong.**
+
+Removed from the corpus on Damar's call, not repaired. The marker's normal frame-to-frame step is
+**1.4 px**, but it jumps **604 / 614 / 713 px in a single frame** at t = 0.85 / 1.74 / 2.08 s,
+flipping between two positions 728 px apart. One of those jumps sits **inside the active window**,
+so 18 of 106 active samples are contaminated. Smoothing spreads each step into a symmetric ramp
+(~±12 frames), which is why they render as mountains and why ω climbs 0 → 10.2 rad/s while the
+tracked position is frozen to 0.1 px.
+
+Effect on the delivered numbers: **mean a_c 7.45 → 5.85, max 31.06 → 18.12.** The worksheets
+taught 7.45, which is **27% above the jump-free value**.
+
+Two further problems were never separated from that one:
+
+1. **A second ~31% effect from the radius.** The sensor validation was run on
+   `job_turntable-3-RECT` (`r_fit_m` 0.1477) while the shipped worksheets came from the
+   unrectified `job_turntable-3` (`r_fit_m` 0.2037) — a 38% radius gap. Because `a_c ∝ r`,
+   rectification and jump-rejection may be double-counting one error or may be two independent
+   ~30% errors. Nobody separated them.
+2. **An unexplained mid-coast speed-up** (v 0.73 → 1.92 m/s during a coast-down) outside every
+   jump-contaminated window. Ruled out: marker centroid, motion blur, perspective, wrong centre,
+   real torque, and SAM3's masks specifically (LocateAnything-3B reproduces it). Still open.
+
+### What to fix when re-shooting
+
+- **A flat, high-contrast marker that cannot be confused with a second object.** The scene holds a
+  red phone, a steel ruler and a hand entering frame; the tracker alternates between two positions
+  728 px apart, so a second candidate is plausible though never proven. Diagnosing that needs the
+  raw detection boxes, not the kinematics.
+- **Spin for longer.** At ~1.5 revolutions the perspective artifact cannot even be diagnosed — the
+  1/rev and 2/rev signatures are not separable. Aim for ≥3 revolutions, as for the park wheel.
+- **A ruler or known-length tape in frame**, so the metre scale does not depend on the same fit
+  that the rectification changes.
+
+**Nothing in the delivered pipeline rejects a jump.** The sweep that found these was written by
+hand for a memo; a guard against a marker moving 500× its usual step is still UNBUILT
+(`TODO.md` §5.1). Detect against the clip's OWN local median step — a fixed px threshold is
+useless, because `computerfan-4029` legitimately moves ~240 px/frame at peak.

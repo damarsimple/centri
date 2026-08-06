@@ -11,7 +11,12 @@ start-llama.sh
 # Bind-mounted at runtime (see docker-compose.yml), so they don't belong in the
 # build context — workspaces alone is ~2.5GB.
 workspaces
+workspaces-archive
 templates
+templates-reshoot
+material_work
+vinsa_export*
+scratchpad
 .pi
 *.mp4
 *.MOV

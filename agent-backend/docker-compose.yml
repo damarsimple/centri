@@ -72,6 +72,10 @@ services:
       - WORKSPACE_DIR=${WORKSPACE_DIR}
       - WORKSPACE_TTL_HOURS=${WORKSPACE_TTL_HOURS}
       - PI_TIMEOUT_SECONDS=${PI_TIMEOUT_SECONDS}
+      # The runaway-output guard (worker/tasks.py). Without this passthrough the
+      # worker falls back to the 1 GB default and long track phases are killed
+      # mid-run, whatever .env says.
+      - MAX_EVENTS_BYTES=${MAX_EVENTS_BYTES}
       - PI_INFERENCE_URL=${PI_INFERENCE_URL}
       - PI_INFERENCE_API_KEY=${PI_INFERENCE_API_KEY}
       - XIAOMI_API_KEY=${XIAOMI_API_KEY}

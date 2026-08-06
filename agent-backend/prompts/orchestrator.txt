@@ -831,20 +831,32 @@ step_end("step4")
 ```python
 step_start("step5")
 
-# ── Reference object pixel diameter (from its tracked bboxes) ───────────────
-width_px_vals, height_px_vals = [], []
-for d in trajectories[ref_label]:
-    if d.get("bbox"):
-        bx0, by0, bx1, by1 = d["bbox"]
-        width_px_vals.append(bx1 - bx0)
-        height_px_vals.append(by1 - by0)
-if not width_px_vals:
-    raise RuntimeError(f"[ABORT] No valid bboxes for reference '{ref_label}'.")
-width_px_median  = float(np.median(width_px_vals))
-height_px_median = float(np.median(height_px_vals))
-diameter_px      = (width_px_median + height_px_median) / 2.0
-if abs(width_px_median - height_px_median) / diameter_px > 0.15:
-    set_validation_flag("bbox_aspect_suspicious")
+# ── Reference object pixel diameter ─────────────────────────────────────────
+# A sidecar MAY state `reference_geometry.diameter_px` outright. Use it verbatim when it
+# is there: the span that pairs with `physical_size` is sometimes not any object's bbox
+# (e.g. an ORBIT RADIUS measured with a tape), and on such a clip the generic sizing below
+# has nothing correct to measure. Deriving it anyway is how one clip's scale went wrong in
+# BOTH directions across two runs from a byte-identical sidecar — the semi-major axis
+# (260 px) one run, the circle-fit median (245 px) the next, a 6% swing in the taught a_c.
+# Clips without the field are unaffected: the bbox path below is unchanged.
+diameter_px_sidecar = (sidecar.get("reference_geometry") or {}).get("diameter_px")
+if diameter_px_sidecar is not None:
+    diameter_px = float(diameter_px_sidecar)
+    log(f"[Step 5] reference.diameter_px = {diameter_px:.1f} px (from sidecar, not measured)")
+else:
+    width_px_vals, height_px_vals = [], []
+    for d in trajectories[ref_label]:
+        if d.get("bbox"):
+            bx0, by0, bx1, by1 = d["bbox"]
+            width_px_vals.append(bx1 - bx0)
+            height_px_vals.append(by1 - by0)
+    if not width_px_vals:
+        raise RuntimeError(f"[ABORT] No valid bboxes for reference '{ref_label}'.")
+    width_px_median  = float(np.median(width_px_vals))
+    height_px_median = float(np.median(height_px_vals))
+    diameter_px      = (width_px_median + height_px_median) / 2.0
+    if abs(width_px_median - height_px_median) / diameter_px > 0.15:
+        set_validation_flag("bbox_aspect_suspicious")
 
 # ── Real-world size of the reference object ─────────────────────────────────
 if physical_size_sidecar is not None:
