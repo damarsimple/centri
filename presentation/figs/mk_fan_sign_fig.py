@@ -6,12 +6,41 @@ Plots fan-4028's angular velocity two ways from the SHIPPED kinematics.csv:
 The fit window is the coast-down side (impulsive_start=true), shaded.
 """
 import csv, json
+import pathlib
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-JOB = "/home/damar/centri/agent-backend/workspaces/job_fan-4028-rect/analysis_output/data"
+
+def find_workspace(job: str, must_contain: str = "") -> pathlib.Path:
+    """The job directory, live or archived, that actually holds `must_contain`.
+
+    Workspaces move to `workspaces-archive/<batch>/` once a clip is superseded or withdrawn —
+    turntable-3 was withdrawn 2026-08-06 — so a bare `workspaces/<job>` path stops resolving.
+    Several batches can hold a directory of the same name (a failed run, a pre-fix snapshot, the
+    withdrawn shipped run), and only some carry the outputs, so require the file we came for and
+    skip candidates that lack it. Live wins over archived; otherwise newest batch first.
+    """
+    base = pathlib.Path("/home/damar/centri/agent-backend")
+    cands = [base / "workspaces" / job]
+    arch = base / "workspaces-archive"
+    if arch.is_dir():
+        cands += [sub / job for sub in sorted(arch.iterdir(), reverse=True) if sub.is_dir()]
+    seen = [c for c in cands if c.is_dir()]
+    for c in seen:
+        if not must_contain or (c / must_contain).exists():
+            return c
+    raise SystemExit(
+        f"{job}"
+        + (f"/{must_contain}" if must_contain else "")
+        + " not found. Looked in: "
+        + ", ".join(str(c) for c in cands[:6])
+        + (f" ({len(seen)} dir(s) matched the name but lacked the file)" if seen else ""))
+
+JOB = str(find_workspace("job_fan-4028-rect", "analysis_output/data/kinematics.csv")
+          / "analysis_output" / "data")   # archived 2026-08-06
 OUT = "/home/damar/centri/presentation/figs/fan-sign-4028.png"
 
 C_MEAS, C_APP, C_ACC, C_GREY = "#1F6FB2", "#2E7D32", "#C62828", "#616161"

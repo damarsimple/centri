@@ -14,8 +14,11 @@ import matplotlib.pyplot as plt
 
 BEFORE = ("/home/damar/centri/agent-backend/workspaces-archive/"
           "pre-coordfix-20260721-145038/job_roundabout-4046-r4/analysis_output/data/kinematics.csv")
-AFTER = ("/home/damar/centri/agent-backend/workspaces/"
-         "job_roundabout-4046-final/analysis_output/data/kinematics.csv")
+# Both sides are pinned to ARCHIVED runs on purpose. This is a before/after figure: if the
+# "after" tracked whatever is live, a later corpus regeneration would silently redraw it and the
+# slide would stop showing the change it claims to show. Archived 2026-07-29.
+AFTER = ("/home/damar/centri/agent-backend/workspaces-archive/pre-full-e2e-20260729/job_roundabout-4046-final"
+         "/analysis_output/data/kinematics.csv")
 OUT = "/home/damar/centri/presentation/figs/wheel-ac-corrected.png"
 
 C_MEAS, C_APP, C_ACC, C_GREY = "#1F6FB2", "#2E7D32", "#C62828", "#616161"

@@ -9,7 +9,7 @@ motion blur), then interpolate. Compares only on the frames LA got right.
 import json, math, pathlib
 import numpy as np
 
-JOB = "/home/damar/centri/agent-backend/workspaces/job_turntable-3-rect"
+JOB = "/home/damar/centri/agent-backend/workspaces-archive/pre-full-e2e-20260729/job_turntable-3-rect"
 S = str(pathlib.Path(__file__).resolve().parent / "trajectories")
 CX, CY = 543.024, 878.016
 

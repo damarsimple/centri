@@ -24,7 +24,9 @@ from pathlib import Path
 
 REPO = Path("/home/damar/centri")
 AB = REPO / "agent-backend"
-CLIP = AB / "workspaces/job_roundabout-4046-final"
+# Pinned to the ARCHIVED run (moved 2026-07-29): this figure contrasts two commits of the
+# renderer on ONE fixed clip, so the clip must not drift under it.
+CLIP = AB / "workspaces-archive/pre-full-e2e-20260729/job_roundabout-4046-final"
 OUT = Path(__file__).resolve().parent
 # The commit that gave the basic tier the full marked-up frame; its parent is the "before".
 PRE_REWORK_REF = "789b60b^"

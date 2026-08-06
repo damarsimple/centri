@@ -19,6 +19,28 @@ import sys
 import tempfile
 from pathlib import Path
 
+
+# Workspaces get archived once a clip is superseded or withdrawn, so a bare
+# `workspaces/<job>` path stops resolving and any test guarded by `if not v.exists(): return`
+# starts passing while checking nothing. Both real-clip tests below did exactly that once
+# `turntable-3` was withdrawn (2026-08-06). Look in the archive too.
+_ROOTS = (Path("/home/damar/centri/agent-backend/workspaces"),
+          Path("/home/damar/centri/agent-backend/workspaces-archive"))
+
+
+def find_workspace(job: str) -> Path | None:
+    """The job directory, live or archived; None if it is genuinely gone."""
+    for root in _ROOTS:
+        if not root.is_dir():
+            continue
+        direct = root / job
+        if direct.is_dir():
+            return direct
+        for sub in sorted(root.iterdir()):          # archive is one level deeper
+            if sub.is_dir() and (sub / job).is_dir():
+                return sub / job
+    return None
+
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workspace_lib"))
@@ -113,16 +135,20 @@ def test_jitter_below_the_threshold_is_ignored():
 
 def test_real_turntable3_clip_if_present():
     """Against the actual file, when it is available: exactly one repeat, at 180."""
-    v = Path("/home/damar/centri/agent-backend/workspaces/job_turntable-3-rect/input_video.mp4")
-    if not v.exists():
+    ws = find_workspace("job_turntable-3-rect")
+    if ws is None:
         return
+    v = ws / "input_video.mp4"
+    assert v.exists(), f"{ws} found but has no input_video.mp4"
     assert contract.duplicated_frame_indices(v, 350) == [180]
 
 
 def test_real_clean_clip_if_present():
-    v = Path("/home/damar/centri/agent-backend/workspaces/job_turntable-2-rect/input_video.mp4")
-    if not v.exists():
+    ws = find_workspace("job_turntable-2-rect")
+    if ws is None:
         return
+    v = ws / "input_video.mp4"
+    assert v.exists(), f"{ws} found but has no input_video.mp4"
     assert contract.duplicated_frame_indices(v, 253) == []
 
 

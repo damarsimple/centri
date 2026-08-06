@@ -48,6 +48,14 @@ presentation/**
 # one-offs that got lost, leaving its PNGs as the only copy and forcing them past the
 # repo-wide *.png rule. Keeping the generator means a figure can be rebuilt from a run.
 !presentation/**/*.py
+# EXCEPT the frozen "before" snapshots, which a generator CANNOT rebuild — they are the
+# pre-fix render, and applying the fix is what destroyed the state they show. The
+# workspaces they came from have since been regenerated or archived, so these files are
+# the only surviving copy of the defect a before/after slide claims to show. Two scripts
+# already document them as "kept under version control"; without these lines that was
+# false and a fresh clone would silently lose the "before" half of every such figure.
+!presentation/figs/src-*.png
+!presentation/figs/*_before.png
 presentation/_backup_*/
 presentation/_old/
 
