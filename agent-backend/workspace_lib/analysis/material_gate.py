@@ -285,6 +285,90 @@ def average_period_as_peak(text: str, seed: dict, window=70):
     return list(dict.fromkeys(issues))
 
 
+# Wording that pins a value to ONE moment, and wording that spreads it over the whole clip. A
+# period and a turns-per-second count that disagree are fine when each is marked this way; the
+# defect A9 catches is the pair reading as a single moment.
+_MOMENT_WORDS = (r"right after|just after|at the start|to begin|initially|at first|"
+                 r"fastest|quickest|peak|by the end|at the end|final|slowest")
+_AVERAGED_WORDS = r"average|averaged|on average|over the whole|over the entire|\bmean\b|typical"
+
+
+_CLAUSE_END = re.compile(r"[;:\n]|\.(?=\s|$)")     # a decimal point is NOT a clause end
+
+
+def _clause_around(t: str, at: int) -> str:
+    """The sentence/clause containing offset `at` — bounded by ; : newline, or a full stop
+    that is followed by whitespace (so '2.07' stays whole)."""
+    start = max((m.end() for m in _CLAUSE_END.finditer(t, 0, at)), default=0)
+    nxt = _CLAUSE_END.search(t, at)
+    return t[start:nxt.start() if nxt else len(t)]
+
+
+def rate_period_referent(text: str, seed: dict, window=None, rel_tol=0.10):
+    """A9: a stated period ('it completes a full turn in just 2.07 seconds') and a stated
+    turns-per-second count ('that turn rate is about 0.30 full turns each second') that are NOT
+    reciprocal belong to different moments of a non-uniform spin.
+
+    Both survive every other check — each traces to a real seed value, so `ungrounded_numbers`
+    passes them, and neither is written as a computation, so `arithmetic_claims` never sees a
+    claim. The defect is purely referential: adjacent prose binds them ("THAT turn rate"), and
+    the reader takes 2.07 s and 0.30 turns/s as one instant when 0.30 turns/s means 3.34 s.
+
+    Flags a non-reciprocal pair within `window` characters unless BOTH sides carry their own
+    qualifier placing them at different moments. Period phrasing only — the turn word must come
+    BEFORE the number ('a full turn takes 2.07 s'), which excludes cumulative milestones
+    ('after 5.17 seconds it has completed one full turn')."""
+    t = norm(text)
+    TURN = r"(?:full\s+)?(?:turn|lap|circle|revolution)"
+    periods = [(m.start(), float(m.group(1)))
+               for m in re.finditer(rf"{TURN}[^.;]{{0,40}}?({NUM})\s*(?:s\b|sec\b|seconds?\b)", t)]
+    rates = [(m.start(), float(m.group(1)))
+             for m in re.finditer(rf"({NUM})\s*(?:full\s+)?turns?\s+(?:each|per|a)\s+second", t)]
+    def reciprocal(p_val, r_val):
+        return abs(1.0 / r_val - p_val) <= max(rel_tol * p_val, 0.05)
+
+    # A rate that states its OWN period in the same clause ("a revolution takes T = 0.805 s, or
+    # about 1.242 full turns each second") is self-anchored: the reader is told which moment it
+    # belongs to, so it cannot be misread against some other lap time elsewhere in the document.
+    anchored = {r_at for r_at, r_val in rates
+                if r_val > 0 and any(p_val > 0 and reciprocal(p_val, r_val)
+                                     for p_at, p_val in periods
+                                     if _clause_around(t, p_at) == _clause_around(t, r_at))}
+
+    issues = []
+    for p_at, p_val in periods:
+        for r_at, r_val in rates:
+            if r_at in anchored:
+                continue
+            # Document-wide by default: the real defect put the lap time in "Scenario" and the
+            # rate in "The variables we measured", 352 characters and a section heading apart —
+            # which makes the dangling "That turn rate" worse, not better.
+            if (window is not None and abs(p_at - r_at) > window) or r_val <= 0 or p_val <= 0:
+                continue
+            implied = 1.0 / r_val
+            if reciprocal(p_val, r_val):
+                continue                                  # reciprocal — one moment, consistent
+            # Each qualifier must sit in its OWN clause. A shared window would let one
+            # "right after the flick" mark both numbers as placed, which is the very
+            # conflation being tested for.
+            ctx_p, ctx_r = _clause_around(t, p_at), _clause_around(t, r_at)
+
+            def placed(c):
+                return bool(re.search(_MOMENT_WORDS, c, re.I)
+                            or re.search(_AVERAGED_WORDS, c, re.I))
+
+            # An anaphor ("THAT turn rate") ties the rate to the previous clause's moment, so
+            # it cannot stand as its own placement however the clause is qualified.
+            anaphoric = bool(re.search(r"\b(?:that|this|the same)\s+(?:turn\s+)?rate", ctx_r, re.I))
+            if placed(ctx_p) and placed(ctx_r) and not anaphoric:
+                continue                                  # each explicitly its own moment
+            issues.append(
+                f"a lap of {round(p_val, 2)} s sits beside a rate of {round(r_val, 2)} turns "
+                f"each second (= a lap of {round(implied, 2)} s) with nothing marking them as "
+                f"different moments ('...{t[max(0, r_at - 40):r_at + 40].strip()}...')")
+    return list(dict.fromkeys(issues))
+
+
 # ---- (2) number grounding ----------------------------------------------------
 def allowed_values(seed: dict):
     vals = set()
@@ -791,6 +875,7 @@ def tier_gate(obj, seed, frame=None, manifest_phases=None):
                for u in ungrounded_numbers(text, allowed_values(seed))]
     issues += [f"wrong-duration: {w}" for w in wrong_duration_products(text, seed)]
     issues += [f"avg-period-as-peak: {w}" for w in average_period_as_peak(text, seed)]
+    issues += [f"rate-period-referent: {w}" for w in rate_period_referent(text, seed)]
     issues += [f"annotation: {a}" for a in annotation_issues(text, manifest_phases or [])]
     issues += tier_compliance(tier, text, unreliable=unreliable)
     issues += motion_faithfulness(seed, text, manifest_phases)

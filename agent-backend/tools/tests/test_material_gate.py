@@ -256,6 +256,36 @@ def test_wrong_duration_products_flags_clip_length():
     assert not G.wrong_duration_products("0.83 × 15", spins_throughout)    # clip IS the turn time
 
 
+def test_rate_period_referent_flagged():
+    """A9 gate: a lap time and a turns-per-second rate from different moments, written as one
+    ('That turn rate...'), is flagged even though both numbers are individually grounded. The
+    real fan-4027 basic sentence is the fixture."""
+    seed = {"angular_acceleration": {"motion_type": "decelerating",
+                                     "omega_initial": 3.033, "omega_final": 0.127},
+            "variables": [{"symbol": "T", "value": 3.34}]}
+    bad = ("Right after that first flick, it completes a full turn in just 2.07 seconds. "
+           "That turn rate is about 0.30 full turns each second.")
+    assert G.rate_period_referent(bad, seed)
+    # same two numbers, each placed at its own moment -> fine
+    assert not G.rate_period_referent(
+        "Right after the flick a full turn takes 2.07 seconds; averaged over the whole clip it "
+        "makes about 0.30 full turns each second.", seed)
+    # reciprocal pair -> fine (0.30 turns/s IS a 3.34 s lap)
+    assert not G.rate_period_referent(
+        "One full turn takes about 3.34 seconds, so it makes about 0.30 full turns each second.",
+        seed)
+    # a cumulative milestone is not a period claim -> must not fire
+    assert not G.rate_period_referent(
+        "It makes about 0.30 full turns each second. After 5.17 seconds it has completed one "
+        "full turn.", seed)
+    assert not G.rate_period_referent("It turns steadily throughout the clip.", seed)
+    # a rate that states its OWN period in the same clause is self-anchored, even when a
+    # different lap time (the peak) appears elsewhere in the document
+    assert not G.rate_period_referent(
+        "At its fastest a lap takes 0.67 s. A revolution takes T = 0.805 s, or about 1.242 "
+        "full turns each second.", seed)
+
+
 def test_average_period_as_peak_flagged():
     """A2 gate: the clip-average period pinned to a peak/fastest moment is flagged; the same
     number attributed to the whole-spin average passes; and a clip whose peak lap barely
