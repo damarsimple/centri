@@ -95,9 +95,14 @@ def main():
 
     # companion passages the teachers read while scoring
     pm = ["# Passages to rate\n",
-          "Score each passage 1–5 on every dimension in your CSV (5 = excellent). The multimodal "
-          "dimensions (image/graph/table/annotation) are scored from the rendered figures in the "
-          "PDF, not the text below. See docs/eval-rubric-ika.md for definitions.\n"]
+          "Score each passage 1–5 on every dimension in your CSV. **Read "
+          "docs/eval-rubric-scoring.md first** — it defines what each score from 1 to 5 means "
+          "for every dimension, and starts with three calibration cases to score before you "
+          "begin. '5 = excellent' on its own is not enough: two independent raters using only "
+          "that reached zero agreement on grounding. The multimodal dimensions "
+          "(image/graph/table/annotation) are scored from the rendered figures in the PDF, not "
+          "the text below; write n/a, never 1, for a modality that is absent. "
+          "docs/eval-rubric-ika.md defines the criteria themselves.\n"]
     for iid, m in items:
         pm.append(f"## {iid}  (asserted tier: {m.get('tier') or m.get('difficulty_level')})\n")
         pm.append(_passage(m) + "\n")

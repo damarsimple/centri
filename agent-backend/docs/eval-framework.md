@@ -21,7 +21,9 @@ rubric rows are dropped (below).
 
 ## The four rubric axes (reconciled)
 
-Every criterion scored **1–5** (5 = excellent). `#` = adopted/kept, `slim` = kept but pruned,
+Every criterion scored **1–5**; the per-score anchors are in
+[`eval-rubric-scoring.md`](eval-rubric-scoring.md) (new 2026-08-06 — before it, nothing
+defined what a 3 meant, which is the direct cause of the grounding κ below). `#` = adopted/kept, `slim` = kept but pruned,
 `NEW` = Centri's own.
 
 ### Axis 1 — Linguistic / authenticity  *(Utami Table 8 + P-MAGIC "Linguistic")*
@@ -80,6 +82,18 @@ more diverse), and **LSTM** fluency (P-MAGIC's metric — note it correlated **b
 judgment there, r = 0.628 vs BERT-F1 0.358). Report **per-tier** *and* **per-modality**, mirroring
 P-MAGIC's ablation (text-image / text-graph / text-table; annotated vs non-annotated).
 
+**2a. Axis 4 — RUN 2026-07-31, and it earns its place.** First scoring of the multimodal axis on
+the current figures (`axis4-multimodal-2026-07-31.md`). By modality, basic/intermediate/advanced:
+image–text 3.71/3.50/3.86, text–graph 3.36/3.14/3.25, text–table n/a/3.36/3.25, **annotation
+correctness 4.29/4.43/4.29**. Three standing conclusions: **modalities are scored per TIER and an
+absent one is `n/a`, never a low score** (basic ships no table by design); **there is no tier
+ladder in Axis 4**, so the difficulty claim rests on the prose and this axis must not be cited for
+it; and **annotation correctness is the strongest row in the whole evaluation**, which is the
+independent evidence for the video-annotation contribution. It also caught a printed falsehood —
+a band captioned "not turning" over samples at 24 rad/s, on 11 of the corpus's 12 rest bands —
+that the deterministic gate passed and no text judge could see. **A clean gate is evidence about
+the gate's questions, not about the figure.**
+
 **2. Semi-automatic — MLLM-as-judge** *(Axis 4 + physics judging; the "semi-automatic" layer).*
 A vision-capable model (mimo-v2.5) receives the **annotated frame(s) + figure + the gate's
 ground-truth values as the reference**, and returns a per-criterion 1–5 score + one-line rationale
@@ -94,6 +108,30 @@ human and model score identical rows (precondition for ICC). P-MAGIC used 10 tea
 **4. Correlation & reliability.** `eval_stats.py`: **Cohen's κ** (inter-rater), **ICC(2,k)**
 (human↔LLM), **Pearson r** (auto↔human). This is where the layered claim is earned — "automatic can
 screen, teachers judge depth," as both P-MAGIC and VLM-QG conclude.
+
+**4a. Judge-vs-judge reliability — RE-MEASURED 2026-08-06 on the current corpus, and it constrains
+what layer 2 may claim.** Two independent LLM raters (`Qwen3.6-35B` and `Claude Opus 5`) scored all
+**15 worksheets (5 clips × 3 levels)** on the identical frozen prompt: **κ = 0.31
+quadratic-weighted, 0.14 unweighted** over **180 pairs** (exact 40%, within-1 88%). **The tier
+ORDERING reproduces across raters; the absolute SCORE does not.** Report rankings from the judge,
+never a level — "4.12/5 → 8.2/10" is a property of the rater. Agreement is best on
+`cognitive_demand` (**κ 0.70, r 0.80** — this is the row the difficulty claim rests on) and
+**absent on `grounding_accuracy` (κ −0.07, with ZERO exact agreement across the 15 worksheets)**,
+whose wording conflates two questions — *do the numbers come from the measurement?* and *does the
+arithmetic printed beside them close?* — and must be split before the human panel scores it. The
+local judge is **deterministic** (a re-run reproduced every pair), so this is a rater difference,
+not run noise.
+
+> **Superseded:** the 2026-07-31 measurement on the previous 7-clip corpus gave κ = 0.34 quad /
+> 0.08 unweighted over 252 pairs, `cognitive_demand` κ 0.59, `grounding_accuracy` κ −0.04. Those
+> numbers describe a corpus that no longer exists (two synthesized-orbit fans and `turntable-3`
+> withdrawn, `fan-4656` added) and must not be quoted as current. The dated companion docs below
+> are frozen records of that run.
+
+Full record + reproduction:
+`judge-reliability-2026-07-31.md`. Two raters is also the **precondition for a real κ column** in
+the results table (`build_pmagic_tables.py --judge-dir-b`); comparing two raters is only valid if
+both were sent the byte-identical prompt (`export_judge_prompts.py`).
 
 ---
 

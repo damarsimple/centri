@@ -17,7 +17,14 @@ rows.
 Their unit is a *word problem*; Centri's unit is a **learning-material passage** across three tiers
 (basic / intermediate / advanced) **plus its annotated figures**. So we **keep the linguistic and
 multimodal rows verbatim**, **drop the problem-only rows** (a passage has no "answer"), and **add**
-Centri's physics/tier + video-recognition rows. Every dimension is scored **1–5** (5 = excellent).
+Centri's physics/tier + video-recognition rows. Every dimension is scored **1–5**.
+
+> **This file defines the CRITERIA — what each dimension measures. It does NOT define the
+> SCORES.** What a 1, 2, 3, 4 or 5 means for each dimension is in
+> **[`eval-rubric-scoring.md`](eval-rubric-scoring.md)**, which is the document raters read.
+> Neither parent published level descriptors, so those anchors are Centri's own; the
+> grounding for each design choice is listed there. Scoring against "5 = excellent" alone is
+> what produced κ = −0.07 on `grounding_accuracy`.
 
 ---
 
