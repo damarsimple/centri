@@ -49,6 +49,13 @@ import numpy as np
 # is not merely pointless, it injects error, because `l` is then fitted to noise.
 MIN_HUB_OFFSET_PX = 20.0
 
+# Above this the orbit is round enough to leave alone: the residual foreshortening is
+# smaller than the scatter we could measure it against, so "correcting" it would stretch
+# noise. Below it the orbit is visibly an ellipse and the AFFINE branch runs, even when
+# the hub is dead centre — the case the hub-offset gate alone used to miss entirely.
+# 0.95 is a ~18 deg tilt; the corpus sits at 0.82 (fan-4656, ~35 deg) or above 0.97.
+AFFINE_MIN_AXIS_RATIO = 0.95
+
 # Guard rails. A rectification that moves the revolution count is not a rectification.
 MAX_MEAN_OMEGA_DRIFT = 0.02      # 2%
 
@@ -169,10 +176,60 @@ def rectify(x_full, y_full, hub_px):
     meta.tilt_deg = float(np.degrees(np.arccos(min(1.0, p["B"] / p["A"]))))
 
     if meta.hub_offset_px < MIN_HUB_OFFSET_PX:
-        # Affine to within our ability to measure it. Say so and leave the data alone;
-        # fitting `l` here would be fitting noise.
-        meta.reason = f"hub_offset_below_{MIN_HUB_OFFSET_PX:g}px"
-        return x_full, y_full, None, meta
+        # The projection is AFFINE to within our ability to measure it: there is no
+        # perspective convergence to undo, and fitting `l` here would be fitting noise.
+        #
+        # That is not the same as "nothing to correct". An affine image of a circle is
+        # still an ELLIPSE — a face-on-centred but TILTED orbit lands here with a large
+        # foreshortening and used to be returned untouched, because this gate asks about
+        # DECENTERING (hub offset) and never about FORESHORTENING (axis ratio), which it
+        # has already measured two lines above.
+        #
+        # What that cost, measured on fan-4656 (2026-08-06): axis ratio 0.823, hub offset
+        # 0.05 px. The orbit stayed an ellipse, so "the orbit radius" had no single value
+        # — semi-major 260 px, semi-minor 214, circle-fit 245 — and two runs from a
+        # BYTE-IDENTICAL sidecar picked differently, giving px_per_m 591 vs 558 and a 6%
+        # swing in the taught a_c. The ambiguity was the bug; the ellipse was its cause.
+        #
+        # De-foreshortening needs no vanishing line, only the ellipse: scale the minor
+        # axis up to the major. `_metric_from_ellipse` preserves handedness, so the sign
+        # of omega — and the reported rotation direction — cannot flip.
+        if meta.axis_ratio >= AFFINE_MIN_AXIS_RATIO:
+            meta.reason = (f"hub_offset_below_{MIN_HUB_OFFSET_PX:g}px_and_"
+                           f"axis_ratio_above_{AFFINE_MIN_AXIS_RATIO:g}")
+            return x_full, y_full, None, meta
+
+        got = _metric_from_ellipse(x, y)
+        if got is None:
+            meta.reason = "affine_stage_failed"
+            return x_full, y_full, None, meta
+        xm_, ym_, _pa = got
+
+        # Same similarity pin as the perspective path: take the MAJOR semi-axis, the
+        # direction foreshortening never shortened, so px_per_m keeps meaning what it
+        # meant and r_fit_px becomes the unambiguous, unforeshortened orbit radius.
+        r_rect = np.hypot(xm_, ym_)
+        scale = float(p["A"] / max(np.median(r_rect), 1e-9))
+        xm_, ym_ = xm_ * scale, ym_ * scale
+        meta.scale_applied = scale
+
+        # ⚠ `radial_residual_after_pct` is TAUTOLOGICAL in this branch and is not evidence.
+        # Any ellipse maps to a circle under the affine map read off its own conic, so this
+        # number is ~0 whatever the input — including when `hub_px` was wrongly given as the
+        # ellipse centre of a genuinely PERSPECTIVE orbit, which this branch cannot detect
+        # (both cases give hub_offset ≈ 0). It is recorded for symmetry with the perspective
+        # path; the real defence is that `hub_px` comes from the marked axle, not from a fit.
+        meta.radial_residual_before_pct = _radial_residual_pct(x, y, p["c"][0], p["c"][1])
+        meta.radial_residual_after_pct = _radial_residual_pct(xm_, ym_, 0.0, 0.0)
+
+        x_out = np.full_like(x_full, np.nan)
+        y_out = np.full_like(y_full, np.nan)
+        x_out[m] = xm_ + hx
+        y_out[m] = ym_ + hy
+
+        meta.applied = True
+        meta.reason = "affine_foreshortening"
+        return x_out, y_out, (hx, hy), meta
 
     l = C @ np.array([hx, hy, 1.0])
     n = np.linalg.norm(l[:2])

@@ -123,15 +123,51 @@ def test_meta_is_json_safe_when_skipped():
     json.dumps(meta2.as_dict(), allow_nan=False)
 
 
-def test_ellipse_centre_as_hub_is_refused_or_inert():
+def test_ellipse_centre_as_hub_is_never_a_perspective_rectification():
     """THE classic error: pass the centre of the ellipse you SEE instead of the imaged
     axle. Its polar is the line at infinity, the homography is the identity, and you have
-    silently done nothing. The hub-offset gate must catch that rather than pretend."""
+    silently done nothing.
+
+    Amended 2026-08-06, when the AFFINE branch was added. The invariant this test protects
+    is that such a call must never be reported as a PERSPECTIVE (`vanishing_line`)
+    rectification — that is the claim that would be false. It may now be handled as an
+    affine de-foreshortening, which is the correct treatment when the axle genuinely does
+    project to the ellipse centre.
+
+    ⚠ Those two cases are NOT distinguishable from the trajectory alone: a mis-supplied
+    hub and a genuinely centred one both give hub_offset ≈ 0. See
+    `test_affine_branch_cannot_detect_a_mis_supplied_hub`."""
     _th, xi, yi, _hub = _scene()
     p = RC.conic_params(RC.fit_conic(xi, yi))
     ellipse_centre = (float(p["c"][0]), float(p["c"][1]))
     _xr, _yr, _cen, meta = RC.rectify(xi, yi, ellipse_centre)
-    assert not meta.applied, "using the ellipse centre must not count as rectification"
+    assert meta.reason != "vanishing_line", \
+        "the ellipse centre cannot yield a perspective rectification"
+    if meta.applied:
+        assert meta.reason == "affine_foreshortening", meta.reason
+
+
+def test_affine_branch_cannot_detect_a_mis_supplied_hub():
+    """Documents a real limit rather than asserting a capability.
+
+    `_scene()` is a PERSPECTIVE image, so its axle does NOT project to the ellipse centre.
+    Supplying that centre anyway hides the perspective, and the affine branch will then
+    circularise the orbit and report a near-zero residual — which proves nothing, because
+    ANY ellipse maps to a circle under the affine map read off its own conic. The residual
+    is tautological in this branch and must never be quoted as evidence of correctness.
+
+    The real defence is upstream: `hub_px` must come from the marked axle, not from a fit."""
+    _th, xi, yi, true_hub = _scene()
+    p = RC.conic_params(RC.fit_conic(xi, yi))
+    centre = (float(p["c"][0]), float(p["c"][1]))
+    off = float(np.hypot(true_hub[0] - centre[0], true_hub[1] - centre[1]))
+    assert off > RC.MIN_HUB_OFFSET_PX, "scene must be perspective for this test to mean anything"
+
+    _xr, _yr, _cen, meta = RC.rectify(xi, yi, centre)
+    if meta.applied:
+        # near-zero by construction, NOT by correctness
+        assert meta.radial_residual_after_pct < 1e-6
+        assert meta.reason == "affine_foreshortening"
 
 
 def test_the_uncorrected_curve_we_draw_is_the_pre_correction_measurement():
