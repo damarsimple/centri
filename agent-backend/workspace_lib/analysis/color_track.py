@@ -54,6 +54,7 @@ def track(
     max_step_px=None,
     roi_inner_px=None,
     max_area=None,
+    relock_after: int = 5,
 ) -> dict:
     """Follow the coloured marker per frame; return the remote-/track schema.
 
@@ -84,6 +85,18 @@ def track(
         sudden jump to a blade is rejected. Set `max_step_px=None` to disable
         gating (pure best-score per frame).
 
+    `relock_after` is what stops that gate from becoming a trap. The lock is only
+    worth keeping while it still explains the frames: after this many CONSECUTIVE
+    misses it is dropped, and the next frame re-acquires on score alone.
+
+    Without it the gate was self-sealing. A miss left `prev` untouched, so one step
+    longer than `max_step_px` — a speed-up, a dropped frame, a brief occlusion —
+    froze the lock at a stale point, and the marker was only re-found when its orbit
+    happened to carry it back within `max_step_px` of that point, once per
+    revolution. Measured on `fan-4656` (2026-08-06): `max_step=90` gave **26.9%**
+    coverage where no gate at all gave **99.99%**. The clip was not hard; the gate
+    could not let go. Set `relock_after=0` to restore the old sticky behaviour.
+
     Frames with no qualifying blob are emitted as misses (`cx`/`cy`/`bbox` = null),
     exactly as the remote tracker reports occlusions.
     """
@@ -98,6 +111,8 @@ def track(
     w = h = None
     i = 0
     prev = None
+    misses = 0
+    n_relocks = 0
     while True:
         ok, fr = cap.read()
         if not ok:
@@ -144,8 +159,17 @@ def track(
                 chosen = max(pool, key=lambda c: c[2])
         if chosen is not None:
             prev = (chosen[0], chosen[1])
+            misses = 0
             traj.append({"frame": i, "cx": chosen[0], "cy": chosen[1], "bbox": chosen[3]})
         else:
+            misses += 1
+            # A lock that has explained nothing for `relock_after` frames is stale.
+            # Drop it so the next frame can re-acquire on score; keeping it is how
+            # a single over-step used to cost a whole revolution.
+            if prev is not None and relock_after and misses >= relock_after:
+                prev = None
+                misses = 0
+                n_relocks += 1
             traj.append({"frame": i, "cx": None, "cy": None, "bbox": None})
         i += 1
     cap.release()
@@ -157,6 +181,10 @@ def track(
                        "nb_frames": len(traj), "fps": fps},
         "track_coverage": (n_valid / len(traj)) if traj else 0.0,
         "method": "color",
+        # How often the temporal gate had to let go. A healthy clip relocks 0 times;
+        # a large count means `max_step_px` is too tight for the motion, and the
+        # coverage figure above is only as good as that gate.
+        "n_relocks": n_relocks,
     }
 
 
@@ -177,19 +205,25 @@ def _main(argv=None) -> int:
                          "prefers a big dull object over the small vivid marker")
     ap.add_argument("--max-step", type=float, default=None,
                     help="max centroid jump px between frames (temporal gate); omit to disable")
+    ap.add_argument("--relock-after", type=int, default=5,
+                    help="drop the lock after this many consecutive misses so the marker can be "
+                         "re-acquired; 0 = never (the old sticky behaviour, which cost fan-4656 "
+                         "73 percent of its coverage)")
     ap.add_argument("--out", default=None, help="write JSON here (default stdout)")
     a = ap.parse_args(argv)
     lo = [int(x) for x in a.hsv_lo.split(",")]
     hi = [int(x) for x in a.hsv_hi.split(",")]
     rc = [float(x) for x in a.roi_center.split(",")] if a.roi_center else None
-    res = track(a.video, a.label, lo, hi, rc, a.roi_radius, a.min_area, a.max_step, a.roi_inner, a.max_area)
+    res = track(a.video, a.label, lo, hi, rc, a.roi_radius, a.min_area, a.max_step, a.roi_inner,
+                a.max_area, a.relock_after)
     out = json.dumps(res)
     if a.out:
         with open(a.out, "w") as f:
             f.write(out)
         vi = res["video_info"]
+        relock = f" relocks={res['n_relocks']}" if res.get("n_relocks") else ""
         print(f"[color_track] {a.label}: coverage={res['track_coverage']:.3f} "
-              f"frames={vi['nb_frames']} fps={vi['fps']} → {a.out}")
+              f"frames={vi['nb_frames']} fps={vi['fps']}{relock} → {a.out}")
     else:
         sys.stdout.write(out)
     return 0
