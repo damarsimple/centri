@@ -28,6 +28,20 @@ MODEL = os.environ.get("PI_MATERIAL_MODEL", "Qwen3.6-35B")
 
 LANGS = {"id": "Bahasa Indonesia", "ms": "Bahasa Melayu", "zh": "Chinese", "ja": "Japanese"}
 
+# A fixed term list, so every tier and every clip says the SAME word for the same quantity. Left
+# free, the model picks "radius" in the beginner passage and "jari-jari" in the intermediate one —
+# a reader climbing the tiers then meets two names for one idea, which is precisely the confusion
+# the tiers exist to avoid. School register (jari-jari, kecepatan sudut) over loanwords.
+GLOSSARY = {
+    "id": [("radius", "jari-jari"), ("angle", "sudut"), ("radian", "radian"),
+           ("angular velocity", "kecepatan sudut"), ("linear velocity", "kecepatan linear"),
+           ("centripetal acceleration", "percepatan sentripetal"), ("period", "periode"),
+           ("frequency", "frekuensi"), ("turn rate", "laju putaran"),
+           ("full turn", "putaran penuh"), ("clockwise", "searah jarum jam"),
+           ("counter-clockwise", "berlawanan arah jarum jam"), ("speed", "kelajuan"),
+           ("inward pull", "tarikan ke dalam")],
+}
+
 SYSTEM = (
     "You are a bilingual physics teacher translating a short learning passage about circular "
     "motion into {lang}. Translate ONLY the prose. HARD RULES:\n"
@@ -36,13 +50,33 @@ SYSTEM = (
     "r, v, T, f. Never translate, convert, round, recompute, or drop a number or symbol.\n"
     "2. Translate technical terms naturally for a student in {lang} (e.g. angular velocity, "
     "centripetal acceleration, radius), but keep the parenthetical symbol if the English has one.\n"
+    "2a. A TERM BEING DEFINED IS PROSE, NOT A KEY — translate it too. The beginner passage defines "
+    "vocabulary as a list of 'term: explanation' lines ('angular velocity: how fast that angle "
+    "grows'). The headword before the colon MUST be translated like everything else, with the "
+    "English kept once in brackets so a bilingual class can follow both: "
+    "'kecepatan sudut (angular velocity): ...'. Leaving the headword in English defeats the "
+    "passage — it is the tier written for the reader with the least English.\n"
+    "2b. Use the ACTIVE voice for an object's own motion. In Bahasa Indonesia an object that "
+    "sweeps round a centre 'menyapu' or 'bergerak melingkar' — it is never 'disapu', which says "
+    "something else swept it (sapu = broom).\n"
     "3. Preserve paragraph breaks and meaning faithfully; do not add, remove, or reorder content, "
     "and never invent a number or fact not in the source.\n"
     "4. Plain Unicode only — never LaTeX or a backslash.\n"
     "Return ONLY a JSON object mapping each given section key (unchanged, in English) to its "
     "translated prose, plus a key \"__titles__\" mapping each section key to a short {lang} "
     "translation of that heading. No prose outside the JSON."
+    "{glossary}"
 )
+
+
+def _glossary_clause(lang):
+    """The fixed EN->target term list, as a prompt clause. Empty for languages without one."""
+    pairs = GLOSSARY.get(lang)
+    if not pairs:
+        return ""
+    return ("\n5. USE EXACTLY THESE TERMS — the same word every time, across every tier, so a "
+            "reader moving up the levels never meets two names for one quantity:\n"
+            + "\n".join(f"   {en} -> {tgt}" for en, tgt in pairs))
 
 
 def _call(system, user, max_tokens=8000):
@@ -68,14 +102,15 @@ def _parse_json(s):
     return json.loads(s[i:j + 1])
 
 
-def translate(material, lang_name):
+def translate(material, lang_name, lang=None):
     secs = material.get("sections", {})
     if not secs:
         return None
     user = ("Translate these section values into " + lang_name + ". Keys are English and stay "
             "unchanged; also return the \"__titles__\" heading map.\n\n"
             + json.dumps(secs, ensure_ascii=False, indent=2))
-    obj = _parse_json(_call(SYSTEM.format(lang=lang_name), user))
+    obj = _parse_json(_call(SYSTEM.format(lang=lang_name,
+                                      glossary=_glossary_clause(lang)), user))
     titles = obj.pop("__titles__", {})
     # Keep only the known section keys; drop anything the model hallucinated.
     translated = {k: obj[k] for k in secs if k in obj and isinstance(obj[k], str)}
@@ -85,7 +120,7 @@ def translate(material, lang_name):
 
 def _one(path, lang, lang_name, out_dir=None):
     material = json.loads(pathlib.Path(path).read_text())
-    res = translate(material, lang_name)
+    res = translate(material, lang_name, lang)
     if not res:
         print(f"  {path}: no sections, skipped")
         return

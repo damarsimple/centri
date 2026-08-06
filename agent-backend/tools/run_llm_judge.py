@@ -70,6 +70,56 @@ MULTIMODAL = [
 # Instrumented (deterministic), NOT LLM-rated: video_recognition_quality (CV vs ground truth).
 BLOOM = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"]
 
+# ── Axis 4, the multimodal rubric (docs/eval-rubric-ika.md, adopted ≈verbatim from P-MAGIC
+# Table 2 + our annotation row). Grouped by MODALITY because a tier is scored only on the
+# modalities actually printed beside it — the basic tier ships no table at all, and scoring an
+# absent modality would drag its mean down for a figure it never showed.
+MULTIMODAL_MODALITIES = {
+    "image": ["image_precision", "image_relevancy"],
+    "graph": ["graph_accuracy_labeling", "graph_scale_proportions", "graph_sense_physical",
+              "graph_relevancy"],
+    "table": ["table_labels_scales", "table_proportional_reasoning", "table_physics_connection",
+              "table_relevancy"],
+    "video": ["annotation_correctness"],
+}
+MULTIMODAL_DEFS = {
+    "image_precision": "The prose refers to the image accurately and clearly.",
+    "image_relevancy": "The image supports the passage's concept/objective.",
+    "graph_accuracy_labeling": "The graph plots the data correctly; axes are labelled with the "
+                               "right quantities and units.",
+    "graph_scale_proportions": "Appropriate scale, evenly spaced intervals matching the data range.",
+    "graph_sense_physical": "Conclusions drawn from the graph are consistent with physical "
+                            "principles.",
+    "graph_relevancy": "Axis titles and values in the graph align with the text.",
+    "table_labels_scales": "Each row/column is clearly labelled with quantities and units, at a "
+                           "readable scale.",
+    "table_proportional_reasoning": "The table supports proportional/predictive reasoning between "
+                                    "variables.",
+    "table_physics_connection": "The table connects to fundamental physics concepts and real-world "
+                                "context.",
+    "table_relevancy": "Column titles and values align with and support the text.",
+    "annotation_correctness": "The overlays drawn on the video frame (radius, angular speed, "
+                              "linear speed, centripetal acceleration) point at the right object "
+                              "and read the right value.",
+}
+
+MULTIMODAL_SYSTEM = (
+    "You are an expert physics-education assessor grading the FIGURES that accompany a short "
+    "learning passage about circular motion, generated from a real video's measurements. You are "
+    "shown the passage, the measured ground-truth values, and the figure images themselves.\n\n"
+    "Grade ONLY the modalities listed as PRESENT for this worksheet. Judge what the images "
+    "actually show, not what the caption claims — where the two disagree, that IS the finding, "
+    "and it belongs in the score.\n\n"
+    "Score each criterion 1–5 (5 = excellent):\n{criteria}\n"
+    "Return ONLY JSON with exactly these keys: {keys} plus \"rationale\":\"one sentence\". "
+    "Every score must be an integer 1–5."
+)
+
+
+def multimodal_criteria_for(present):
+    """The criteria that may be scored, given which modalities this tier actually prints."""
+    return [c for mod, crits in MULTIMODAL_MODALITIES.items() if mod in present for c in crits]
+
 _RUBRIC_LINES = (
     "Axis 1 — Linguistic / authenticity:\n"
     "- motivating_context: presents a meaningful and compelling purpose.\n"
@@ -131,7 +181,13 @@ def _parse(text):
     return json.loads(text[a:b + 1])
 
 
-def judge_one(mat, seed=None, measured_ei=None):
+def build_prompt(mat, seed=None, measured_ei=None):
+    """(system, user, level) — the one place a judge prompt is built.
+
+    Kept separate from judge_one so a SECOND judge can be handed the byte-identical question
+    (tools/export_judge_prompts.py). If two raters are to be compared, the only thing that may
+    differ between them is the model; anything assembled twice eventually drifts.
+    """
     secs = mat.get("sections", mat)
     passage = "\n\n".join(f"## {k}\n{v}" for k, v in secs.items() if isinstance(v, str))
     level = mat.get("difficulty_level") or mat.get("tier") or "unspecified"
@@ -145,7 +201,38 @@ def judge_one(mat, seed=None, measured_ei=None):
                 f"difficulty_fit: higher EI should accompany a higher tier.")
     user = f"Asserted difficulty level: {level}\n\nPassage:\n{passage}{ctx}"
     # NB: .replace not .format — SYSTEM contains literal JSON braces the format parser would choke on.
-    res = _parse(_call(SYSTEM.replace("{level}", str(level)), user))
+    return SYSTEM.replace("{level}", str(level)), user, level
+
+
+def build_multimodal_prompt(mat, present, figure_claims=None, seed=None):
+    """(system, user, criteria) for Axis 4 — scored only on the modalities this tier prints.
+
+    ``present`` is the set of modality keys actually shown beside this tier ("image", "graph",
+    "table", "video"); ``figure_claims`` is the render manifest's description of what each figure
+    is supposed to show, which the rater checks the image against.
+    """
+    crits = multimodal_criteria_for(present)
+    secs = mat.get("sections", mat)
+    passage = "\n\n".join(f"## {k}\n{v}" for k, v in secs.items() if isinstance(v, str))
+    level = mat.get("difficulty_level") or mat.get("tier") or "unspecified"
+
+    lines = "".join(f"- {c}: {MULTIMODAL_DEFS[c]}\n" for c in crits)
+    keys = ",".join(f'"{c}":n' for c in crits)
+    system = MULTIMODAL_SYSTEM.replace("{criteria}", lines).replace("{keys}", "{" + keys + "}")
+
+    ctx = f"Asserted difficulty level: {level}\nModalities present: {', '.join(sorted(present))}"
+    if seed:
+        vs = "; ".join(f"{v['symbol']}={v.get('value')}" for v in seed.get("variables", []))
+        ctx += f"\n\nMeasured ground truth: {vs}"
+    if figure_claims:
+        ctx += ("\n\nWhat each figure is SUPPOSED to show, per the renderer's own manifest "
+                "(verify the image against this):\n" + json.dumps(figure_claims, indent=1))
+    return system, f"{ctx}\n\nPassage:\n{passage}", crits
+
+
+def judge_one(mat, seed=None, measured_ei=None):
+    system, user, level = build_prompt(mat, seed, measured_ei)
+    res = _parse(_call(system, user))
     res["_level"] = level
     return res
 
