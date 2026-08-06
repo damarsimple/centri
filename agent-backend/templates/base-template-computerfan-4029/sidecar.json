@@ -1,8 +1,37 @@
 {
-  "tracked_object": { "visual_cues": ["red marker"] },
-  "reference_geometry": { "label": "red marker", "physical_size": 0.04 },
-  "rotation_center_frac": [0.5194, 0.4734],
+  "tracked_object": {
+    "visual_cues": [
+      "red marker"
+    ]
+  },
+  "reference_geometry": {
+    "label": "red marker",
+    "physical_size": 0.04
+  },
+  "rotation_center_frac": [
+    0.5194,
+    0.4734
+  ],
   "tracking_mode": "color",
-  "tracking_config": { "hsv_lo": [168,80,80], "hsv_hi": [12,255,255], "roi_radius": 520, "max_step": 300, "min_area": 100 },
-  "display_w": 1080, "display_h": 1920, "video_w": 1080, "video_h": 1920
+  "tracking_config": {
+    "hsv_lo": [
+      168,
+      80,
+      80
+    ],
+    "hsv_hi": [
+      12,
+      255,
+      255
+    ],
+    "roi_radius": 520,
+    "max_step": 300,
+    "min_area": 100
+  },
+  "display_w": 1080,
+  "display_h": 1920,
+  "video_w": 1080,
+  "video_h": 1920,
+  "object_name": "red marker",
+  "scene_title": "a red marker on a computer fan blade"
 }

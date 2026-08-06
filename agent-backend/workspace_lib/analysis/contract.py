@@ -57,6 +57,15 @@ REQUIRED = (
 _DISPLAY_SPACES = {"display", "full_frame", "full-frame", "original", "full"}
 _CROPPED_SPACES = {"cropped", "crop", "cropped-video", "cropped_video"}
 
+# Slack before a point counts as outside the crop rectangle. Detection centroids are
+# sub-pixel, so this only absorbs rounding; it is not a physical tolerance.
+_OUTSIDE_TOL_PX = 2.0
+# How far outside, and how many points, before "outside the crop" is taken as proof
+# rather than one freak detection. A genuine display-space trajectory overshoots by
+# something close to the crop offset, so this bar is far below the real signal.
+_OUTSIDE_MIN_PX = 4.0
+_OUTSIDE_MIN_PTS = 3
+
 
 class ContractError(ValueError):
     """Raised when pipeline_inputs.json is missing or malformed."""
@@ -114,6 +123,31 @@ def _radius_cv(x, y, cx, cy) -> float:
         return float("nan")
     m = float(r.mean())
     return float(r.std() / m) if m > 1e-9 else float("nan")
+
+
+def _overshoot_px(x, y, crop_w: float, crop_h: float) -> float:
+    """How far the trajectory falls OUTSIDE the crop rectangle, in pixels.
+
+    A trajectory measured on the cropped video is bounded by that video's frame
+    by construction — a detection cannot be reported at a pixel the file does not
+    contain. So any meaningful overshoot proves the points are NOT cropped, no
+    matter what `coordinate_space` says and no matter where the centre sits.
+
+    Returns (largest single-axis excursion, how many points sit outside). Both are
+    0 when the trajectory fits inside the rectangle, which proves nothing either
+    way: display-space points also fit whenever the crop offset is small.
+    """
+    over = 0.0
+    outside = np.zeros(np.asarray(x).shape, dtype=bool)
+    for v, hi in ((x, crop_w), (y, crop_h)):
+        if not (hi and hi > 0):
+            continue
+        finite = np.isfinite(v)
+        vf = v[finite]
+        if vf.size:
+            over = max(over, float(-vf.min()), float(vf.max() - (hi - 1)))
+        outside |= finite & ((v < -_OUTSIDE_TOL_PX) | (v > (hi - 1) + _OUTSIDE_TOL_PX))
+    return max(over, 0.0), int(outside.sum())
 
 
 def _frame_timestamps(video: Path) -> np.ndarray | None:
@@ -231,9 +265,36 @@ def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
         # better, and say so out loud when it is.
         traj_needs_crop = True
         if x_off or y_off:
+            # The radius test above compares the trajectory against the CENTRE, so it
+            # is only as good as the centre. On computerfan-4029 the centre arrived as
+            # a `bootstrap` estimate sitting 260 px off the hub, which made BOTH
+            # readings look bad (cv 0.462 declared vs 0.243 untouched) and the test
+            # picked the less-bad wrong one. The trajectory then kept its display
+            # coordinates, a RANSAC refit moved the centre to match it, and the result
+            # was self-consistent — correct radius, correct omega, and every overlay
+            # drawn exactly roi_crop.y_off px off the object.
+            #
+            # The crop rectangle settles it without consulting the centre at all: the
+            # cropped video cannot contain a detection outside its own frame. Where
+            # that is decisive it outranks the radius test, which can only ever be
+            # circumstantial.
+            overshoot, n_outside = _overshoot_px(
+                x_px, y_px, float(roi_crop.get("crop_w", 0) or 0),
+                float(roi_crop.get("crop_h", 0) or 0),
+            )
+            provably_display = overshoot > _OUTSIDE_MIN_PX and n_outside >= _OUTSIDE_MIN_PTS
+            if provably_display:
+                common.log(
+                    f"[contract] trajectory is in display space by construction: "
+                    f"{n_outside} point(s) fall up to {overshoot:.0f}px outside the "
+                    f"{roi_crop.get('crop_w')}x{roi_crop.get('crop_h')} crop, which the "
+                    f"cropped video cannot contain. Cropping both."
+                )
+
             cv_declared = _radius_cv(x_px, y_px, cx_px, cy_px)
             cv_traj_cropped = _radius_cv(x_px + x_off, y_px + y_off, cx_px, cy_px)
-            if (cv_declared == cv_declared and cv_traj_cropped == cv_traj_cropped
+            if (not provably_display
+                    and cv_declared == cv_declared and cv_traj_cropped == cv_traj_cropped
                     and cv_declared > 0.15 and cv_traj_cropped < 0.6 * cv_declared):
                 traj_needs_crop = False
                 common.set_validation_flag("trajectory_space_mismatch")
@@ -284,8 +345,16 @@ def load_inputs(path: Path = INPUTS_PATH) -> Inputs:
 
     tracked_label = str(data["tracked_label"])
     ref_label = str(data["ref_label"])
-    scene_title = str(data.get("scene_title") or "").strip() \
-        or f"{tracked_label} on {ref_label}"
+    # Collapse the degenerate "<X> on <X>" here, at the seam, rather than relying on every
+    # display surface to remember. The composite is built in prompts/orchestrator.txt as
+    # "<tracked> on <ref>", which reads fine until the tracked object IS the scale reference
+    # — on computerfan-4029 the 4 cm marker is both, and the title shipped as "red marker on
+    # red marker". `dedup_display_name` was written for exactly this and is called by the
+    # seed, the report and figures; render/annotate.py never called it, so the video banner
+    # carried the duplicate while the figure beside it did not. Normalising once means a new
+    # surface cannot reintroduce it by forgetting.
+    scene_title = common.dedup_display_name(data.get("scene_title")) \
+        or common.dedup_display_name(f"{tracked_label} on {ref_label}")
 
     return Inputs(
         fps=float(data["fps"]),
