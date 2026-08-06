@@ -1,0 +1,475 @@
+% Centri — Weekly progress (week ending 2026-08-12)
+% Sparse presenting deck (CLAUDE.md rule #5): claim + number + figure + one-line takeaway,
+% <=60 words/slide of PROSE. Tables and figures are exempt from the word budget (rule #5,
+% revised 2026-07-31) — the eval tables mirror P-MAGIC's published ones in full.
+% The cold-readable companion is centri-weekly-2026-08-12-memo.md — every claim here
+% appears there with its terms defined.
+% Tables: agent-backend/material_work/_eval/pmagic_tables_2026-08-06.tex, built by
+%         agent-backend/tools/build_pmagic_tables.py — regenerate, never hand-edit.
+% Compile: pdflatex -interaction=nonstopmode centri-weekly-2026-08-12.tex  (run twice)
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{metropolis}
+\metroset{sectionpage=progressbar, subsectionpage=none, numbering=fraction, progressbar=frametitle}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+\usepackage[most]{tcolorbox}
+
+% ---- palette (shared with the other Centri decks) ------------------------
+\definecolor{cMeas}{HTML}{1F6FB2}
+\definecolor{cPed}{HTML}{B5651D}
+\definecolor{cApp}{HTML}{2E7D32}
+\definecolor{cInfra}{HTML}{5E35B1}
+\definecolor{cAccent}{HTML}{C62828}
+\definecolor{cGrey}{HTML}{616161}
+\definecolor{cBasic}{HTML}{2E7D32}
+\definecolor{cInter}{HTML}{1F6FB2}
+\definecolor{cAdv}{HTML}{5E35B1}
+\setbeamercolor{frametitle}{bg=cPed}
+\setbeamercolor{progress bar}{fg=cAccent}
+
+\newcommand{\ok}{{\color{cApp}\textbf{\checkmark}}}
+\newcommand{\nope}{{\color{cGrey}--}}
+\newcommand{\takeaway}[1]{\vfill{\footnotesize\itshape\color{cGrey}#1\par}}
+
+\input{pmagic_tables.tex}
+
+\title{Centri --- A Corpus That Holds}
+\subtitle{Re-shooting the fan, withdrawing a clip, and re-deriving every number ---
+see the accompanying memo for detail}
+\author{Damar Albaribin}
+\institute{MSc Thesis --- advisor: Prof.\ Wu-Yuin Hwang}
+\date{Week ending 2026-08-12}
+
+\begin{document}
+\maketitle
+
+% =========================================================================
+\begin{frame}{Where the work stands}
+\vfill
+\begin{center}
+{\Large One phone video $\rightarrow$ \textbf{\color{cBasic}basic} $\cdot$
+\textbf{\color{cInter}intermediate} $\cdot$ \textbf{\color{cAdv}advanced}}\\[3pt]
+{\footnotesize 5 clips, 15 worksheets --- every clip's trajectory now measured}
+\end{center}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.6}
+\begin{tabular}{@{}p{7.4cm}c@{}}
+\toprule
+\rowcolor{cPed!12}
+\textbf{Question} & \\
+\midrule
+Do the numbers trace to the measurement? & \ok \\
+Is every clip's trajectory measured, not modelled? & \ok \\
+Is the rotation rate right? & \ok \ {\footnotesize\color{cGrey}$<1\%$, one clip} \\
+Is the metre scale right? & {\color{cPed}\textbf{$\pm5\%$, one clip}} \\
+Does it get harder by level? & \ok \ {\footnotesize\color{cGrey}both raters} \\
+\textbf{Does anybody learn from it?} & {\color{cAccent}\textbf{?}} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\takeaway{Two clips left the corpus and one entered it. The last row is still the question the
+project is actually asking.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The corpus changed}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}llp{6.0cm}@{}}
+\toprule
+\rowcolor{cPed!12}
+\textbf{Clip} & & \textbf{Why} \\
+\midrule
+fan-4027 $\cdot$ fan-4028 & {\color{cAccent}out} & no tracked point --- the orbit was
+\emph{synthesised} from a blade-pass rate \\
+turntable-3 & {\color{cAccent}out} & the tracked marker teleports; taught a number $27\%$ high \\
+\midrule
+\textbf{fan-4656} & {\color{cApp}\textbf{in}} & re-shot with a card on one blade:
+$99.99\%$ coverage, $190.8$ turns, zero jumps \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Nothing was deleted. Both templates and both workspaces are archived with the
+evidence that condemned them.}
+\end{center}
+\takeaway{Every published number described a corpus that no longer exists. All of them were
+re-derived from scratch --- none rescaled.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{One piece of card}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\rowcolor{cPed!12}
+& \textbf{before} & \textbf{after} \\
+\midrule
+what is measured & a rate & \textbf{a trajectory} \\
+the orbit drawn on the frame & {\color{cAccent}invented} & {\color{cApp}observed} \\
+coverage & --- & $99.99\%$ \\
+turns tracked & --- & $190.8$ \\
+frames off the orbit & --- & \textbf{0} \\
+comes to rest on camera & no & {\color{cApp}yes} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize The marker is $1000\times$ larger than the next yellow thing inside the fan's
+radius, so finding it needs no learned detector at all.}
+\end{center}
+\takeaway{The cheapest accuracy improvement in the whole project was a piece of card and a
+second take.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Checking the rate without a sensor}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\rowcolor{cMeas!12}
+\textbf{Window} & \textbf{marker track} & \textbf{blade-pass} & \textbf{difference} \\
+\midrule
+$78$--$90$~s   & $6.199$ & $6.190$ & $\mathbf{+0.16\%}$ \\
+$112$--$124$~s & $6.172$ & $6.170$ & $\mathbf{+0.03\%}$ \\
+$146$--$158$~s & $5.046$ & $4.997$ & $+0.99\%$ \\
+$180$--$192$~s & $1.331$ & $1.335$ & $-0.34\%$ \\
+\midrule
+\rowcolor{cAccent!8}
+$214$--$226$~s \emph{(at rest)} & $\mathbf{0.016}$ & $\mathbf{4.690}$ & {\color{cAccent}\textbf{---}} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Second measurement uses \textbf{no marker and no tracker}: one pixel patch,
+brightness over time, Fourier transform, divided by five blades. rad/s.}
+\end{center}
+\takeaway{The last row is the result. The fan is stopped; the old method still reports
+$4.69$~rad/s. That is why those two clips had to go.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The card is the ruler}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\rowcolor{cPed!12}
+\textbf{Span} & \textbf{tape} & \textbf{pixels} & \textbf{px/m} \\
+\midrule
+hub to card's near edge & $31$~cm & $190.5$ & $615$ \\
+card length & $25$~cm & $139.0$ & $556$ \\
+\midrule
+\rowcolor{cApp!10}
+\textbf{fitted together} & & & $\mathbf{591}$ \\
+\midrule
+$\Rightarrow$ hub to card centre & \emph{44~cm} & $260.0$ & \emph{used} \\
+$\Rightarrow$ blade tip \emph{(prediction)} & \emph{54~cm} & $319.3$ & \emph{to check} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize A ruler is unreadable at ceiling distance. It was not needed: the card lies
+\emph{along} the blade and ends exactly at the tip, so it measures itself.}
+\end{center}
+\takeaway{Reading ``31~cm'' as the card's \emph{centre} rather than its \emph{edge} would have
+made every distance $29\%$ too small. Caught before a worksheet shipped.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{A gate that measured the tilt and ignored it}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\rowcolor{cInfra!12}
+\textbf{fan-4656} & \textbf{was} & \textbf{now} \\
+\midrule
+orbit correction & {\color{cAccent}skipped} & {\color{cApp}applied} \\
+reason & \emph{``hub is centred''} & \emph{the orbit is an ellipse} \\
+out-of-round & $7.29\%$ & $\mathbf{3.41\%}$ \\
+\midrule
+radius used & $245$ \emph{or} $260$~px & $\mathbf{260}$~px \\
+scale & $558$ \emph{or} $591$ & $\mathbf{591}$ \\
+inward pull taught & $20.99$ \emph{or} $22.24$ & $\mathbf{22.67}$~m/s$^2$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Two runs of the \textbf{same video and the same settings} disagreed by $6\%$,
+because a tilted orbit has three plausible ``radii'' and nothing chose between them.}
+\end{center}
+\takeaway{The fix removes the choice: straighten the ellipse first, and only one radius exists.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{A tracker that could not let go}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\rowcolor{cInfra!12}
+\textbf{Coverage} & \textbf{was} & \textbf{now} \\
+\midrule
+fan-4656 \emph{(the config that exposed it)} & $26.9\%$ & $\mathbf{92.6\%}$ \\
+computerfan-4029 \emph{(shipped this way for weeks)} & $86.9\%$ & $\mathbf{99.3\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize The tracker ignores candidates too far from where it last saw the marker. When
+\emph{none} qualified it kept the old position, so one bad frame stranded it until the marker
+came round.}
+\end{center}
+\takeaway{On every frame the old code got right, the new one returns the identical point. 4029's
+recovered frames moved its taught acceleration by $21\%$.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The sensor was right for the wrong reason}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\rowcolor{cMeas!12}
+\textbf{Peak turn rate, turntable-3} & \textbf{rad/s} & \textbf{vs sensor} \\
+\midrule
+as shipped & $12.348$ & {\color{cAccent}$+25.5\%$} \\
+\rowcolor{cApp!10}
+same run, three bad frames removed & $9.431$ & $\mathbf{-4.1\%}$ \\
+the other run & $9.781$ & $-0.6\%$ \\
+\midrule
+gyroscope & $9.838$ & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize We had read this table as a result about perspective correction. It is not:
+$3$ frames out of $350$ account for almost all of it.}
+\end{center}
+\takeaway{The phone's own sensor caught the teleports weeks before we went looking for them ---
+nothing else in the stack can see three bad frames.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Automatic evaluation, by level}
+\vfill
+\begin{center}
+\scriptsize
+\renewcommand{\arraystretch}{1.15}
+\resizebox{\textwidth}{!}{\pmagicAuto}
+\end{center}
+\vfill
+\begin{center}
+{\scriptsize P-MAGIC Table 3 layout (their Easy / Intermediate / Advanced), where BERT F1 runs
+$0.877$--$0.885$ and diversity $\approx 0.51$. Each column is defined overleaf.}
+\end{center}
+\takeaway{Spread \emph{within} a level is $\pm 0.003$; across all $15$ it is $\pm 0.013$. These
+are reading the level, not the video.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{What each score measures}
+\begin{center}
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\pmagicMetricDefs
+\end{center}
+\takeaway{Higher means ``more like OpenStax'' --- not ``teaches better''.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The instrument}
+\begin{center}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\pmagicCriteria
+\end{center}
+\begin{center}
+{\scriptsize Twelve \emph{text} criteria, each scored \textbf{1--5}. Ten adopted from the parent
+line so the rows line up with theirs; two are Centri's.}
+\end{center}
+\takeaway{The same instrument goes to the teachers, unchanged. Only the rater differs.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{LLM-judge results, every criterion}
+\begin{center}
+\tiny
+\renewcommand{\arraystretch}{0.95}
+\resizebox{\textwidth}{!}{\pmagicJudge}
+\end{center}
+\begin{center}
+{\scriptsize Two \textbf{LLM} raters, same $15$ worksheets, byte-identical prompt: local
+\texttt{Qwen3.6-35B} and \texttt{Claude Opus 5}. \textbf{Cohen's $\kappa$}, quadratic-weighted,
+is \textbf{model-vs-model} --- P-MAGIC's $0.76$ is human-vs-human.}
+\end{center}
+\takeaway{Both raters put advanced top. Overall $\kappa = 0.31$: they agree on the
+\emph{ordering}, not on the score.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The one row that holds}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\rowcolor{cApp!12}
+\textbf{Cognitive demand} & \textbf{basic} & \textbf{intermediate} & \textbf{advanced} \\
+\midrule
+Qwen3.6-35B & $2.80$ & $3.60$ & $\mathbf{4.80}$ \\
+Claude Opus 5 & $3.00$ & $3.20$ & $\mathbf{4.20}$ \\
+\midrule
+\multicolumn{4}{@{}l@{}}{\footnotesize agreement $\kappa = \mathbf{0.70}$, correlation
+$r = \mathbf{0.80}$ --- the best-agreed of the twelve} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize The other measure of difficulty --- counting quantities and relations --- rises
+$5 \rightarrow 22 \rightarrow 37$, but the generator is \emph{required} to make it rise and
+re-rolls until it does. That is a conformance check, not evidence.}
+\end{center}
+\takeaway{This is the difficulty claim: it rises for two independent raters, and it is the one
+row they agree on.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Where the raters part company}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\rowcolor{cAccent!10}
+\textbf{Criterion} & \textbf{$\kappa$} & \textbf{exact} & \textbf{within 1} \\
+\midrule
+cognitive demand & $\mathbf{0.70}$ & $60\%$ & $100\%$ \\
+completeness & $0.58$ & $53\%$ & $100\%$ \\
+variable naming & $0.51$ & $60\%$ & $93\%$ \\
+\midrule
+\rowcolor{cAccent!8}
+\textbf{grounding accuracy} & $\mathbf{-0.07}$ & {\color{cAccent}$\mathbf{0\%}$} &
+{\color{cAccent}$\mathbf{33\%}$} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Grounding asks two questions at once --- \emph{do the numbers come from the
+measurement?} and \emph{does the arithmetic printed beside them close?} Raters answer different
+ones.}
+\end{center}
+\takeaway{Zero exact agreement on $15$ worksheets. This must be split into two questions before
+it goes to teachers, or the human $\kappa$ inherits the same ambiguity.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{An overlay that agreed with itself}
+\vfill
+\begin{center}
+\includegraphics[width=0.58\linewidth]{overlay-fix-4029.png}
+\end{center}
+\begin{center}
+{\footnotesize Every overlay sat $328$~px low --- one crop offset --- including the figure in all
+three worksheets. The numbers were right: radius within $0.5\%$ of the video, rate unchanged.
+Trajectory and centre moved \emph{together}, so every check agreed.}
+\end{center}
+\takeaway{No layer caught this. A frame of reference cannot be audited from inside itself.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{What the layers caught --- and one they did not}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}p{4.2cm}p{6.6cm}@{}}
+\toprule
+\rowcolor{cInfra!12}
+\textbf{Layer} & \textbf{What it caught} \\
+\midrule
+deterministic gate & ungrounded rate-vs-period wording, $4$ of $15$ \\
+LLM judge (rater B) & \textbf{turntable-2: $\omega^2 r$ printed as $4.91$ when it is $4.31$} \\
+phone sensor & the three teleports, $25.5\%$ on peak rate \\
+a second measurement principle & the old fan method reporting $4.69$~rad/s at rest \\
+\addlinespace[2pt]
+\rowcolor{cAccent!10}
+\textbf{none of them} & \textbf{the overlay $328$~px off its object --- found by opening the video} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize The gate \emph{passed} the worksheet the judge caught --- $4.91$ does trace to
+the measurement. It is the mean of $\omega^2 r$, not $\omega^2 r$ of the mean.}
+\end{center}
+\takeaway{Each layer sees a question the others cannot ask --- and none of them asks whether the
+picture matches the world.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{What is still unproven}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}p{5.6cm}p{5.2cm}@{}}
+\toprule
+\rowcolor{cAccent!10}
+\textbf{Open} & \textbf{What would settle it} \\
+\midrule
+\textbf{Does anybody learn from it?} & the teacher panel \\
+No clip has a sensor check any more & re-shoot one clip logging its gyroscope \\
+Grounding asks two questions & split the criterion, then re-rate \\
+Metre scale rests on one clip & a known length in every scene \\
+Nothing rejects a teleport & build the guard; the sweep is still by hand \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Withdrawing turntable-3 removed the only clip with a paired sensor log. That is
+a real cost of the decision, not a footnote.}
+\end{center}
+\takeaway{Everything measured so far is a property of the text and the measurement. The first
+row is the only one that answers the question the project exists to ask.}
+\end{frame}
+
+\end{document}

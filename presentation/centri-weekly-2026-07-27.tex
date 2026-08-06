@@ -1,5 +1,7 @@
 % Centri — Weekly progress (week ending 2026-07-27)
-% Standalone deck: every slide readable cold, no narration needed.
+% Sparse presenting deck (CLAUDE.md rule #5, revised 2026-07-29): claim + number + figure +
+% one-line takeaway, <=60 words/slide. The cold-readable companion is
+% centri-weekly-2026-07-27-memo.md — every claim here appears there with its definition.
 % Compile: pdflatex -interaction=nonstopmode centri-weekly-2026-07-27.tex  (run twice)
 \documentclass[aspectratio=169,10pt]{beamer}
 \usetheme{metropolis}
@@ -34,7 +36,7 @@
 \newcommand{\takeaway}[1]{\vfill{\footnotesize\itshape\color{cGrey}#1\par}}
 
 \title{Centri --- The Three Levels, Reworked}
-\subtitle{Material a reader works through rather than reads, at a level they can actually read, with every change checked}
+\subtitle{Material a reader works through rather than reads --- see the accompanying memo for detail}
 \author{Damar Albaribin}
 \institute{MSc Thesis --- advisor: Prof.\ Wu-Yuin Hwang}
 \date{Week ending 2026-07-27}
@@ -43,400 +45,345 @@
 \maketitle
 
 % =========================================================================
-\begin{frame}{Where this comes from}
-\scriptsize
-\textbf{Centri} turns an ordinary phone video of something spinning into physics worksheets at
-\textbf{three levels} --- basic, intermediate, advanced --- all written from the \emph{same}
-measured numbers, so they differ in demand without disagreeing on fact. Two things have been asked
-of that material: that each level be readable by the reader it is aimed at, and that a reader
-\emph{work through} it rather than read it.
-\vspace{4pt}
-
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}p{4.4cm}p{7.7cm}c@{}}
+\begin{frame}{One video, three levels}
+\vfill
+\begin{center}
+{\Large One phone video $\rightarrow$ \textbf{\color{cBasic}basic} $\cdot$
+\textbf{\color{cInter}intermediate} $\cdot$ \textbf{\color{cAdv}advanced}}\\[3pt]
+{\footnotesize all written from the \emph{same} measured numbers}
+\end{center}
+\vfill
+\begin{center}
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}p{5.2cm}p{5.2cm}@{}}
 \toprule
 \rowcolor{cPed!12}
-\textbf{What was wrong with it} & \textbf{What the generator does now} & \\
+\textbf{Asked of the material} & \textbf{Answer} \\
 \midrule
-\multicolumn{3}{@{}l@{}}{\textbf{\color{cPed}Read at the right level} {\color{cGrey}\,--- from a
-review by someone who teaches physics in a classroom, the author of P-MAGIC}} \\
-the advanced level uses words a high-school student has not met &
-the same ideas in plain language; the formal version goes to the teacher's copy & \ok \\
-it reaches for the equation before the reader has understood the picture &
-the graph is read in words first, then the formula as the compact way to say it & \ok \\
-each level is one jump, not a few graded steps &
-three graded steps inside every level, each ending in a checkpoint & \ok \\
-\midrule
-\multicolumn{3}{@{}l@{}}{\textbf{\color{cMeas}Do something, rather than read}} \\
-nothing is ever asked of the reader first &
-predict before the measurement is shown; a check to clear at each step & \ok \\
-it never confronts what the reader probably already believes &
-the documented traps, posed as questions with the answers held back & \ok \\
-one clip binds the idea to one object &
-a transfer prompt that moves the same physics somewhere else & \ok \\
+readable at its level & \ok\ measured, all 7 clips \\
+worked through, not read & \ok\ 6 additions, all computed \\
 \bottomrule
 \end{tabular}
-\takeaway{The three-level architecture is unchanged. What changed is the reading level, the size of
-the steps, and whether the reader does anything --- plus one outright error, which is the next
-slide.}
+\end{center}
+\vfill
+\takeaway{The architecture is unchanged; the reading level, the step size, and what the reader does
+are new.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{The direction-sign defect}
-\scriptsize
-A turn rate carries a sign that records only \textbf{which way round} something turns. Two of the
-seven clips turn the way that is recorded as negative, and for those two the software read ``is it
-speeding up?'' off the \emph{slope of the signed value} --- and a negative number climbing towards
-zero slopes upward.
-
+\vfill
 \begin{center}
-\includegraphics[width=0.575\textwidth]{fan-sign-4028.png}
+\includegraphics[width=0.60\textwidth]{fan-sign-4028.png}
 \end{center}
-\vspace{-4pt}
-
-\renewcommand{\arraystretch}{1.25}
-\begin{tabular}{@{}lp{10.6cm}@{}}
-\toprule
-\rowcolor{cAccent!10}
-& \textbf{what the beginner's worksheet for this ceiling fan says} \\
-\midrule
-{\color{cAccent}\textbf{before}}~ & ``The fan blade whirls faster and faster as time passes.'' \\
-{\color{cApp}\textbf{now}}~ & ``\ldots bends flatter over time, telling us the blade spins fast at
-first and then gradually slows down.'' \\
-\bottomrule
-\end{tabular}
-\takeaway{Two of seven clips were affected; the other five are unchanged to the digit. The trend is
-now taken from the green line above --- the speed --- and the sign is explained wherever one is printed.}
+\vfill
+\begin{center}
+\small
+{\color{cAccent}\textbf{before:}} ``whirls faster and faster'' \quad$\rightarrow$\quad
+{\color{cApp}\textbf{now:}} ``spins fast at first, then gradually slows''
+\end{center}
+\vfill
+\takeaway{The trend now comes from the speed, not from a sign. Two of seven clips were wrong; the
+other five are unchanged to the digit.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{Lowering the reading level}
-\scriptsize
-Three phrases were named as beyond a high-school reader. Each was in the student worksheet because
-\textbf{the specification we wrote asked for it} --- so each was a one-line change, not a limit of
-the language model.
-\vspace{3pt}
-
-\renewcommand{\arraystretch}{1.4}
-\begin{tabular}{@{}p{4.3cm}p{4.4cm}p{4.4cm}@{}}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.6}
+\begin{tabular}{@{}p{5.6cm}p{5.6cm}@{}}
 \toprule
 \rowcolor{cPed!12}
-\textbf{what the student used to read} & \textbf{what it is really saying} & \textbf{where it goes now} \\
+\textbf{Was in the student text} & \textbf{Now} \\
 \midrule
-``which quantities are independent of the \textbf{calibration}'' &
-angle measurements do not depend on how we sized the scene; values in metres do &
-said to the student in exactly those plain words \\
-``the angular quantities are \textbf{scale-free}'' &
-the same idea, named a second time &
-merged into the sentence above \\
-``formally $\langle\omega^2\rangle \ge \langle\omega\rangle^2$, a \textbf{Jensen inequality}'' &
-squaring an average is not the same as averaging the squares &
-\textbf{teacher's copy only} \\
+``independent of the calibration'' & said in plain words \\
+``scale-free'' & merged into the sentence above \\
+``a Jensen inequality'' & \textbf{teacher's copy only} \\
 \bottomrule
 \end{tabular}
-\vspace{5pt}
-
-Two things make this stick. A separate \textbf{teacher's copy} of every worksheet already existed
-and already carried the answer key, so the formal version is re-routed rather than lost. And all
-three phrases are now on a list the \textbf{automatic checker refuses}, so the next run cannot
-quietly put them back.
-\takeaway{Keep the idea, drop the vocabulary, give the formal version to the teacher --- and make
-the rule enforceable so it survives the next regeneration.}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize All three are now on the checker's refusal list.}
+\end{center}
+\vfill
+\takeaway{Each was there because our own specification asked for it --- so each was a one-line fix,
+not a limit of the model.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{Reading the graph first}
-\scriptsize
-The intermediate level used to introduce the equation and then show the graph beside it. The order
-is now reversed, so the formula arrives as shorthand for something the reader has already seen.
-\vspace{4pt}
-
-\renewcommand{\arraystretch}{1.4}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.6}
 \begin{tabular}{@{}ll@{}}
 \toprule
 \rowcolor{cInter!12}
 & \textbf{order of the intermediate worksheet} \\
 \midrule
-{\color{cAccent}\textbf{before}}~ & the scene $\rightarrow$ the measured quantities $\rightarrow$
-\textbf{how they are related} $\rightarrow$ what the video shows over time \\
-{\color{cApp}\textbf{now}}~ & the scene $\rightarrow$ the measured quantities $\rightarrow$
-\textbf{what the video shows over time} $\rightarrow$ how they are related \\
+{\color{cAccent}\textbf{before}} & scene $\rightarrow$ quantities $\rightarrow$
+\textbf{the equation} $\rightarrow$ the graph \\
+{\color{cApp}\textbf{now}} & scene $\rightarrow$ quantities $\rightarrow$
+\textbf{the graph} $\rightarrow$ the equation \\
 \bottomrule
 \end{tabular}
-\vspace{6pt}
-
-Real output from the reworked generator, on the ceiling-fan clip. The graph section carries no
-formula at all, and the next section opens by pointing back at it:
-\vspace{3pt}
-
-\begin{tcolorbox}[colback=cInter!5,colframe=cInter,boxsep=2pt,left=6pt,right=6pt,top=3pt,bottom=3pt]
-\scriptsize
-\textbf{What the video shows over time.} ``The graph of the turn rate over time tells the story of
-the coasting spin. \ldots\ Where the graph is high, the turn rate is large and the blade is whipping
-around quickly; where the graph drops, the turn rate shrinks and the blade sweeps through smaller
-angles each second.''
-\vspace{2pt}
-
-\textbf{How the variables are related.} ``\emph{The falling turn rate on the graph} directly controls
-the inward pull through the relation $a_{\mathrm{c}} = \omega^2 r$.''
-\end{tcolorbox}
-\takeaway{Interpret before you calculate --- the equation is introduced as a description of a
-picture the reader has already read, not as the thing to be understood first.}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize The graph section carries no formula at all.}
+\end{center}
+\vfill
+\takeaway{The equation arrives as shorthand for a picture the reader has already read.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{Three graded steps}
-\scriptsize
-Every level is now a staircase of three steps, printed at the top of the worksheet so a reader can
-see which rung they are on, with a bridge carrying them onto the first step of the next level.
-\vspace{4pt}
-
-\renewcommand{\arraystretch}{1.45}
-\begin{tabular}{@{}cp{2.9cm}p{4.3cm}p{4.2cm}@{}}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}cp{2.7cm}p{3.6cm}p{3.6cm}@{}}
 \toprule
 \rowcolor{cPed!12}
 & \textbf{\color{cBasic}basic} & \textbf{\color{cInter}intermediate} & \textbf{\color{cAdv}advanced} \\
 \midrule
-\textbf{1} & what the words mean &
-read the graph in words, no formula at all &
-compare two moments \\
-\textbf{2} & what this clip's numbers are &
-meet the equation, and put this clip's numbers in &
-compare the phases of the motion \\
-\textbf{3} & which idea joins them &
-how long it took to slow from this rate to that one &
-which claims does this video actually support? \\
-\midrule
-\textbf{bridge} & \multicolumn{3}{@{}l@{}}{step 3 of each level names the step it hands over to ---
-one staircase, not three separate documents} \\
+\textbf{1} & what the words mean & read the graph in words & compare two moments \\
+\textbf{2} & this clip's numbers & put the numbers in & compare the phases \\
+\textbf{3} & which idea joins them & how long to slow & what does the video support? \\
 \bottomrule
 \end{tabular}
-\vspace{6pt}
-
-\begin{columns}[T]
-\begin{column}{0.49\textwidth}
-\textbf{\color{cApp}Each step ends in a checkpoint} --- one question to clear before the next step
-starts, printed where that step actually ends rather than listed at the top. A named rung a reader
-never has to stand on is a signpost, not a staircase.
-\end{column}
-\begin{column}{0.49\textwidth}
-\textbf{\color{cMeas}And the level is chosen, not assigned.} Each edition opens by stating what it
-assumes and naming the level above and below, so a reader who is in the wrong one can move without
-being tested first.
-\end{column}
-\end{columns}
-\takeaway{The thinking level separates the three levels; the steps inside each one, and the check
-that closes each step, make it reachable from the level below.}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Each step ends in a checkpoint. Step 3 names the step it hands over to.}
+\end{center}
+\vfill
+\takeaway{One staircase, not three separate documents.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{From reading to doing}
-\scriptsize
-The material was \textbf{exposition}: a well-graded passage to read. Reading is among the weakest
-routes into physics, and a worksheet built from a video can do better --- a textbook cannot stop
-before the reveal. Four additions, none written by the language model, every answer held back for
-the teacher's copy.
-\vspace{3pt}
-
-\renewcommand{\arraystretch}{1.28}
-\begin{tabular}{@{}p{3.5cm}p{4.5cm}p{4.3cm}@{}}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{3.9cm}p{7.4cm}@{}}
 \toprule
 \rowcolor{cMeas!12}
-\textbf{What the reader does} & \textbf{Where it sits} & \textbf{Why there} \\
+\textbf{The reader} & \textbf{Why} \\
 \midrule
-\textbf{Predicts} & before any measurement is shown &
-a commitment made first is what makes the reveal informative \\
-\textbf{Clears a checkpoint} & at the end of each of the three steps &
-a rung named at the top is one a reader never has to stand on \\
-\textbf{Meets the traps} & after the honesty box &
-the wrong answer most readers hold has to be said out loud to be given up \\
-\textbf{Moves it elsewhere} & last, before the closing questions &
-if the idea only works on the object just watched, it has not been understood \\
+\textbf{predicts} & a commitment first makes the reveal informative \\
+\textbf{clears a checkpoint} & a rung nobody stands on is a signpost \\
+\textbf{meets the traps} & a wrong belief must be said aloud to be given up \\
+\textbf{moves it elsewhere} & an idea tied to one object has not transferred \\
 \bottomrule
 \end{tabular}
-\vspace{5pt}
-
-\begin{columns}[T]
-\begin{column}{0.52\textwidth}
-\textbf{\color{cAdv}The advanced examples now fade.} The first is worked in full as a model; the
-rest show the setup and stop, leaving the last step to the reader. A fully worked example is what a
-beginner needs and what stops helping once the pattern is there.
-\end{column}
-\begin{column}{0.45\textwidth}
-\textbf{\color{cAccent}An honest limit.} The material never names a cause --- no forces --- so the
-misconceptions that live there (a spinning object ``flung outward'') stay out of reach. The traps
-it does pose are the ones a motion-only treatment can actually correct.
-\end{column}
-\end{columns}
-\takeaway{Every one of these is computed, not written, so it is correct on every clip without a
-language model being trusted to invent it.}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Plus self-placement, and worked examples that fade at advanced.}
+\end{center}
+\vfill
+\takeaway{All computed, not written --- so it is right on every clip, with no model trusted to
+invent it.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{Measuring the ladder}
-\scriptsize
-Whether the three levels really do get harder is \emph{measured} from the finished prose, not
-asserted. Averages over all seven clips. One measure always held; the other was failing, and
-measuring \emph{why} turned it into a one-line fix.
-\vspace{3pt}
-
-\renewcommand{\arraystretch}{1.28}
-\begin{tabular}{@{}p{4.2cm}ccc l@{}}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}p{4.0cm}ccc l@{}}
 \toprule
 \rowcolor{cPed!12}
-& \textbf{\color{cBasic}basic} & \textbf{\color{cInter}intermediate} & \textbf{\color{cAdv}advanced}
+& \textbf{\color{cBasic}basic} & \textbf{\color{cInter}int.} & \textbf{\color{cAdv}adv.}
 & \textbf{verdict} \\
 \midrule
-\textbf{ideas held at once} {\color{cGrey}\,--- quantities plus the relations linking them}
-& 5 & 19 & 44 & \ok\ rises, 7/7 clips \\
-\textbf{words per sentence} {\color{cGrey}\,--- was 15.8 / 10.1 / 11.5} & 8.2 & 7.2 & 12.0 &
-\ok\ advanced longest, not basic \\
-\textbf{reading grade} {\color{cGrey}\,--- was 7.2 / 5.2 / 6.7} & 4.3 & 3.7 & 6.6 &
-\ok\ advanced hardest, not basic \\
+\textbf{ideas held at once} & 4.9 & 13.9 & 44.9 & \ok\ rises, 7/7 clips \\
+\textbf{words per sentence} & 8.3 & 7.1 & 12.4 & \ok\ advanced longest \\
+\textbf{reading grade} & 4.6 & 4.3 & 6.6 & \nope\ no ladder, 1/7 \\
 \bottomrule
 \end{tabular}
-\vspace{4pt}
-
-The \textbf{basic} worksheet used to score the \emph{hardest} reading grade of the three --- the
-level aimed at the least fluent reader. Splitting that score into its two causes showed it was not
-the vocabulary: syllables per word barely move between levels (1.41 / 1.43 / 1.51). It was
-\textbf{sentence length}: basic explained in long sentences where the other levels state in short
-ones. Asking that level for short sentences took it from 15.8 words to 8.2.
-\vspace{2pt}
-
-{\scriptsize\color{cGrey}Precisely: the three are still not strictly ordered by reading grade ---
-intermediate reads easiest of all. What changed is that the level for the weakest reader is no
-longer the hardest to read.}
-\takeaway{Plain words and plain sentences are not the same thing. Measuring which of the two was
-responsible turned something that looked like a design trade-off into a defect with a fix.}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Reading grade cannot see an equation --- so the level carrying symbols scores as the
+easiest prose.}
+\end{center}
+\vfill
+\takeaway{Report reading grade; never optimise it. Element interactivity is the measure that ranks
+the levels correctly.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{Showing the correction}
-\scriptsize
-Where a measurement is adjusted, the worksheet now draws \textbf{both} lines --- what came off the
-video, and what it was corrected to. Real output from the shipped run on the playground-wheel clip:
-\vspace{1pt}
-
+\vfill
 \begin{center}
-\includegraphics[width=0.495\textwidth]{wheel-ac-shipped.png}
+\includegraphics[width=0.52\textwidth]{wheel-ac-shipped.png}
 \end{center}
-\vspace{-4pt}
-
-\begin{columns}[T]
-\begin{column}{0.49\textwidth}
-The wheel is filmed at a slant, so the handle appears to race and stall once per turn. That is the
-\textbf{camera position}, not the wheel --- and it lands hardest in the inward pull, which follows
-the turn rate \emph{squared}.
-\end{column}
-\begin{column}{0.49\textwidth}
-The swing narrows from \textbf{7.8--31.8} to \textbf{9.8--23.0}\,m/s\textsuperscript{2} while the
-average barely moves (16.2 to 16.1) --- so a reader can \emph{see} that the correction redistributed
-the motion within each turn rather than rescaling it.
-\end{column}
-\end{columns}
-\takeaway{The figure now carries the argument the honesty note used to make in prose, and every
-adjustment names itself in the legend.}
+\vfill
+\begin{center}
+\small Swing \textbf{7.8--31.8} $\rightarrow$ \textbf{9.8--23.0}\,m/s\textsuperscript{2},
+mean unmoved (16.2 $\rightarrow$ 16.1)
+\end{center}
+\vfill
+\takeaway{The worksheet draws both lines --- measured and corrected --- so a reader sees the
+correction redistribute the motion rather than rescale it.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{The picture a beginner sees}
-\scriptsize
-The basic level used to get a stripped-down still marking only the radius, while the two harder
-levels got the fully marked-up frame. It now gets the same four marks, named in words rather than
-symbols --- which is the rule that separates this level, and is untouched by the change.
-\vspace{1pt}
-
+\vfill
 \begin{columns}[T]
-\begin{column}{0.33\textwidth}
+\begin{column}{0.34\textwidth}
 \centering
-\includegraphics[width=0.78\textwidth]{basic-frame-before.png}\\[1pt]
-{\scriptsize\textbf{\color{cAccent}Before.} One idea: how far out it sits.}
+\includegraphics[width=0.80\textwidth]{basic-frame-before.png}\\[2pt]
+{\footnotesize\textbf{\color{cAccent}Before.} One mark.}
 \end{column}
-\begin{column}{0.65\textwidth}
+\begin{column}{0.64\textwidth}
 \centering
-\includegraphics[width=0.86\textwidth]{basic-frame-after.png}\\[1pt]
-{\scriptsize\textbf{\color{cApp}Now.} Four arrows with worded labels. Only two carry a number ---
-the only two this level is allowed to meet.}
+\includegraphics[width=0.86\textwidth]{basic-frame-after.png}\\[2pt]
+{\footnotesize\textbf{\color{cApp}Now.} Four marks, labelled in words.}
 \end{column}
 \end{columns}
-\takeaway{The picture a beginner sees should carry \emph{more} of the explanation than the one an
-advanced reader sees, not less --- the beginner has the least text to fall back on.}
+\vfill
+\takeaway{The beginner's picture should carry \emph{more} of the explanation, not less --- that
+reader has the least text to fall back on.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{Checking every worksheet}
-\scriptsize
-Every worksheet is checked before it ships: arithmetic that closes on its own printed numbers, no
-number that is not in the measurement, vocabulary suited to the level, and a description of the
-motion that matches the graph beside it. All seven clips were then regenerated from scratch. After
-the fixes below, \textbf{21 of the 21 worksheets pass every check}.
-\vspace{2pt}
-
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}p{6.3cm}p{6.3cm}@{}}
+\vfill
+\begin{center}
+{\Large\textbf{\color{cApp}19 of 21} worksheets pass every check}\\[2pt]
+{\footnotesize a true end-to-end run: live tracking, live writing, nothing replayed}
+\end{center}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}ll@{}}
 \toprule
 \rowcolor{cMeas!12}
-\textbf{What the regeneration flagged} & \textbf{What it turned out to be} \\
+\textbf{The residue} & \\
 \midrule
-the elapsed time between two instants --- which is the answer to the new third step & \\
-``a brief steady spin'', on a clip whose graph draws a steady band and prints that word on it & \\
-``(average turn rate) squared $\times$ radius'' in a worked example & \\
-``this clip covers only 1.47 revolutions'' --- a sentence the pipeline instructs the writer to include &
-\multirow{-4}{6.3cm}{\raggedright \textbf{\color{cAccent}Four times the checker was wrong}, each
-time refusing wording or a number the pipeline had itself handed the writer. All four are fixed and
-pinned by a test.} \\
-\midrule
-the word \emph{momentum} in a kinematics passage; an ``='' sign in the symbol-free level &
-\textbf{\color{cApp}Two real errors}, on two clips --- and the model repeated the first on both
-retries, the known limit of the 35-billion-parameter model we run locally: it drafts well, corrects
-itself poorly. Both cleared on the regenerated run. \\
+a banned word; an invented number & the model drafts well, corrects poorly \\
+a reused instant; an unflagged average & narrow rules, real faults \\
 \bottomrule
 \end{tabular}
-\takeaway{Four of the six flags were the checker refusing writing the pipeline itself asked for ---
-a fault that costs quality silently, so it matters more than the pass rate.}
+\end{center}
+\vfill
+\takeaway{An earlier offline run scored 21/21 --- so quote the run, or quote a mean. The checker
+flags; it does not withhold.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Textbook similarity}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{@{}p{6.0cm}cc@{}}
+\toprule
+\rowcolor{cMeas!12}
+\textbf{BERTScore F1, against real teaching text} & & \\
+\midrule
+OpenStax \S6.2, whole passage & \textbf{0.818} $\pm$ 0.014 & {\footnotesize n=21} \\
+the same, section by section & 0.822 $\pm$ 0.015 & {\footnotesize n=105} \\
+19 independent references & 0.798 $\pm$ 0.006 & \\
+\midrule
+by level & {\color{cBasic}0.799} $\cdot$ {\color{cInter}0.824} $\cdot$ {\color{cAdv}0.830} & \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize The rework moved it 0.005 downward; changing the reference moves it 0.04.\\
+BLEU-4 0.029, ROUGE-L 0.163, diversity 0.308.}
+\end{center}
+\vfill
+\takeaway{It scores resemblance to a college textbook --- so making the beginner level readable
+makes it worse. Report it beside P-MAGIC; never optimise it.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Scoring the material}
+\vfill
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{@{}p{4.4cm}ccc@{}}
+\toprule
+\rowcolor{cPed!12}
+\textbf{LLM judge, 1--5} & \textbf{\color{cBasic}basic} & \textbf{\color{cInter}int.}
+& \textbf{\color{cAdv}adv.} \\
+\midrule
+\textbf{cognitive demand} & 2.9 & 3.9 & 4.7 \\
+\textbf{Bloom level reached} & Understand & Apply & Analyze \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize 21 worksheets $\times$ 12 criteria, on the rubric shared with SocioMathLLM and
+P-MAGIC.\\ Grounding in the measurements: 2.1 $\cdot$ 2.7 $\cdot$ 4.4 --- the weakest column.}
+\end{center}
+\vfill
+\takeaway{The only automatic score that answers to teaching --- but the judge is the model family
+that wrote the text, so it is evidence, not proof.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{A defect the checker missed}
+\vfill
+\begin{center}
+\begin{tcolorbox}[colback=cAccent!6,colframe=cAccent,boxsep=2pt,left=8pt,right=8pt,top=5pt,bottom=5pt,width=0.92\textwidth]
+\centering ``a full turn in \textbf{2.07 seconds}'' \dots\ ``\emph{that} turn rate is
+\textbf{0.30 full turns each second}''\\[2pt]
+{\footnotesize 0.30 turns each second \emph{is} a 3.34-second turn}
+\end{tcolorbox}
+\end{center}
+\vfill
+\begin{center}
+\small Both are measured --- the fastest lap, and the clip average --- so the checker passed it.
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize A new rule catches it, and agrees with the judge clip for clip:
+the same six flagged, the same one clean.}
+\end{center}
+\takeaway{Instructing the writer to stop made every score worse --- the period and the rate have to
+reach it already paired.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{What is still unproven}
-\scriptsize
-\begin{tcolorbox}[colback=cAccent!6,colframe=cAccent,boxsep=1pt,left=6pt,right=6pt,top=2pt,bottom=2pt]
-\scriptsize Everything measured here is a property of the \textbf{text}: how many ideas it makes the
-reader hold, how long its sentences run, whether its numbers trace to the video. Nothing yet measures
-whether anyone \emph{learns} from it. P-MAGIC has ten teachers and a rating of 8.2--8.6/10; this
-material has one expert reader --- whose review, to its credit, found a real correctness bug.
+\vfill
+\begin{center}
+\begin{tcolorbox}[colback=cAccent!6,colframe=cAccent,boxsep=2pt,left=8pt,right=8pt,top=5pt,bottom=5pt,width=0.92\textwidth]
+\centering Everything measured is a property of the \textbf{text}.\\
+\textbf{Nothing yet measures whether anyone learns from it.}
 \end{tcolorbox}
-\vspace{3pt}
-
-\begin{columns}[T]
-\begin{column}{0.5\textwidth}
-\textbf{\color{cPed}Teaching}
-\begin{itemize}\setlength\itemsep{3pt}
-  \item \textbf{Teacher ratings} --- the step that turns all of this from preliminary into
-        publishable, and the only one that answers the question above. \todo
-  \item \textbf{Should the no-forces rule stay?} It keeps every claim inside what the video
-        measures, and it puts the most common circular-motion misconceptions out of reach. \todo
-  \item \textbf{Are three steps the right three?} The staircase is built and climbable; whether it
-        is the right shape is a teaching judgement, not a measurement. \todo
-  \item \textbf{Bahasa Indonesia edition} for classroom use. \todo
-\end{itemize}
-\end{column}
-\begin{column}{0.5\textwidth}
-\textbf{\color{cMeas}Measurement}
-\begin{itemize}\setlength\itemsep{3pt}
-  \item \textbf{A stronger writer.} The one remaining failure class is the local model repeating a
-        banned word when told to fix it. The alternatives are steering the first draft, generating
-        several and selecting, or a larger model. \todo
-  \item \textbf{Re-film two clips} with a small flat high-contrast sticker --- the accuracy limit is
-        the marker, not the mathematics.
-  \item \textbf{Ceiling fan with sensors:} film the fan while a phone on the blade records its own
-        motion sensors, so video and sensor can be compared on one motion. \todo
-\end{itemize}
-\end{column}
-\end{columns}
-\takeaway{The material is correct, readable and now asks something of the reader. Whether it
-\emph{teaches} is the one claim the pipeline cannot check itself --- and that needs teachers, not
-more code.}
+\end{center}
+\vfill
+\begin{center}
+\small
+\begin{tabular}{@{}ll@{}}
+P-MAGIC & ten teachers, 8.2--8.6/10 \\
+Centri & one expert reader, one model \\
+\end{tabular}
+\end{center}
+\vfill
+\begin{center}
+{\footnotesize Next: teacher ratings. All 42 documents are built in Bahasa Indonesia for the panel.}
+\end{center}
+\vfill
+\takeaway{Whether it \emph{teaches} is the one claim the pipeline cannot check itself --- and that
+needs teachers, not more code.}
 \end{frame}
 
 \end{document}
